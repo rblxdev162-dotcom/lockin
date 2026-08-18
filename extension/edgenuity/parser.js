@@ -35,6 +35,8 @@ const MAX_TEXT_LENGTH = 200000;
 const MAX_PROGRESSBARS = 40;
 
 const PROGRESS_WORDS = /progress|complete|completed|finished/i;
+/** What Edgenuity calls the pace line: "target", "on pace", "expected". */
+const TARGET_WORDS = /target|on pace|expected|should be|goal/i;
 
 function clean(value, max) {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
@@ -136,6 +138,32 @@ export function readLabelledPercent(text) {
 }
 
 /** The course's own name, from the page heading or title. Never invented. */
+/**
+ * The pace Edgenuity says the student should be at, or null.
+ *
+ * Edgenuity shows a target alongside actual progress, which is what makes
+ * "you're behind" a fact from the course rather than a guess from LockIn. It
+ * is read separately from `readLabelledPercent` because the labels are
+ * different words and confusing the two would report the target as the
+ * student's own progress — the single worst mistake this file could make.
+ */
+export function readTargetPercent(text) {
+  const found = [];
+  const pattern = /(\d{1,3})\s*%/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const value = Number(match[1]);
+    if (!inRange(value, 100)) continue;
+    const from = Math.max(0, match.index - LABEL_WINDOW);
+    const context = text.slice(from, match.index + match[0].length + LABEL_WINDOW);
+    if (TARGET_WORDS.test(context) && !PROGRESS_WORDS.test(context.replace(TARGET_WORDS, ''))) {
+      found.push(value);
+    }
+  }
+  const distinct = [...new Set(found)];
+  return distinct.length === 1 ? distinct[0] : null;
+}
+
 export function readCourseName(doc) {
   const heading = doc.querySelector?.('h1, [role="heading"][aria-level="1"]');
   const fromHeading = clean(heading?.textContent, LIMITS.MAX_COURSE_NAME_LENGTH);
@@ -157,6 +185,7 @@ export function parseEdgenuityPage(doc, url) {
   const barPercent = readProgressBar(doc);
   const textPercent = readLabelledPercent(text);
   const counts = readActivityCounts(text);
+  const targetPercent = readTargetPercent(text);
 
   // Two independent readings that disagree mean the page was misread, not that
   // one of them is right. Refuse rather than pick.
@@ -184,6 +213,7 @@ export function parseEdgenuityPage(doc, url) {
       externalCourseId: externalCourseId.slice(0, LIMITS.MAX_ID_LENGTH),
       courseName: courseName || undefined,
       progressPercent: progressPercent ?? undefined,
+      targetPercent: targetPercent ?? undefined,
       activitiesCompleted: counts?.completed,
       activitiesTotal: counts?.total,
     },

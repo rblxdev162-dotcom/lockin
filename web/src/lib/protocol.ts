@@ -83,6 +83,10 @@ export const MSG = {
   EDGENUITY_VIEW: 'EDGENUITY_VIEW',
   /** Pushed by the extension when a new Edgenuity reading lands. */
   EDGENUITY_PUSH: 'EDGENUITY_PUSH',
+
+  /* --- Reminders (Phase 13) --- */
+  /** Hands the extension the schedule it fires OS notifications from. */
+  REMINDER_SCHEDULE: 'REMINDER_SCHEDULE',
 } as const;
 
 export type MessageType = (typeof MSG)[keyof typeof MSG];

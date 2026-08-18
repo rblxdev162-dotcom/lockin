@@ -34,6 +34,12 @@ import {
 } from './canvas.js';
 import { EDGENUITY_MSG } from '../edgenuity/messaging.js';
 import {
+  onNotificationClicked,
+  pruneFired,
+  runReminderCheck,
+  setSchedule,
+} from './reminders.js';
+import {
   connectEdgenuity,
   disconnectEdgenuity,
   getEdgenuityView,
@@ -131,6 +137,11 @@ chrome.permissions.onAdded.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HEARTBEAT_ALARM) {
+    // Reminders ride the existing one-minute heartbeat rather than adding an
+    // alarm of their own; the check is a storage read and some arithmetic.
+    void runReminderCheck();
+  }
   if (alarm.name === EXPIRY_ALARM || alarm.name === HEARTBEAT_ALARM) {
     void refresh();
   }
@@ -247,6 +258,16 @@ async function handlePageMessage(envelope, sender) {
       return { type: MSG.EDGENUITY_VIEW, payload: { ...(await getEdgenuityView()), sync: result } };
     }
 
+    /**
+     * The reminder schedule. Stored and evaluated on the heartbeat alarm, so
+     * notifications keep arriving with every LockIn tab closed.
+     */
+    case MSG.REMINDER_SCHEDULE: {
+      const count = await setSchedule(envelope.payload?.items);
+      await pruneFired();
+      return { type: MSG.STATE_ACK, payload: { ok: true, scheduled: count } };
+    }
+
     case MSG.EDGENUITY_DISCONNECT: {
       const result = await disconnectEdgenuity();
       return {
@@ -259,6 +280,27 @@ async function handlePageMessage(envelope, sender) {
       return { type: MSG.STATE_ACK, payload: { ok: false, reason: 'unknown-type' } };
   }
 }
+
+/**
+ * Brings LockIn to the front, reusing an existing tab rather than piling up
+ * new ones. Shared by the popup, the block page and a clicked reminder.
+ */
+async function openApp() {
+  const state = await getState();
+  const url = state.appUrl || DEFAULT_APP_URL;
+  const tabs = await chrome.tabs.query({ url: `${new URL(url).origin}/*` });
+  if (tabs.length > 0 && tabs[0].id !== undefined) {
+    await chrome.tabs.update(tabs[0].id, { active: true, url });
+    if (tabs[0].windowId !== undefined) {
+      await chrome.windows.update(tabs[0].windowId, { focused: true });
+    }
+  } else {
+    await chrome.tabs.create({ url });
+  }
+}
+
+// A reminder is only useful if it takes you to the work.
+onNotificationClicked(openApp);
 
 async function handleInternalMessage(message) {
   switch (message.type) {
@@ -281,18 +323,7 @@ async function handleInternalMessage(message) {
     }
 
     case INTERNAL.OPEN_APP: {
-      const state = await getState();
-      const url = state.appUrl || DEFAULT_APP_URL;
-      // Reuse an existing LockIn tab instead of piling up new ones.
-      const tabs = await chrome.tabs.query({ url: `${new URL(url).origin}/*` });
-      if (tabs.length > 0 && tabs[0].id !== undefined) {
-        await chrome.tabs.update(tabs[0].id, { active: true, url });
-        if (tabs[0].windowId !== undefined) {
-          await chrome.windows.update(tabs[0].windowId, { focused: true });
-        }
-      } else {
-        await chrome.tabs.create({ url });
-      }
+      await openApp();
       return { ok: true };
     }
 

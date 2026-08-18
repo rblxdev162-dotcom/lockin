@@ -46,6 +46,7 @@ export function validateCourseProgress(raw) {
   if (!externalCourseId) return null;
 
   const progressPercent = int(raw.progressPercent, 100);
+  const targetPercent = int(raw.targetPercent, 100);
   const activitiesCompleted = int(raw.activitiesCompleted, LIMITS.MAX_ACTIVITIES);
   const activitiesTotal = int(raw.activitiesTotal, LIMITS.MAX_ACTIVITIES);
 
@@ -63,6 +64,7 @@ export function validateCourseProgress(raw) {
     externalCourseId,
     courseName: str(raw.courseName, LIMITS.MAX_COURSE_NAME_LENGTH) || undefined,
     progressPercent,
+    targetPercent,
     activitiesCompleted: countsValid ? activitiesCompleted : undefined,
     activitiesTotal: countsValid ? activitiesTotal : undefined,
     readAt: validIso(raw.readAt) || new Date().toISOString(),

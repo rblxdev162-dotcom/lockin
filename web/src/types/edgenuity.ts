@@ -156,6 +156,15 @@ export interface EdgenuityLink {
   browserBaseline?: { activitiesCompleted?: number; progressPercent?: number; at: string };
   /** Highest completed-activity count ever credited. New work is measured from here. */
   lastVerifiedActivityCount?: number;
+  /**
+   * The pace Edgenuity itself says the student should be at, as last read.
+   *
+   * Not LockIn's calculation. The course publishes a target percentage beside
+   * the actual one, and a number the student can check on their own screen is
+   * worth more than one only this app believes. Used for reminder wording,
+   * never for verification — falling behind is not evidence of anything.
+   */
+  targetProgressPercent?: number;
   /** Course name as last read from a photo — used to reject a different course. */
   observedCourseName?: string;
   lastActivityName?: string;

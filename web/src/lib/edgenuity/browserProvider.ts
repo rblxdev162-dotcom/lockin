@@ -70,6 +70,7 @@ export function sanitizeReading(raw: unknown): EdgenuityReading | null {
   if (!externalCourseId) return null;
 
   const progressPercent = int(r.progressPercent, 100);
+  const targetPercent = int(r.targetPercent, 100);
   const activitiesCompleted = int(r.activitiesCompleted, 2000);
   const activitiesTotal = int(r.activitiesTotal, 2000);
 
@@ -89,6 +90,7 @@ export function sanitizeReading(raw: unknown): EdgenuityReading | null {
         ? r.courseName.replace(/\s+/g, ' ').trim().slice(0, 120) || undefined
         : undefined,
     progressPercent,
+    targetPercent,
     activitiesCompleted: countsValid ? activitiesCompleted : undefined,
     activitiesTotal: countsValid ? activitiesTotal : undefined,
     readAt: iso(r.readAt) ?? new Date().toISOString(),

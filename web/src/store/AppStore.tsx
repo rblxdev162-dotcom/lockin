@@ -21,6 +21,7 @@ import { toBridgeState } from '../lib/selectors';
 import { canvasProvider, sanitizeView } from '../lib/canvas/pageProvider';
 import { applyCanvasView } from '../lib/canvas/reconcile';
 import { sanitizeEdgenuityView } from '../lib/edgenuity/browserProvider';
+import { buildReminderSchedule, scheduleKey } from '../lib/reminderSchedule';
 
 const CHANNEL_NAME = 'lockin-sync';
 const PING_INTERVAL_MS = 15_000;
@@ -179,6 +180,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void syncExtension();
   }, [bridgeSignature, syncExtension]);
+
+  /**
+   * Hand the extension the reminder schedule.
+   *
+   * This is what makes reminders survive the LockIn tab being closed: a page
+   * can only run timers while it is alive, so the *deciding* stays here and the
+   * *waking up* moves to the service worker's alarm.
+   *
+   * Rebuilt from state, but only sent when it actually differs — otherwise
+   * every keystroke in an assignment title would wake the worker. `now` is
+   * excluded from the signature deliberately: the schedule is a list of
+   * absolute due times, so the passage of time alone never changes it.
+   */
+  const schedule = useMemo(() => buildReminderSchedule(state, now), [state, now]);
+  const scheduleSignature = scheduleKey(schedule);
+  useEffect(() => {
+    bridge.post(MSG.REMINDER_SCHEDULE, { items: schedule });
+    // `schedule` is intentionally absent: the signature is what decides.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleSignature]);
 
   // The extension pushes block counts (aggregate only) back to us.
   useEffect(() => {

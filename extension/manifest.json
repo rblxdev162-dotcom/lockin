@@ -9,7 +9,8 @@
     "storage",
     "alarms",
     "tabs",
-    "scripting"
+    "scripting",
+    "notifications"
   ],
   "host_permissions": [
     "http://*/*",

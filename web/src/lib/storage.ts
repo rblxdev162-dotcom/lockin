@@ -400,6 +400,7 @@ function coerceEdgenuityLink(raw: unknown): EdgenuityLink | undefined {
     lastVerifiedActivityCount: Number.isFinite(e.lastVerifiedActivityCount)
       ? Math.max(0, Math.round(Number(e.lastVerifiedActivityCount)))
       : undefined,
+    targetProgressPercent: coercePercent(e.targetProgressPercent) ?? undefined,
   };
 }
 

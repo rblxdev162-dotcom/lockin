@@ -51,6 +51,16 @@ export const MSG = {
   EDGENUITY_VIEW: 'EDGENUITY_VIEW',
   /** ext → web: pushed when a new reading lands, so no refresh is needed */
   EDGENUITY_PUSH: 'EDGENUITY_PUSH',
+
+  /* --- Reminders (Phase 13) --- */
+  /**
+   * web → ext: the reminder schedule.
+   *
+   * Sent whenever it changes. The extension fires OS notifications from it on
+   * its own alarm, so reminders survive every LockIn tab being closed — which
+   * the page-side timer cannot do.
+   */
+  REMINDER_SCHEDULE: 'REMINDER_SCHEDULE',
 };
 
 /**

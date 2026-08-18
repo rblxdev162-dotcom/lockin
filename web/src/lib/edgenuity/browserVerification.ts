@@ -28,6 +28,8 @@ export interface EdgenuityReading {
   externalCourseId: string;
   courseName?: string;
   progressPercent?: number;
+  /** What Edgenuity says the student should be at by now, when the page shows it. */
+  targetPercent?: number;
   activitiesCompleted?: number;
   activitiesTotal?: number;
   readAt: string;

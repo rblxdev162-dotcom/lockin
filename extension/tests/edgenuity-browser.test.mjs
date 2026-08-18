@@ -224,6 +224,7 @@ test('unknown fields are dropped rather than copied through', () => {
     'externalCourseId',
     'progressPercent',
     'readAt',
+    'targetPercent',
   ]);
 });
 

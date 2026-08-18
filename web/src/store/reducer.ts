@@ -1981,6 +1981,8 @@ export function reducer(state: AppState, action: Action): AppState {
           lastVerifiedActivityCount: result.lastVerifiedActivityCount,
           lastVerifiedProgress: result.lastVerifiedProgress,
           observedCourseName: reading.courseName ?? link.observedCourseName,
+          // Pace, not evidence: it only ever shapes what a reminder says.
+          targetProgressPercent: reading.targetPercent ?? link.targetProgressPercent,
           browserBaseline: link.browserBaseline ?? {
             activitiesCompleted: reading.activitiesCompleted,
             progressPercent: reading.progressPercent,

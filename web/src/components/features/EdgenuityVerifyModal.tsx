@@ -11,7 +11,6 @@
  * as "Manual / unverified" and cannot unlock Strict Mode.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
 import type { Assignment, EdgenuityProof, EdgenuitySession } from '../../types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
@@ -20,7 +19,6 @@ import { Field, TextInput } from '../ui/Field';
 import { Icon } from '../ui/Icon';
 import { ProgressBar } from '../ui/Progress';
 import { toast } from '../ui/Toast';
-import { CameraCapture } from './CameraCapture';
 import { ScreenCapture } from './ScreenCapture';
 import { useApp } from '../../store/context';
 import type { CapturedImage } from '../../lib/edgenuity/capture';
@@ -31,14 +29,10 @@ import type { ProofReading } from '../../lib/edgenuity/pipeline';
 import {
   checkProgress,
   requiredDeltaOf,
-  requiredTrustFor,
 } from '../../lib/edgenuity/verification';
-import { CHALLENGE_PROBLEM_ADVICE } from '../../lib/edgenuity/challenge';
-import { createChallenge } from '../../store/factories';
-import { EdgenuityChallengeCard } from './EdgenuityChallengeCard';
 import { cx } from '../../lib/cx';
 
-type Step = 'guidance' | 'camera' | 'screen' | 'reading' | 'review';
+type Step = 'guidance' | 'screen' | 'reading' | 'review';
 
 export function EdgenuityVerifyModal({
   open,
@@ -52,14 +46,14 @@ export function EdgenuityVerifyModal({
   session?: EdgenuitySession;
   onClose: () => void;
 }) {
-  const { state, dispatch, now } = useApp();
+  const { state, dispatch } = useApp();
   const [step, setStep] = useState<Step>('guidance');
   const [progress, setProgress] = useState<OcrProgress | null>(null);
   const [reading, setReading] = useState<ProofReading | null>(null);
   const [manualValue, setManualValue] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
   /** How the frame under review was obtained. Set at capture time. */
-  const [capturedSource, setCapturedSource] = useState<CapturedImage['source']>('live_camera');
+  const [capturedSource, setCapturedSource] = useState<CapturedImage['source']>('live_screen');
   const abortRef = useRef<AbortController | null>(null);
 
   const config = assignment.edgenuity?.config;
@@ -74,50 +68,6 @@ export function EdgenuityVerifyModal({
    * changing the setting midway can neither strand a student nor quietly
    * downgrade a verification they began under the stricter rule.
    */
-  const requiredTrust = session
-    ? session.requiredTrust
-    : config
-      ? requiredTrustFor(config, state.settings.edgenuityProofMode)
-      : 'standard';
-  const enhanced = requiredTrust === 'enhanced';
-  const phase: 'before' | 'after' = isFinal ? 'after' : 'before';
-
-  /** The live code for this phase, if one has been issued. */
-  const challenge = state.edgenuity.challenges.find(
-    (c) =>
-      c.status === 'pending' &&
-      c.assignmentId === assignment.id &&
-      c.phase === phase &&
-      (phase === 'before' || c.sessionId === session?.id),
-  );
-
-  /**
-   * The code value at capture time.
-   *
-   * Held in a ref so `process` does not need the challenge in its dependency
-   * list — the countdown re-renders every second, and rebuilding the capture
-   * callback that often would tear down work mid-read.
-   */
-  const challengeValueRef = useRef<string | undefined>(undefined);
-  challengeValueRef.current = challenge?.value;
-
-  const issueChallenge = useCallback(() => {
-    dispatch({
-      type: 'EDGENUITY_ISSUE_CHALLENGE',
-      challenge: createChallenge(assignment.id, phase, session?.id ?? null),
-    });
-  }, [assignment.id, dispatch, phase, session?.id]);
-
-  /**
-   * The final code is cut only when the student opens this dialog to verify —
-   * never at session start. If both codes existed up front, both photos could
-   * be staged in one sitting and the anti-replay value would evaporate.
-   */
-  useEffect(() => {
-    if (!open || !enhanced || challenge) return;
-    issueChallenge();
-  }, [open, enhanced, challenge, issueChallenge]);
-
   /* Reset every time the dialog opens, and never leave work running behind it. */
   useEffect(() => {
     if (open) {
@@ -147,7 +97,6 @@ export function EdgenuityVerifyModal({
           requirePercent,
           wantThumbnail: true,
           keepRawText: state.edgenuity.developerMode,
-          expectedChallenge: enhanced ? challengeValueRef.current : undefined,
           signal: controller.signal,
           onProgress: setProgress,
         });
@@ -166,7 +115,7 @@ export function EdgenuityVerifyModal({
         abortRef.current = null;
       }
     },
-    [dispatch, enhanced, requirePercent, state.edgenuity.developerMode],
+    [dispatch, requirePercent, state.edgenuity.developerMode],
   );
 
   const cancelReading = useCallback(() => {
@@ -190,9 +139,7 @@ export function EdgenuityVerifyModal({
           ? isFinal
             ? 'Step 3 of 3 — show your progress now'
             : 'Step 1 of 3 — show your current progress'
-          : step === 'camera'
-            ? 'Line the screen up and capture'
-            : step === 'reading'
+          : step === 'reading'
               ? 'Reading the photo on this device'
               : 'Check what was detected'
       }
@@ -205,24 +152,6 @@ export function EdgenuityVerifyModal({
       {step === 'guidance' && (
         <GuidanceStep
           isFinal={isFinal}
-          enhanced={enhanced}
-          challengeCard={
-            enhanced && challenge ? (
-              <EdgenuityChallengeCard
-                challenge={challenge}
-                now={now}
-                onRegenerate={issueChallenge}
-              />
-            ) : null
-          }
-          /* Without a live code there is nothing to photograph *with*, so the
-             shutter stays shut rather than wasting a capture. */
-          cameraDisabled={enhanced && !challenge?.value}
-          onOpenCamera={() => setStep('camera')}
-          /* A shared window cannot carry a handwritten code, so Enhanced keeps
-             demanding the camera rather than accepting a proof that cannot
-             clear the bar it was set to. */
-          screenDisabled={enhanced}
           onOpenScreen={() => setStep('screen')}
           devFixtures={devFixtures}
           onFixture={(src) => {
@@ -238,28 +167,6 @@ export function EdgenuityVerifyModal({
               await process(image);
             })();
           }}
-        />
-      )}
-
-      {step === 'camera' && (
-        <CameraCapture
-          active
-          onPermission={(permission) =>
-            dispatch({ type: 'EDGENUITY_SET_CAMERA_PERMISSION', permission })
-          }
-          onCancel={() => setStep('guidance')}
-          onCapture={(image) => {
-            setCapturedSource('live_camera');
-            void process(image);
-          }}
-          challengeCode={enhanced ? challenge?.value : undefined}
-          guidance={
-            <p className="text-xs lk-muted">
-              {enhanced
-                ? 'Both the Edgenuity progress and your written code must be in this one photo.'
-                : 'Keep the course name and the progress number both inside the frame.'}
-            </p>
-          }
         />
       )}
 
@@ -287,8 +194,6 @@ export function EdgenuityVerifyModal({
           session={session}
           reading={reading}
           proof={proof}
-          enhanced={enhanced}
-          expectedCode={challenge?.value}
           manualOpen={manualOpen}
           manualValue={manualValue}
           onManualOpen={() => setManualOpen(true)}
@@ -306,8 +211,7 @@ export function EdgenuityVerifyModal({
           }}
           onRetake={() => {
             setReading(null);
-            // Back to whichever capture they were using, not always the camera.
-            setStep(capturedSource === 'live_screen' ? 'screen' : 'camera');
+            setStep('screen');
           }}
           onConfirm={() => {
             if (session) {
@@ -315,14 +219,12 @@ export function EdgenuityVerifyModal({
                 type: 'EDGENUITY_SUBMIT_PROOF',
                 sessionId: session.id,
                 after: proof,
-                challengeId: enhanced ? challenge?.id : undefined,
               });
             } else {
               dispatch({
                 type: 'EDGENUITY_START_SESSION',
                 assignmentId: assignment.id,
                 before: proof,
-                challengeId: enhanced ? challenge?.id : undefined,
               });
               toast('Starting progress saved. Come back and verify when you’ve worked.', 'success');
             }
@@ -338,21 +240,11 @@ export function EdgenuityVerifyModal({
 
 function GuidanceStep({
   isFinal,
-  enhanced,
-  challengeCard,
-  cameraDisabled,
-  onOpenCamera,
-  screenDisabled,
   onOpenScreen,
   devFixtures,
   onFixture,
 }: {
   isFinal: boolean;
-  enhanced: boolean;
-  challengeCard: ReactNode;
-  cameraDisabled: boolean;
-  onOpenCamera: () => void;
-  screenDisabled: boolean;
   onOpenScreen: () => void;
   devFixtures: boolean;
   onFixture: (src: string) => void;
@@ -365,8 +257,6 @@ function GuidanceStep({
           : 'Before you begin, show your current Edgenuity progress.'}
       </p>
 
-      {challengeCard}
-
       <div className="lk-sunken rounded-2xl border lk-border p-4">
         <p className="text-xs font-bold tracking-wide lk-muted uppercase">Make sure these are visible</p>
         <ul className="mt-2 space-y-1.5 text-sm lk-strong">
@@ -374,7 +264,6 @@ function GuidanceStep({
             'The Edgenuity course or activity name',
             'The progress percentage',
             'Enough of the page to recognise the screen',
-            ...(enhanced ? ['Your verification code, beside the screen'] : []),
           ].map((line) => (
             <li key={line} className="flex items-start gap-2">
               <Icon name="check" size={14} className="mt-1 shrink-0 text-mint-500" />
@@ -387,34 +276,19 @@ function GuidanceStep({
         </p>
       </div>
 
-      <Button
-        size="lg"
-        block
-        icon={<Icon name="camera" size={18} />}
-        disabled={cameraDisabled}
-        onClick={onOpenCamera}
-      >
-        Open camera
-      </Button>
-
       {/* For Edgenuity running on this same computer, where the camera faces
           the student and cannot photograph their own screen. */}
       <Button
         size="lg"
         block
-        variant="secondary"
         icon={<Icon name="edgenuity" size={18} />}
-        disabled={screenDisabled}
         onClick={onOpenScreen}
       >
         Share my Edgenuity window
       </Button>
 
       <p className="text-center text-xs lk-muted">
-        {screenDisabled
-          ? 'Enhanced Proof needs the camera — a written code can’t appear inside a shared window.'
-          : 'Live capture only. Photos and files from your computer can’t verify Edgenuity progress.'}
-        {enhanced && ' The code and the screen must appear in the same photo.'}
+        Live capture only. Photos and files from your computer can’t verify Edgenuity progress.
       </p>
 
       {/* `import.meta.env.DEV &&` is repeated here, not just at the call site.
@@ -480,8 +354,6 @@ function ReviewStep({
   session,
   reading,
   proof,
-  enhanced,
-  expectedCode,
   manualOpen,
   manualValue,
   onManualOpen,
@@ -494,8 +366,6 @@ function ReviewStep({
   session?: EdgenuitySession;
   reading: ProofReading;
   proof: EdgenuityProof;
-  enhanced: boolean;
-  expectedCode?: string;
   manualOpen: boolean;
   manualValue: string;
   onManualOpen: () => void;
@@ -513,39 +383,6 @@ function ReviewStep({
    * Nothing here offers a way to confirm the code by hand — a student ticking
    * "yes it was there" would turn the whole feature back into a question.
    */
-  const challengeFailed = enhanced && !problem && reading.challenge?.matched !== true;
-  if (challengeFailed) {
-    const challengeProblem = reading.challenge?.problem ?? 'not_found';
-    return (
-      <div className="space-y-4">
-        {reading.thumbnail && <Thumb src={reading.thumbnail} />}
-        <div className="rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4">
-          <p className="text-sm font-bold text-amber-700 dark:text-amber-300">
-            {expectedCode
-              ? `The code ${expectedCode} wasn’t detected in this photo.`
-              : 'The verification code wasn’t detected in this photo.'}
-          </p>
-          <p className="mt-2 text-sm lk-muted">{CHALLENGE_PROBLEM_ADVICE[challengeProblem]}</p>
-          <ul className="mt-2 space-y-1 text-xs lk-muted">
-            <li>• write in large BLOCK CAPITALS</li>
-            <li>• use dark ink on plain paper</li>
-            <li>• keep the characters separated</li>
-            <li>• hold the paper beside the screen, in the same shot</li>
-          </ul>
-          <p className="mt-2 text-xs lk-muted">
-            The progress reading was fine — only the code is missing, and the same code still works
-            until it expires.
-          </p>
-        </div>
-        <div className="flex justify-end">
-          <Button icon={<Icon name="camera" size={16} />} onClick={onRetake}>
-            Retake
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   if (problem || advice) {
     return (
       <div className="space-y-4">
@@ -558,10 +395,9 @@ function ReviewStep({
           </p>
           <p className="mt-2 text-sm lk-muted">{advice}</p>
           <ul className="mt-2 space-y-1 text-xs lk-muted">
-            <li>• move closer</li>
-            <li>• reduce glare</li>
-            <li>• hold the camera steady</li>
-            <li>• make the progress number larger on screen</li>
+            <li>• share the window with your course page on it</li>
+            <li>• scroll so the progress number is visible</li>
+            <li>• make the browser window larger</li>
           </ul>
         </div>
 
@@ -571,7 +407,7 @@ function ReviewStep({
               Enter it manually instead
             </Button>
           )}
-          <Button icon={<Icon name="camera" size={16} />} onClick={onRetake}>
+          <Button icon={<Icon name="edgenuity" size={16} />} onClick={onRetake}>
             Retake
           </Button>
         </div>
@@ -640,12 +476,7 @@ function ReviewStep({
           <Badge tone={reading.result.parseConfidence === 'high' ? 'mint' : 'amber'}>
             {reading.result.parseConfidence === 'high' ? 'Clear reading' : 'Lower confidence'}
           </Badge>
-          {enhanced && reading.challenge?.matched && (
-            <Badge tone="mint">Code {reading.challenge.matchedText} verified ✓</Badge>
-          )}
-          {proof.source !== 'live_camera' && proof.source !== 'live_screen' && (
-            <Badge tone="flame">Not a live capture</Badge>
-          )}
+          {proof.source !== 'live_screen' && <Badge tone="flame">Not a live capture</Badge>}
         </div>
       </div>
 
@@ -671,9 +502,8 @@ function ReviewStep({
       )}
 
       <p className="text-xs lk-muted">
-        {enhanced
-          ? 'This records that a live photo showed these values alongside a code issued moments ago. It makes a prepared photo much harder to reuse — it does not prove the screen itself was genuine.'
-          : 'This records that a live photo showed these values. It does not prove the screen itself was genuine.'}
+        This records that a window you shared showed these values. It does not prove the page
+        itself was genuine.
       </p>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

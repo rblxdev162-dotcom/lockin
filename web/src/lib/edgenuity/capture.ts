@@ -1,18 +1,18 @@
 /**
  * Where a proof image comes from.
  *
- * Strict Edgenuity verification accepts exactly two sources, and both are live
- * MediaStreams grabbed in this tab: a camera frame (Phase 4) or a screen-share
- * frame (Phase 12). There is no "upload a photo", no drag-and-drop and no file
- * picker anywhere in the flow — not because a photographed screen cannot be
- * faked, but because removing the file picker removes the easiest way to fake
- * it. A screen source keeps that property: `getDisplayMedia` hands back a
- * stream the browser opened, never a file the student chose.
+ * Strict Edgenuity verification accepts exactly one source: a frame grabbed
+ * from a window the student shared with this tab. There is no "upload a
+ * photo", no drag-and-drop and no file picker anywhere in the flow — not
+ * because a screen image cannot be faked, but because removing the file picker
+ * removes the easiest way to fake it. `getDisplayMedia` hands back a stream the
+ * browser opened, never a file the student chose.
  *
- * Screen capture exists because the camera path assumes two machines — a
- * school computer showing Edgenuity and the student's own device holding the
- * camera. When both are the same Mac, its camera faces the student, and no
- * amount of framing help makes a screen photograph itself.
+ * The camera source this file used to carry is gone (it was Phase 4; removed
+ * in Phase 15). It assumed two machines — a school computer showing Edgenuity,
+ * and the student's own device holding the camera. On one Mac the camera faces
+ * the student, so it could never photograph the screen beside it, and pointing
+ * a webcam at schoolwork was never a thing this app should have asked for.
  *
  * The fixture capture source the E2E suite uses lives in its own module,
  * `capture.dev.ts`, which is only ever reached through a dynamic import behind
@@ -26,13 +26,13 @@ export interface CapturedImage {
   width: number;
   height: number;
   capturedAt: string;
-  source: 'live_camera' | 'live_screen' | 'fixture';
+  source: 'live_screen' | 'fixture';
   /** Frees the backing canvas so repeated captures don't accumulate memory. */
   release(): void;
 }
 
 export interface ProofCaptureSource {
-  readonly kind: 'live_camera' | 'live_screen' | 'fixture';
+  readonly kind: 'live_screen' | 'fixture';
   capture(): Promise<CapturedImage>;
   stop(): void;
 }
@@ -55,203 +55,6 @@ export function toCapturedImage(
       canvas.height = 0;
     },
   };
-}
-
-/* ------------------------------------------------------------------ */
-/* Camera availability                                                 */
-/* ------------------------------------------------------------------ */
-
-export type CameraProblem =
-  | 'unsupported'
-  | 'insecure_context'
-  | 'denied'
-  | 'not_found'
-  | 'in_use'
-  | 'unknown';
-
-export interface CameraSupport {
-  supported: boolean;
-  problem?: CameraProblem;
-  /** Explains what is missing, in the student's words. */
-  detail?: string;
-}
-
-/**
- * getUserMedia only exists on secure origins. `localhost` counts as secure, so
- * the shipped dev setup works; a LAN IP like `http://192.168.1.5:5173` does
- * not, and that is worth saying plainly instead of showing a dead button.
- */
-export function checkCameraSupport(): CameraSupport {
-  if (typeof navigator === 'undefined' || typeof window === 'undefined') {
-    return { supported: false, problem: 'unsupported', detail: 'No browser environment.' };
-  }
-  if (!window.isSecureContext) {
-    return {
-      supported: false,
-      problem: 'insecure_context',
-      detail:
-        'Cameras only work on a secure page. Open LockIn at http://localhost:5173 (or an https address) rather than over a plain network address.',
-    };
-  }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    return {
-      supported: false,
-      problem: 'unsupported',
-      detail: 'This browser does not provide camera access to web pages.',
-    };
-  }
-  return { supported: true };
-}
-
-/** Maps a DOMException from getUserMedia onto something a student can act on. */
-export function describeCameraError(error: unknown): { problem: CameraProblem; detail: string } {
-  const name = (error as { name?: string } | null)?.name ?? '';
-  switch (name) {
-    case 'NotAllowedError':
-    case 'SecurityError':
-      return {
-        problem: 'denied',
-        detail:
-          'Camera access is required for live Edgenuity verification. Allow the camera for this page and try again.',
-      };
-    case 'NotFoundError':
-    case 'OverconstrainedError':
-      return { problem: 'not_found', detail: 'No camera was found on this device.' };
-    case 'NotReadableError':
-    case 'AbortError':
-      return {
-        problem: 'in_use',
-        detail: 'The camera is already being used by another app. Close it and try again.',
-      };
-    default:
-      return { problem: 'unknown', detail: 'The camera could not be started.' };
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* Live camera                                                         */
-/* ------------------------------------------------------------------ */
-
-export type FacingMode = 'environment' | 'user';
-
-/**
- * Owns the MediaStream for one capture flow.
- *
- * The single most important behaviour in this file is that `stop()` really
- * stops every track. A page that keeps a camera light on after the student
- * closed the dialog is both a privacy failure and the kind of thing that gets
- * an app uninstalled, so every exit path — capture, cancel, unmount, page hide
- * — routes through here.
- */
-export class LiveCameraCapture implements ProofCaptureSource {
-  readonly kind = 'live_camera' as const;
-
-  private stream: MediaStream | null = null;
-  private video: HTMLVideoElement | null = null;
-  private facing: FacingMode = 'environment';
-
-  get facingMode(): FacingMode {
-    return this.facing;
-  }
-
-  get active(): boolean {
-    return !!this.stream;
-  }
-
-  /**
-   * Starts the camera and resolves with the stream to show in a <video>.
-   * Rear-facing is preferred because the student is photographing another
-   * screen, but it is a preference rather than a constraint — a laptop with
-   * only a front camera still works.
-   */
-  async start(facing: FacingMode = this.facing): Promise<MediaStream> {
-    const support = checkCameraSupport();
-    if (!support.supported) throw new Error(support.detail ?? 'Camera unavailable');
-
-    this.stop();
-    this.facing = facing;
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: facing },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-      audio: false,
-    });
-    return this.stream;
-  }
-
-  /** Binds the running stream to a video element and waits for real frames. */
-  async attach(video: HTMLVideoElement): Promise<void> {
-    if (!this.stream) throw new Error('Camera is not running');
-    this.video = video;
-    video.srcObject = this.stream;
-    video.setAttribute('playsinline', 'true');
-    video.muted = true;
-    await video.play().catch(() => {
-      /* Autoplay refusal still leaves a usable preview after a user gesture. */
-    });
-    if (video.readyState < 2) {
-      await new Promise<void>((resolve) => {
-        const done = () => {
-          video.removeEventListener('loadeddata', done);
-          resolve();
-        };
-        video.addEventListener('loadeddata', done);
-        // Never hang the UI on a camera that refuses to produce frames.
-        window.setTimeout(done, 3000);
-      });
-    }
-  }
-
-  /** True when the device has more than one camera worth switching to. */
-  async hasMultipleCameras(): Promise<boolean> {
-    if (!navigator.mediaDevices?.enumerateDevices) return false;
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      return devices.filter((d) => d.kind === 'videoinput').length > 1;
-    } catch {
-      return false;
-    }
-  }
-
-  async switchCamera(): Promise<MediaStream> {
-    const next: FacingMode = this.facing === 'environment' ? 'user' : 'environment';
-    const stream = await this.start(next);
-    if (this.video) await this.attach(this.video);
-    return stream;
-  }
-
-  /** Grabs the current frame at the camera's own resolution. */
-  async capture(): Promise<CapturedImage> {
-    const video = this.video;
-    if (!video || !this.stream) throw new Error('Camera is not running');
-
-    const width = video.videoWidth;
-    const height = video.videoHeight;
-    if (!width || !height) throw new Error('The camera has not produced a frame yet');
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas is unavailable');
-    ctx.drawImage(video, 0, 0, width, height);
-
-    return toCapturedImage(canvas, 'live_camera');
-  }
-
-  /** Stops every track and detaches the preview. Safe to call repeatedly. */
-  stop(): void {
-    if (this.stream) {
-      for (const track of this.stream.getTracks()) track.stop();
-      this.stream = null;
-    }
-    if (this.video) {
-      this.video.srcObject = null;
-      this.video = null;
-    }
-  }
 }
 
 /* ------------------------------------------------------------------ */

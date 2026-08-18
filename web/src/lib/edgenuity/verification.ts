@@ -29,7 +29,6 @@ import {
   EDGENUITY_MIN_GAP_MS,
   EDGENUITY_SESSION_TTL_MS,
   meetsTrust,
-  trustRank,
   weakerTrust,
 } from '../../types/edgenuity';
 import { meetsEnhancedScreenBar } from './parser';
@@ -125,15 +124,22 @@ export function sessionTrust(session: EdgenuitySession, after: EdgenuityProof): 
 /**
  * The trust an assignment must reach.
  *
- * The global setting raises the floor and never lowers it: a parent turning on
- * Enhanced Proof must not be quietly overridden by a per-assignment default.
+ * Always `standard` since Phase 15.
+ *
+ * Enhanced was a handwritten one-time code photographed beside the screen, and
+ * it went out with the camera — a shared window cannot hold up a piece of
+ * paper. The function stays, rather than every call site learning that the
+ * answer is now a constant, and because a bar is exactly the kind of thing
+ * that comes back.
+ *
+ * It deliberately ignores any stored `requiredVerificationTrust` and any old
+ * `edgenuityProofMode`. A save file written before this change can still say
+ * `enhanced`, and honouring that would set a bar nothing on this device can
+ * clear — an assignment that could never be completed, with no way for the
+ * student to find out why.
  */
-export function requiredTrustFor(
-  config: EdgenuityConfig,
-  proofMode: 'standard' | 'enhanced' = 'standard',
-): VerificationTrust {
-  const perAssignment = config.requiredVerificationTrust ?? 'standard';
-  return trustRank(perAssignment) >= trustRank(proofMode) ? perAssignment : proofMode;
+export function requiredTrustFor(_config?: EdgenuityConfig): VerificationTrust {
+  return 'standard';
 }
 
 /** A fresh ledger for a newly configured Edgenuity assignment. */

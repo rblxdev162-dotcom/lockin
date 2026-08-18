@@ -9,14 +9,8 @@ import type {
   Priority,
   Status,
 } from '../types';
-import type { ChallengePhase, VerificationChallenge } from '../types/edgenuity';
 import { splitIsoToLocal, todayISO, uid } from '../lib/time';
 import { isVerifiedComplete } from '../lib/canvas/verification';
-import {
-  challengeExpiryFrom,
-  generateChallengeValue,
-  hashChallengeValue,
-} from '../lib/edgenuity/challenge';
 
 export interface AssignmentDraft {
   title: string;
@@ -127,38 +121,6 @@ export function createAssignmentFromCanvas(
       courseName: detected.courseName,
       kind: detected.kind,
     },
-  };
-}
-
-/**
- * Issues a one-time challenge (Phase 5).
- *
- * A factory rather than something the reducer conjures, matching how
- * assignments are built: the random value comes from `crypto.getRandomValues`
- * in one place, and the reducer stays a function of its inputs.
- *
- * `sessionId` is null for the starting challenge — the session it will belong
- * to does not exist until the starting proof is accepted.
- */
-export function createChallenge(
-  assignmentId: string,
-  phase: ChallengePhase,
-  sessionId: string | null = null,
-): VerificationChallenge {
-  const now = new Date().toISOString();
-  const value = generateChallengeValue();
-  return {
-    id: uid('chl'),
-    assignmentId,
-    sessionId,
-    phase,
-    type: 'visual_code',
-    value,
-    valueHash: hashChallengeValue(value),
-    createdAt: now,
-    expiresAt: challengeExpiryFrom(now),
-    status: 'pending',
-    attempts: 0,
   };
 }
 

@@ -39,7 +39,7 @@ export function EdgenuityPanel({
   const session = link ? activeSessionFor(state.edgenuity.sessions, assignment.id, now) : undefined;
   const done = assignment.status === 'Completed';
   const requiredTrust = link
-    ? requiredTrustFor(link.config, state.settings.edgenuityProofMode)
+    ? requiredTrustFor(link.config)
     : 'standard';
   /**
    * A session already running keeps the requirement it began with, so raising

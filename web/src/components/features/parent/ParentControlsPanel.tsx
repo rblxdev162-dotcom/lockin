@@ -324,7 +324,7 @@ function AssignmentTrustRow({
   const { dispatch } = useApp();
   const config = assignment.edgenuity!.config;
   const own = config.requiredVerificationTrust ?? 'standard';
-  const effective = requiredTrustFor(config, globalFloor);
+  const effective = requiredTrustFor(config);
   // The floor already demands Enhanced, so a per-assignment switch here could
   // only appear to lower it — which it must never do.
   const forcedByDefault = globalFloor === 'enhanced';

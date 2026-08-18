@@ -20,7 +20,6 @@ import type {
   PlanVersionEntry,
   PlannerSettings,
   StudyPlan,
-  VerificationChallenge,
   RequirableTrust,
 } from '../types';
 import { MAX_PLAN_HISTORY, MAX_PLAN_SKIPS } from '../types/planner';
@@ -28,7 +27,6 @@ import { buildPlan, statusContext, unfinishedBefore } from '../lib/planner';
 import { orderItems } from '../lib/planner/engine';
 import { canvasKey, defaultCanvasState } from '../types/canvas';
 import {
-  MAX_EDGENUITY_CHALLENGES,
   MAX_EDGENUITY_SESSIONS,
   meetsTrust,
 } from '../types/edgenuity';
@@ -50,12 +48,6 @@ import type { EdgenuityCheckResult } from '../lib/edgenuity/verification';
 import type { EdgenuityLink } from '../types/edgenuity';
 import { checkBrowserProgress, isBrowserSource, readingMatches } from '../lib/edgenuity/browserVerification';
 import type { EdgenuityReading } from '../lib/edgenuity/browserVerification';
-import {
-  CHALLENGE_REJECTION_MESSAGE,
-  challengeUsable,
-  isChallengeExpired,
-  normalizeChallengeText,
-} from '../lib/edgenuity/challenge';
 import { createAssignmentFromCanvas } from './factories';
 import { MAX_ACTIVITY, MAX_COMPLETED_SESSIONS, trimActivity } from '../lib/retention';
 import { AWAY_GRACE_MS } from '../lib/focusGuard';
@@ -143,21 +135,18 @@ export type Action =
    * the randomness lives in one place; any earlier pending code for the same
    * assignment and phase is retired, leaving exactly one live code.
    */
-  | { type: 'EDGENUITY_ISSUE_CHALLENGE'; challenge: VerificationChallenge }
   /** Store the starting proof and open a verification session. */
   | {
       type: 'EDGENUITY_START_SESSION';
       assignmentId: string;
       before: EdgenuityProof;
       /** The challenge this capture was checked against, when one was required. */
-      challengeId?: string;
     }
   /** Fold a final proof in. The decision itself is made by checkProgress(). */
   | {
       type: 'EDGENUITY_SUBMIT_PROOF';
       sessionId: string;
       after: EdgenuityProof;
-      challengeId?: string;
     }
   | {
       /**
@@ -449,107 +438,6 @@ function updateAssignment(
   };
 }
 
-/**
- * Validates and spends a challenge (Phase 5).
- *
- * The reducer re-checks everything rather than trusting the caller's word that
- * a code was seen. It cannot re-run OCR — only the capture pipeline ever holds
- * the image — but it can and does check the parts that live in state: that the
- * challenge exists, is pending, is unexpired, belongs to this assignment,
- * phase and session, and that the text OCR reported actually equals the code
- * that was issued. A stale or borrowed detection fails all of those.
- */
-function consumeChallenge(
-  state: AppState,
-  challengeId: string | undefined,
-  context: {
-    assignmentId: string;
-    phase: 'before' | 'after';
-    sessionId: string | null;
-    detection: EdgenuityProof['challenge'];
-    now: string;
-  },
-): { ok: true; state: AppState; challenge: VerificationChallenge } | { ok: false; message: string } {
-  if (!challengeId) return { ok: false, message: CHALLENGE_REJECTION_MESSAGE.missing };
-
-  const challenge = state.edgenuity.challenges.find((c) => c.id === challengeId);
-  const usable = challengeUsable(challenge, {
-    assignmentId: context.assignmentId,
-    phase: context.phase,
-    sessionId: context.sessionId,
-    now: Date.parse(context.now) || Date.now(),
-  });
-  if (!usable.ok) return { ok: false, message: CHALLENGE_REJECTION_MESSAGE[usable.reason] };
-
-  const issued = challenge!;
-  if (context.detection?.matched !== true) {
-    return {
-      ok: false,
-      message: 'That verification code wasn’t detected in the photo.',
-    };
-  }
-  // Consistency check: the text OCR matched has to be the code we issued.
-  // A detection carried over from an earlier capture cannot pass this.
-  if (
-    !issued.value ||
-    normalizeChallengeText(context.detection.matchedText ?? '') !== normalizeChallengeText(issued.value)
-  ) {
-    return { ok: false, message: 'The detected code does not match the code that was issued.' };
-  }
-
-  const spent: VerificationChallenge = {
-    ...issued,
-    status: 'verified',
-    usedAt: context.now,
-    sessionId: context.sessionId ?? issued.sessionId,
-    // The code itself is dropped once spent; `valueHash` still ties the record
-    // to this challenge without keeping the value around.
-    value: undefined,
-  };
-
-  return {
-    ok: true,
-    challenge: spent,
-    state: {
-      ...state,
-      edgenuity: {
-        ...state.edgenuity,
-        challenges: state.edgenuity.challenges.map((c) => (c.id === spent.id ? spent : c)),
-      },
-    },
-  };
-}
-
-/** Counts a capture attempt against a challenge, for diagnostics only. */
-function noteChallengeAttempt(state: AppState, challengeId?: string): AppState {
-  if (!challengeId) return state;
-  return {
-    ...state,
-    edgenuity: {
-      ...state.edgenuity,
-      challenges: state.edgenuity.challenges.map((c) =>
-        c.id === challengeId ? { ...c, attempts: c.attempts + 1 } : c,
-      ),
-    },
-  };
-}
-
-/** Retires challenges whose five minutes are up. */
-function expireChallenges(state: AppState, now: number): AppState {
-  const stale = state.edgenuity.challenges.filter(
-    (c) => c.status === 'pending' && isChallengeExpired(c, now),
-  );
-  if (stale.length === 0) return state;
-  return {
-    ...state,
-    edgenuity: {
-      ...state.edgenuity,
-      challenges: state.edgenuity.challenges.map((c) =>
-        stale.some((s) => s.id === c.id) ? { ...c, status: 'expired' as const, value: undefined } : c,
-      ),
-    },
-  };
-}
 
 function replaceSession(state: AppState, session: EdgenuitySession): AppState {
   return {
@@ -732,11 +620,9 @@ export function reducer(state: AppState, action: Action): AppState {
         next = closeFocusRun(next, 'test_expired');
         next = log(next, 'focus_mode_ended', 'Blocking test finished automatically');
       }
-      // A stale Edgenuity starting photo must stop being comparable on its own,
-      // not only when the student next opens the camera. Challenge codes age
-      // out much faster — five minutes — and on the same clock.
+      // A stale Edgenuity starting reading must stop being comparable on its
+      // own, not only when the student next opens the verify dialog.
       next = expireEdgenuitySessions(next, action.now);
-      next = expireChallenges(next, action.now);
 
       /**
        * Day rollover.
@@ -1719,10 +1605,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const target = state.assignments.find((a) => a.id === action.assignmentId);
       if (!target?.edgenuity) return state;
 
-      const requiredTrust = requiredTrustFor(
-        target.edgenuity.config,
-        state.settings.edgenuityProofMode,
-      );
+      const requiredTrust = requiredTrustFor(target.edgenuity.config);
 
       /**
        * Enhanced Proof is gated here, at the *starting* photo.
@@ -1732,31 +1615,10 @@ export function reducer(state: AppState, action: Action): AppState {
        * whole attack this phase closes. Both halves carry a code or neither
        * counts as Enhanced.
        */
-      let next = noteChallengeAttempt(state, action.challengeId);
-      let before = action.before;
-      let beforeChallengeId: string | undefined;
+      let next = state;
+      const before = { ...action.before, trust: proofTrust(action.before) };
 
-      if (requiredTrust === 'enhanced') {
-        const consumed = consumeChallenge(next, action.challengeId, {
-          assignmentId: action.assignmentId,
-          phase: 'before',
-          sessionId: null,
-          detection: action.before.challenge,
-          now: action.before.capturedAt,
-        });
-        if (!consumed.ok) {
-          return log(
-            next,
-            'edgenuity_verification_failed',
-            `Enhanced Proof not started for “${target.title}” — ${consumed.message}`,
-            { phase: 'before', requiredTrust },
-          );
-        }
-        next = consumed.state;
-        beforeChallengeId = consumed.challenge.id;
-      }
 
-      before = { ...before, trust: proofTrust(before), challengeId: beforeChallengeId };
 
       if (!meetsTrust(before.trust ?? 'manual', requiredTrust)) {
         return log(
@@ -1777,20 +1639,7 @@ export function reducer(state: AppState, action: Action): AppState {
         target: target.edgenuity.config,
         focusMinutesAtStart: target.loggedMinutes,
         requiredTrust,
-        beforeChallengeId,
       };
-      // Bind the spent starting challenge to the session it just created.
-      if (beforeChallengeId) {
-        next = {
-          ...next,
-          edgenuity: {
-            ...next.edgenuity,
-            challenges: next.edgenuity.challenges.map((c) =>
-              c.id === beforeChallengeId ? { ...c, sessionId: session.id } : c,
-            ),
-          },
-        };
-      }
       const sessions = [
         session,
         ...next.edgenuity.sessions.map((s) =>
@@ -1836,37 +1685,8 @@ export function reducer(state: AppState, action: Action): AppState {
       const assignment = state.assignments.find((a) => a.id === session.assignmentId);
       if (!assignment?.edgenuity) return state;
 
-      /**
-       * The final challenge is a *different* code from the starting one, issued
-       * only when the student asked to verify. One prepared photograph
-       * therefore cannot satisfy both halves of a session.
-       */
-      let next = noteChallengeAttempt(state, action.challengeId);
-      let after = action.after;
-      let afterChallengeId: string | undefined;
+      const after = { ...action.after, trust: proofTrust(action.after) };
 
-      if (session.requiredTrust === 'enhanced') {
-        const consumed = consumeChallenge(next, action.challengeId, {
-          assignmentId: session.assignmentId,
-          phase: 'after',
-          sessionId: session.id,
-          detection: action.after.challenge,
-          now: action.after.capturedAt,
-        });
-        if (!consumed.ok) {
-          return log(
-            next,
-            'edgenuity_verification_failed',
-            `Enhanced Proof not accepted for “${assignment.title}” — ${consumed.message}`,
-            { phase: 'after', requiredTrust: session.requiredTrust },
-          );
-        }
-        next = consumed.state;
-        afterChallengeId = consumed.challenge.id;
-      }
-
-      after = { ...after, trust: proofTrust(after), challengeId: afterChallengeId };
-      state = next;
 
       const result = checkProgress({
         session,
@@ -1901,39 +1721,7 @@ export function reducer(state: AppState, action: Action): AppState {
         );
       }
 
-      return applyEdgenuityProgress(
-        state,
-        { ...session, afterChallengeId },
-        assignment,
-        after,
-        result,
-      );
-    }
-
-    /**
-     * Issues a code for the next capture.
-     *
-     * Only one code per assignment and phase is live at a time: retiring the
-     * previous one stops a student holding several valid codes and choosing
-     * which prepared photo to use. The final code is only ever issued when the
-     * student asks to verify, so it cannot be written down in advance.
-     */
-    case 'EDGENUITY_ISSUE_CHALLENGE': {
-      const { challenge } = action;
-      const superseded = state.edgenuity.challenges.map((c) =>
-        c.status === 'pending' &&
-        c.assignmentId === challenge.assignmentId &&
-        c.phase === challenge.phase
-          ? { ...c, status: 'expired' as const, value: undefined }
-          : c,
-      );
-      return {
-        ...state,
-        edgenuity: {
-          ...state.edgenuity,
-          challenges: [challenge, ...superseded].slice(0, MAX_EDGENUITY_CHALLENGES),
-        },
-      };
+      return applyEdgenuityProgress(state, session, assignment, after, result);
     }
 
     /**
@@ -2173,7 +1961,7 @@ export function reducer(state: AppState, action: Action): AppState {
         {
           ...state,
           assignments: state.assignments.map((a) => ({ ...a, verificationRecords: [] })),
-          edgenuity: { ...state.edgenuity, sessions: [], challenges: [] },
+          edgenuity: { ...state.edgenuity, sessions: [] },
         },
         'parent_controls_changed',
         'Parent cleared the verification history',

@@ -32,7 +32,7 @@ if (!globalThis.crypto?.subtle) globalThis.crypto = webcrypto;
 
 const { reducer } = await import('../../web/src/store/reducer.ts');
 const { defaultState } = await import('../../web/src/lib/storage.ts');
-const { createAssignment, createChallenge } = await import('../../web/src/store/factories.ts');
+const { createAssignment } = await import('../../web/src/store/factories.ts');
 const { checkProgress } = await import('../../web/src/lib/edgenuity/verification.ts');
 const { isVerifiedComplete } = await import('../../web/src/lib/canvas/verification.ts');
 const { sanitizeView } = await import('../../web/src/lib/canvas/pageProvider.ts');
@@ -89,37 +89,6 @@ function startedSession(requiredTrust = 'standard', beforeOverrides = {}) {
   return { state: next, assignmentId, session, link };
 }
 
-/**
- * Opens a genuine Enhanced session: a challenge is issued, photographed and
- * spent exactly as the real flow spends it. Anything less would be testing the
- * refusal path instead of the bypass.
- */
-function startedEnhancedSession() {
-  const { state, assignmentId } = withEdgenuityAssignment('enhanced');
-  const challenge = createChallenge(assignmentId, 'before', null);
-  let next = reducer(state, { type: 'EDGENUITY_ISSUE_CHALLENGE', challenge });
-  next = reducer(next, {
-    type: 'EDGENUITY_START_SESSION',
-    assignmentId,
-    before: proof({
-      progressPercent: 40,
-      screenEvidence: GOOD_SCREEN,
-      challenge: { matched: true, matchedText: challenge.value, confidence: 0.95 },
-    }),
-    challengeId: challenge.id,
-  });
-  const session = next.edgenuity.sessions[0];
-  const link = next.assignments.find((a) => a.id === assignmentId).edgenuity;
-  return { state: next, assignmentId, session, link, challenge };
-}
-
-/** Screen evidence strong enough to clear the Enhanced bar. */
-const GOOD_SCREEN = {
-  score: 0.95,
-  signals: ['course_header', 'progress_bar', 'activity_list', 'brand_mark'],
-  confidence: 'high',
-};
-
 /** A proof as the pipeline would produce it. */
 function proof(overrides = {}) {
   return {
@@ -127,7 +96,7 @@ function proof(overrides = {}) {
     progressPercent: 50,
     courseName: 'Algebra I',
     parseConfidence: 'high',
-    source: 'live_camera',
+    source: 'live_screen',
     ...overrides,
   };
 }
@@ -175,150 +144,6 @@ test('1b. an unsubmitted or unknown Canvas status is never completion', () => {
   assert.equal(isVerifiedComplete('graded'), true, 'a real pass still passes');
 });
 
-/* ------------------------------------------------------------------ */
-/* 2. Satisfying an Enhanced requirement with a Standard capture       */
-/* ------------------------------------------------------------------ */
-
-test('2. a Standard photo cannot satisfy an Enhanced requirement, or bank progress toward one', () => {
-  const { session, link } = startedEnhancedSession();
-  assert.ok(session, 'the Enhanced session must open before the bypass can be attempted');
-  assert.equal(session.requiredTrust, 'enhanced');
-
-  // A perfectly good final photo showing 20 points of real progress — but with
-  // no code in the frame, so it is only Standard strength.
-  const result = checkProgress({
-    session,
-    link,
-    after: proof({ progressPercent: 60 }),
-    focusMinutesNow: 30,
-  });
-
-  assert.equal(result.outcome, 'rejected', 'an Enhanced requirement must refuse a Standard photo');
-  assert.equal(
-    result.newProgress,
-    0,
-    'refusing must not bank the progress for a later Enhanced photo to finish off',
-  );
-  assert.equal(result.requirementMet, false);
-});
-
-test('2b. an Enhanced session refuses to even open on a Standard starting photo', () => {
-  const { state, assignmentId } = withEdgenuityAssignment('enhanced');
-  // No challenge at all: exactly what a student gets by declining to write the
-  // code down. The session must not open, because a Standard starting frame
-  // would leave the before-reading replayable.
-  const next = reducer(state, {
-    type: 'EDGENUITY_START_SESSION',
-    assignmentId,
-    before: proof({ progressPercent: 40 }),
-  });
-  assert.equal(next.edgenuity.sessions.length, 0);
-  assert.ok(
-    next.activity.some((e) => e.type === 'edgenuity_verification_failed'),
-    'the refusal is recorded rather than failing silently',
-  );
-});
-
-/* ------------------------------------------------------------------ */
-/* 3. Replaying an old challenge                                       */
-/* ------------------------------------------------------------------ */
-
-test('3. a spent challenge cannot be spent again', () => {
-  const { state, assignmentId } = withEdgenuityAssignment('enhanced');
-  const challenge = createChallenge(assignmentId, 'before', null);
-
-  let next = reducer(state, { type: 'EDGENUITY_ISSUE_CHALLENGE', challenge });
-  assert.equal(
-    next.edgenuity.challenges.find((c) => c.id === challenge.id).status,
-    'pending',
-  );
-
-  next = reducer(next, {
-    type: 'EDGENUITY_START_SESSION',
-    assignmentId,
-    before: proof({
-      progressPercent: 40,
-      screenEvidence: GOOD_SCREEN,
-      challenge: { matched: true, matchedText: challenge.value, confidence: 0.9 },
-    }),
-    challengeId: challenge.id,
-  });
-
-  const spent = next.edgenuity.challenges.find((c) => c.id === challenge.id);
-  assert.notEqual(spent.status, 'pending', 'a used challenge must not stay spendable');
-  assert.equal(next.edgenuity.sessions.length, 1);
-  assert.equal(
-    next.edgenuity.sessions[0].before.trust,
-    'enhanced',
-    'the first, legitimate use does earn Enhanced trust',
-  );
-
-  // The replay: the very same code and the very same detection, offered again.
-  const sessionsBefore = next.edgenuity.sessions.length;
-  const replayed = reducer(next, {
-    type: 'EDGENUITY_START_SESSION',
-    assignmentId,
-    before: proof({
-      progressPercent: 40,
-      screenEvidence: GOOD_SCREEN,
-      challenge: { matched: true, matchedText: challenge.value, confidence: 0.9 },
-    }),
-    challengeId: challenge.id,
-  });
-
-  assert.equal(
-    replayed.edgenuity.sessions.length,
-    sessionsBefore,
-    'a spent code must not open a second session',
-  );
-  assert.ok(
-    replayed.activity.some((e) => e.type === 'edgenuity_verification_failed'),
-    'the replay attempt is recorded',
-  );
-});
-
-test('3b. a challenge belonging to another assignment is not usable here', () => {
-  const { state, assignmentId } = withEdgenuityAssignment('enhanced');
-  const foreign = createChallenge('asg_someone_else', 'before', null);
-
-  const next = reducer(state, { type: 'EDGENUITY_ISSUE_CHALLENGE', challenge: foreign });
-  const started = reducer(next, {
-    type: 'EDGENUITY_START_SESSION',
-    assignmentId,
-    before: proof({
-      progressPercent: 40,
-      challenge: { matched: true, matchedText: foreign.value, confidence: 0.9 },
-    }),
-    challengeId: foreign.id,
-  });
-
-  assert.equal(
-    started.edgenuity.sessions.length,
-    0,
-    'a code issued for another assignment must not open a session here',
-  );
-});
-
-test('3c. a code that OCR read as different text is refused, however confident it was', () => {
-  const { state, assignmentId } = withEdgenuityAssignment('enhanced');
-  const challenge = createChallenge(assignmentId, 'before', null);
-  let next = reducer(state, { type: 'EDGENUITY_ISSUE_CHALLENGE', challenge });
-  next = reducer(next, {
-    type: 'EDGENUITY_START_SESSION',
-    assignmentId,
-    // `matched: true` is the OCR layer's opinion; the reducer still checks the
-    // text against the code it issued, so a claim alone proves nothing.
-    before: proof({
-      progressPercent: 40,
-      challenge: { matched: true, matchedText: 'XXXX', confidence: 1 },
-    }),
-    challengeId: challenge.id,
-  });
-  assert.equal(next.edgenuity.sessions.length, 0);
-});
-
-/* ------------------------------------------------------------------ */
-/* 4. A fixture capture in production                                  */
 /* ------------------------------------------------------------------ */
 
 test('4. a fixture-sourced photo cannot open a session', () => {
@@ -576,18 +401,18 @@ test('8b. a detected title carrying markup stays inert text', () => {
 /* ------------------------------------------------------------------ */
 
 test('9. the export contains no secret, at any depth', () => {
-  const { state, assignmentId } = withEdgenuityAssignment();
-  const challenge = createChallenge(assignmentId, 'before', null);
+  const { state } = withEdgenuityAssignment();
   const populated = {
-    ...reducer(state, { type: 'EDGENUITY_ISSUE_CHALLENGE', challenge }),
+    ...state,
     parentPin: { hash: 'PIN_HASH_SECRET', salt: 'PIN_SALT_SECRET', createdAt: 'x' },
   };
 
   const text = JSON.stringify(buildExport(populated, '1.0.0'));
   assert.ok(!text.includes('PIN_HASH_SECRET'));
   assert.ok(!text.includes('PIN_SALT_SECRET'));
-  assert.ok(!text.includes(challenge.value), 'a live challenge code must not be exported');
-  assert.ok(!text.includes(challenge.valueHash), 'nor its hash');
+  // The export is an allowlist (invariant 22), so this holds for whatever is
+  // added to state next — including the fields Phase 5's challenge codes used
+  // to occupy.
 });
 
 /* ------------------------------------------------------------------ */

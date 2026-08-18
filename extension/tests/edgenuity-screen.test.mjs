@@ -78,18 +78,30 @@ test('a shared window never reaches Enhanced, even carrying a matched code', () 
   assert.equal(proofTrust(withCode), 'standard');
 });
 
-test('an Enhanced requirement is not satisfied by a shared window', () => {
+test('a stored Enhanced requirement is ignored rather than stranding the student', () => {
+  /**
+   * Enhanced was a handwritten code photographed beside the screen. The camera
+   * is gone, so nothing on this device can produce it — and a save file
+   * written before that change can still say `enhanced`.
+   *
+   * Honouring it would set a bar that can never be cleared: an assignment
+   * permanently stuck at "not verified", with nothing in the UI able to
+   * explain why. So the requirement is dropped to standard and a shared
+   * window satisfies it.
+   */
   const required = requiredTrustFor({ ...CONFIG, requiredVerificationTrust: 'enhanced' });
-  assert.equal(meetsTrust(proofTrust(proof()), required), false);
+  assert.equal(required, 'standard');
+  assert.equal(meetsTrust(proofTrust(proof()), required), true);
 });
 
-test('a camera photo is still the only way to reach Enhanced', () => {
-  const enhanced = proof({
-    source: 'live_camera',
+test('nothing can reach Enhanced any more', () => {
+  // Even a proof carrying every Phase 5 field, which only a hand-edited save
+  // file could produce now.
+  const dressed = proof({
     challenge: { matched: true, value: 'AB12' },
     screenEvidence: { confidence: 'high', score: 0.9, signals: ['a', 'b', 'c'] },
   });
-  assert.equal(proofTrust(enhanced), 'enhanced');
+  assert.equal(proofTrust(dressed), 'standard');
 });
 
 test('anything that is not a live stream is still Manual', () => {
@@ -125,11 +137,11 @@ test('a fixture paired with a shared window is refused as not live', () => {
   assert.equal(result.reason, 'not_live');
 });
 
-test('a photo cannot be paired with a shared window', () => {
-  // Otherwise a student could photograph a real screen for the starting
-  // reading and share a doctored window for the final one.
+test('a source that is not a shared window cannot be paired with one', () => {
+  // The mixed-source rule outlived the camera: anything claiming a different
+  // source is either a fixture or a hand-edited save file.
   const before = proof({
-    source: 'live_camera',
+    source: 'fixture',
     progressPercent: 40,
     capturedAt: new Date(Date.now() - 35 * 60_000).toISOString(),
   });

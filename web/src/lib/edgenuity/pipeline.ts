@@ -10,7 +10,6 @@
  * slower than retaking the photo and no more accurate.
  */
 import type {
-  ChallengeDetection,
   EdgenuityOcrResult,
   EdgenuityProof,
   ScreenEvidence,
@@ -20,7 +19,6 @@ import type { OcrProgress } from './ocr';
 import type { QualityReport } from './preprocess';
 import { recognizeCanvas } from './ocr';
 import { parseEdgenuityText, screenEvidenceFrom } from './parser';
-import { findChallengeInWords } from './challenge';
 import {
   QUALITY_ADVICE,
   assessQuality,
@@ -46,7 +44,6 @@ export interface ReadProofOptions {
    * shutter, so the detector confirms one string instead of harvesting codes
    * and comparing afterwards.
    */
-  expectedChallenge?: string;
 }
 
 export interface PassReport {
@@ -54,15 +51,12 @@ export interface PassReport {
   confidence: number;
   problem?: string;
   percent?: number;
-  challengeMatched?: boolean;
 }
 
 export interface ProofReading {
   result: EdgenuityOcrResult;
   /** How convincingly this frame looked like an Edgenuity page (Phase 5). */
   screenEvidence: ScreenEvidence;
-  /** Present only when a challenge was expected. */
-  challenge?: ChallengeDetection;
   quality: QualityReport;
   /** What each attempted pass produced. Diagnostics; never persisted. */
   passes: PassReport[];
@@ -73,31 +67,25 @@ export interface ProofReading {
 }
 
 /** Higher is better. Used to keep the best pass when none is confident. */
-function rank(result: EdgenuityOcrResult, challenge?: ChallengeDetection): number {
+function rank(result: EdgenuityOcrResult): number {
   const confidence = { high: 2, medium: 1, low: 0 }[result.parseConfidence];
   const usable = result.problem ? 0 : 1;
   // `not_edgenuity` is the least useful outcome — a pass that at least found an
   // Edgenuity-looking screen is a better basis for the retake message.
   const recognised = result.problem === 'not_edgenuity' ? 0 : 1;
-  // A pass that found the code is worth more than one that only read the
-  // progress: without the code the capture cannot reach Enhanced trust anyway.
-  const codeFound = challenge?.matched ? 40 : 0;
-  return (
-    usable * 100 + codeFound + recognised * 20 + confidence * 5 + (result.confidence ?? 0) / 100
-  );
+  return usable * 100 + recognised * 20 + confidence * 5 + (result.confidence ?? 0) / 100;
 }
 
 /**
  * Whether to stop early.
  *
- * When a code is expected, a pass that read the progress but missed the code is
- * *not* good enough — a higher-contrast variant often picks up hand-written
- * characters the first pass loses, and stopping early would fail the student
- * for a pass we hadn't tried yet.
+ * A clean, confident read is as good as this gets, so later variants would
+ * only cost time. Before Phase 15 this also had to keep going when a
+ * handwritten code was expected but unread; with the codes gone, confidence is
+ * the whole question.
  */
-function isGoodEnough(result: EdgenuityOcrResult, challenge?: ChallengeDetection): boolean {
-  if (result.problem || result.parseConfidence === 'low') return false;
-  return challenge === undefined || challenge.matched;
+function isGoodEnough(result: EdgenuityOcrResult): boolean {
+  return !result.problem && result.parseConfidence !== 'low';
 }
 
 /**
@@ -138,7 +126,6 @@ export async function readProofImage(
   const variants = buildVariants(image.canvas);
   const passes: PassReport[] = [];
   let best: EdgenuityOcrResult | null = null;
-  let bestChallenge: ChallengeDetection | undefined;
 
   try {
     for (const variant of variants.slice(0, maxPasses)) {
@@ -156,27 +143,15 @@ export async function readProofImage(
         requirePercent: options.requirePercent,
         keepRawText: options.keepRawText,
       });
-      // The code is looked for in the same recognised words, so Enhanced Proof
-      // costs no extra OCR pass — just a scan of tokens already in hand.
-      const challenge = options.expectedChallenge
-        ? findChallengeInWords(words, options.expectedChallenge, {
-            progressRegion: parsed.progressRegion,
-          })
-        : undefined;
-
       passes.push({
         variant: variant.name,
         confidence,
         problem: parsed.problem,
         percent: parsed.detectedProgressPercent,
-        challengeMatched: challenge?.matched,
       });
 
-      if (!best || rank(parsed, challenge) > rank(best, bestChallenge)) {
-        best = parsed;
-        bestChallenge = challenge;
-      }
-      if (isGoodEnough(parsed, options.expectedChallenge ? challenge : undefined)) break;
+      if (!best || rank(parsed) > rank(best)) best = parsed;
+      if (isGoodEnough(parsed)) break;
     }
   } finally {
     releaseVariants(variants);
@@ -196,7 +171,6 @@ export async function readProofImage(
     passes,
     result,
     screenEvidence: screenEvidenceFrom(result),
-    challenge: bestChallenge,
   };
 }
 
@@ -220,7 +194,6 @@ export function proofFromReading(
     parseConfidence: reading.result.parseConfidence,
     source,
     screenEvidence: reading.screenEvidence,
-    challenge: reading.challenge,
   };
 }
 

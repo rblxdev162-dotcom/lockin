@@ -135,18 +135,42 @@ export function EdgenuityBrowserSettings() {
         )}
 
         {active && (
-          <dl className="grid gap-2 sm:grid-cols-3">
-            <Stat label="Courses seen" value={String(view.courseCount)} />
-            <Stat
-              label="Edgenuity tabs open"
-              value={String(view.openTabs)}
-              tone={view.openTabs > 0 ? 'mint' : 'neutral'}
-            />
-            <Stat
-              label="Last read"
-              value={view.lastSeenAt ? relativeTime(view.lastSeenAt, new Date(now)) : 'Not yet'}
-            />
-          </dl>
+          <>
+            <dl className="grid gap-2 sm:grid-cols-3">
+              <Stat label="Courses seen" value={String(view.courseCount)} />
+              <Stat
+                label="Edgenuity tabs open"
+                value={String(view.openTabs)}
+                tone={view.openTabs > 0 ? 'mint' : 'neutral'}
+              />
+              <Stat
+                label="Last read"
+                value={view.lastSeenAt ? relativeTime(view.lastSeenAt, new Date(now)) : 'Not yet'}
+              />
+            </dl>
+
+            {/*
+              "0 courses, 0 tabs, never read" is technically true and completely
+              useless — it is the same display whether Edgenuity is closed, or
+              open in a Chrome profile this extension can never see. The second
+              case is invisible by construction and impossible to guess at, so
+              it gets said out loud rather than left as a silent zero.
+            */}
+            {view.courseCount === 0 && view.openTabs === 0 && (
+              <div className="rounded-xl border px-3 py-2.5 text-sm lk-border">
+                <p className="font-semibold lk-strong">No Edgenuity page seen yet</p>
+                <p className="mt-1 lk-muted">
+                  If Edgenuity is open right now, it is in a different Chrome profile.
+                  Extensions cannot see across profiles — LockIn only reads tabs in the
+                  same profile it is installed in.
+                </p>
+                <p className="mt-1.5 lk-muted">
+                  Open <strong>learn.edgenuity.com</strong> in <em>this</em> Chrome window and
+                  log in there. Nothing about LockIn touches your school profile.
+                </p>
+              </div>
+            )}
+          </>
         )}
 
         <div className="flex flex-wrap gap-2">

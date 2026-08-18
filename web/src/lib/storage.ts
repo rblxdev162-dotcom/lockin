@@ -95,6 +95,7 @@ export function defaultSettings(): Settings {
     // paper for every check, which is the right trade only when someone has
     // decided it is.
     edgenuityProofMode: 'standard',
+    edgenuityBridgeEnabled: false,
     extensionSeen: false,
     // On by default: it is observation, not obstruction, and it is the option
     // students actually keep. Onboarding still announces it.
@@ -510,6 +511,9 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
   // An unrecognised proof mode falls back to `standard`, never to something
   // stricter that would strand the student, nor to a value the UI can't render.
   settings.edgenuityProofMode = settings.edgenuityProofMode === 'enhanced' ? 'enhanced' : 'standard';
+  // Anything but a literal true is off — a corrupted save file must not switch
+  // on the one feature that reaches outside this browser.
+  settings.edgenuityBridgeEnabled = settings.edgenuityBridgeEnabled === true;
   settings.focusGuard = settings.focusGuard !== false;
   settings.blockingAsked = settings.blockingAsked === true;
 

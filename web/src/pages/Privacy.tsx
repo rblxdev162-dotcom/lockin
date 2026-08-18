@@ -33,6 +33,13 @@ export function PrivacyPage() {
           LockIn from. Opening Canvas or Edgenuity is you visiting those sites in the normal way;
           LockIn reads the page you are already looking at and never contacts them itself.
         </p>
+        <p className="mt-3 text-sm leading-relaxed lk-muted">
+          If you turn on reading Edgenuity from any Chrome window, LockIn talks to its own
+          background service on this computer — <code>127.0.0.1</code>, the same program already
+          serving this page. That never leaves the machine, and it cannot: it has no address to
+          send anything to. It asks Chrome for two numbers off a course page you have open, and
+          nothing else.
+        </p>
       </Card>
 
       <Card>

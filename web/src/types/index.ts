@@ -272,6 +272,14 @@ export interface Settings {
    */
   edgenuityProofMode: RequirableTrust;
   /**
+   * Let the local service read Edgenuity from any Chrome window (Phase 14).
+   *
+   * Off by default and never turned on implicitly: it is the one feature that
+   * reaches outside the browser LockIn is running in, so it is a decision the
+   * student makes rather than a default they inherit.
+   */
+  edgenuityBridgeEnabled: boolean;
+  /**
    * True once the Chrome extension has answered on this device (Phase 8).
    *
    * It is the difference between two very different sentences: "Browser

@@ -20,6 +20,7 @@
  * so serving anywhere else silently breaks blocking and Canvas.
  */
 import { createServer } from 'node:http';
+import { diagnose, readProgress } from './bridge.mjs';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +51,62 @@ if (!existsSync(join(DIST, 'index.html'))) {
   process.exit(1);
 }
 
+/**
+ * The bridge endpoints.
+ *
+ * The only routes here that *do* something rather than return a file, so they
+ * are fenced deliberately:
+ *
+ *   - loopback only (the listener below binds 127.0.0.1);
+ *   - the request must carry `x-lockin-bridge`, which is not a CORS-simple
+ *     header. That forces any cross-origin caller through a preflight this
+ *     server never answers, so a random web page cannot reach these routes
+ *     even though the port is guessable;
+ *   - `Origin`, when present, must be this server's own;
+ *   - no CORS headers ever come back, so nothing off-origin can read a reply
+ *     even if it manages to send a request;
+ *   - the request body is ignored entirely. Nothing a caller sends is ever
+ *     executed — `bridge.mjs` runs one fixed script that lives in that file.
+ */
+const BRIDGE_ROUTES = new Set(['/api/edgenuity/status', '/api/edgenuity/read']);
+
+export function bridgeCallerAllowed(headers, port = PORT) {
+  if (headers['x-lockin-bridge'] !== '1') return false;
+  const origin = headers.origin;
+  if (origin && origin !== `http://localhost:${port}` && origin !== `http://127.0.0.1:${port}`) {
+    return false;
+  }
+  return true;
+}
+
+function sendJson(res, status, body) {
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+  });
+  res.end(JSON.stringify(body));
+}
+
+/** One bridge call at a time. Chrome is not a database; queue rather than pile up. */
+let bridgeBusy = false;
+
+async function handleBridge(pathname, res) {
+  if (bridgeBusy) {
+    sendJson(res, 429, { ok: false, problem: 'busy', detail: 'Already reading Chrome.' });
+    return;
+  }
+  bridgeBusy = true;
+  try {
+    const result = pathname === '/api/edgenuity/status' ? await diagnose() : await readProgress();
+    sendJson(res, 200, result);
+  } catch (error) {
+    console.error('[LockIn] bridge failed', error);
+    sendJson(res, 200, { ok: false, problem: 'unknown', detail: 'The bridge failed.' });
+  } finally {
+    bridgeBusy = false;
+  }
+}
+
 const server = createServer((req, res) => {
   let file;
   try {
@@ -64,6 +121,16 @@ const server = createServer((req, res) => {
   // server that can read outside its root is a bad habit at any scope.
   if (!file.startsWith(DIST)) {
     res.writeHead(403).end('forbidden');
+    return;
+  }
+
+  const pathname = new URL(req.url, `http://localhost:${PORT}`).pathname;
+  if (BRIDGE_ROUTES.has(pathname)) {
+    if (!bridgeCallerAllowed(req.headers)) {
+      res.writeHead(403, { 'cache-control': 'no-store' }).end('forbidden');
+      return;
+    }
+    void handleBridge(pathname, res);
     return;
   }
 
@@ -91,9 +158,20 @@ server.on('error', (error) => {
   throw error;
 });
 
-// Loopback only. LockIn is local-first; there is no reason for this to be
-// reachable from the network, and the camera needs a secure context anyway
-// (localhost qualifies, a LAN address does not).
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`LockIn is live at http://localhost:${PORT}`);
-});
+/**
+ * Only listen when run directly.
+ *
+ * The bridge tests import this file for `bridgeCallerAllowed`, and a module
+ * that binds a port as an import side effect cannot be tested while the real
+ * service is running — which, for an always-on LaunchAgent, is always.
+ *
+ * Loopback only. LockIn is local-first; there is no reason for this to be
+ * reachable from the network, and screen capture needs a secure context anyway
+ * (localhost qualifies, a LAN address does not).
+ */
+const runDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (runDirectly) {
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`LockIn is live at http://localhost:${PORT}`);
+  });
+}

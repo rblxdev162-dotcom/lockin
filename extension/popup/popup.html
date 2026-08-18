@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LockIn</title>
+    <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="pop">
+      <header class="head">
+        <span class="lk-mark">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="10" width="16" height="10" rx="2.5" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+        </span>
+        <span class="wordmark">LOCKIN</span>
+        <span class="pill" id="pill">…</span>
+      </header>
+
+      <p class="label">Focus Mode</p>
+      <p class="state" id="state">…</p>
+
+      <div id="active-block" hidden>
+        <div class="rows">
+          <div class="row">
+            <span class="lk-muted">Tasks remaining</span>
+            <strong id="tasks-remaining">0</strong>
+          </div>
+          <div class="row">
+            <span class="lk-muted">Blocked sites</span>
+            <strong id="blocked-count">0</strong>
+          </div>
+        </div>
+        <div class="lk-bar" id="bar-wrap" hidden><span id="bar" style="width: 0%"></span></div>
+        <div class="task lk-card" id="task-row" hidden>
+          <p class="label">Current task</p>
+          <p class="task-title" id="task-title"></p>
+        </div>
+      </div>
+
+      <p class="idle" id="idle-note" hidden>No websites are currently blocked.</p>
+
+      <button class="lk-btn lk-btn-primary full" id="open-lockin">OPEN LOCKIN</button>
+      <p class="foot" id="foot"></p>
+    </div>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

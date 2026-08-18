@@ -1,0 +1,150 @@
+@import 'tailwindcss';
+
+/*
+ * LockIn design tokens.
+ * Light is the default; `.dark` on <html> flips the surfaces. Everything else
+ * in the app is expressed in these tokens so both themes stay consistent.
+ */
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --color-brand-50: oklch(0.97 0.02 275);
+  --color-brand-100: oklch(0.94 0.04 275);
+  --color-brand-200: oklch(0.88 0.07 275);
+  --color-brand-300: oklch(0.8 0.11 275);
+  --color-brand-400: oklch(0.71 0.15 275);
+  --color-brand-500: oklch(0.62 0.19 275);
+  --color-brand-600: oklch(0.55 0.2 275);
+  --color-brand-700: oklch(0.47 0.18 275);
+  --color-brand-800: oklch(0.39 0.14 275);
+  --color-brand-900: oklch(0.31 0.1 275);
+
+  --color-mint-400: oklch(0.78 0.15 165);
+  --color-mint-500: oklch(0.7 0.15 165);
+  --color-mint-600: oklch(0.6 0.14 165);
+
+  --color-flame-400: oklch(0.76 0.16 45);
+  --color-flame-500: oklch(0.68 0.18 35);
+  --color-flame-600: oklch(0.58 0.19 30);
+
+  --radius-card: 1.25rem;
+
+  --animate-rise: rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade: fade 0.25s ease-out both;
+  --animate-pop: pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-pulse-ring: pulse-ring 2.4s ease-out infinite;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop {
+  0% { opacity: 0; transform: scale(0.94); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--ring-color) 45%, transparent); }
+  70% { box-shadow: 0 0 0 14px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --surface: oklch(0.985 0.003 275);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.96 0.005 275);
+  --border-soft: oklch(0.9 0.008 275);
+  --text-strong: oklch(0.22 0.02 275);
+  --text-muted: oklch(0.52 0.02 275);
+  --ring-color: var(--color-brand-500);
+  color-scheme: light;
+}
+
+.dark {
+  --surface: oklch(0.19 0.014 275);
+  --surface-raised: oklch(0.235 0.017 275);
+  --surface-sunken: oklch(0.16 0.012 275);
+  --border-soft: oklch(0.32 0.02 275);
+  --text-strong: oklch(0.97 0.005 275);
+  --text-muted: oklch(0.72 0.015 275);
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--text-strong);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  * {
+    border-color: var(--border-soft);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-brand-200);
+    color: var(--color-brand-900);
+  }
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .lk-surface { background: var(--surface); }
+  .lk-raised { background: var(--surface-raised); }
+  .lk-sunken { background: var(--surface-sunken); }
+  .lk-muted { color: var(--text-muted); }
+  .lk-strong { color: var(--text-strong); }
+  .lk-border { border-color: var(--border-soft); }
+
+  .lk-card {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-card);
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 8px 24px -18px oklch(0 0 0 / 0.35);
+  }
+
+  .lk-input {
+    width: 100%;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-soft);
+    border-radius: 0.75rem;
+    padding: 0.6rem 0.8rem;
+    color: var(--text-strong);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .lk-input:focus {
+    outline: none;
+    border-color: var(--color-brand-500);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-brand-500) 22%, transparent);
+  }
+  .lk-input::placeholder { color: var(--text-muted); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

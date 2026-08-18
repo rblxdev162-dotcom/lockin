@@ -1,0 +1,19 @@
+node_modules/
+
+# Build output
+web/dist/
+release/
+dist/
+
+# Generated: `npm run vendor:ocr` copies the engine out of node_modules
+web/public/ocr/
+
+# Generated: `npm run fixtures:edgenuity`
+web/public/fixtures/
+extension/tests/fixtures/edgenuity/
+
+# The tesseract language model, downloaded rather than authored
+eng.traineddata
+
+.DS_Store
+*.log

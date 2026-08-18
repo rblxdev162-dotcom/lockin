@@ -1,0 +1,102 @@
+/**
+ * Canvas content-script logic (ES module).
+ *
+ * Loaded by `content.js`, which is the classic script Chrome actually injects —
+ * content scripts cannot use static imports, so the loader pulls this in with a
+ * dynamic import. Keeping the logic here preserves the module split.
+ *
+ * Injected only into the Canvas origin the student configured AND granted
+ * permission for (see background/canvas.js). Never present on any other site.
+ *
+ * Strictly READ ONLY. It never clicks, submits, or changes anything on the
+ * page — it reads what the student can already see and reports a small
+ * structured summary to the background worker.
+ */
+import { detectCanvasPage } from './detector.js';
+import { parseCanvasPage } from './parser.js';
+import { createCanvasObserver } from './observer.js';
+import { CANVAS_MSG } from './messaging.js';
+
+export function startCanvasContentScript() {
+  // Guard against double injection (registered script + a manual re-inject).
+  if (window.__lockinCanvasActive) return;
+  window.__lockinCanvasActive = true;
+
+  const domain = location.hostname.toLowerCase();
+  let lastPayloadKey = '';
+
+  function send(message) {
+    try {
+      chrome.runtime.sendMessage(message).catch(() => {
+        /* worker asleep or extension reloaded; the next parse retries */
+      });
+    } catch {
+      /* extension context invalidated — nothing to do */
+    }
+  }
+
+  function parseAndReport(reason) {
+    const detection = detectCanvasPage(document, location.href, domain);
+    if (!detection.isCanvas) return;
+
+    let result;
+    try {
+      result = parseCanvasPage(document, location.href);
+    } catch (error) {
+      console.warn('[LockIn] Canvas parse error', error);
+      send({ type: CANVAS_MSG.UNREADABLE, domain, url: location.href.slice(0, 500) });
+      return;
+    }
+
+    if (!result.readable) {
+      // Recognisably Canvas, nothing usable on it. Reported so the UI can say
+      // so honestly rather than silently showing nothing.
+      send({ type: CANVAS_MSG.UNREADABLE, domain, pageKind: result.pageKind });
+      return;
+    }
+
+    const payload = {
+      type: CANVAS_MSG.DETECTION,
+      domain,
+      pageKind: result.pageKind,
+      readable: true,
+      assignments: result.assignments,
+      courses: result.courses,
+      detectedAt: new Date().toISOString(),
+    };
+
+    // Skip identical repeats: a mutating page must not generate a message per
+    // render. `detectedAt` is excluded from the comparison on purpose.
+    const key = JSON.stringify({
+      a: payload.assignments.map((a) => [
+        a.externalCourseId,
+        a.externalAssignmentId,
+        a.submissionStatus,
+        a.title,
+        a.dueAt,
+      ]),
+      c: payload.courses.map((c) => [c.externalCourseId, c.originalName]),
+      k: payload.pageKind,
+    });
+    if (key === lastPayloadKey && reason !== 'forced') return;
+    lastPayloadKey = key;
+
+    send(payload);
+  }
+
+  const observer = createCanvasObserver(parseAndReport);
+  observer.start();
+
+  // The background worker can ask for a fresh read (Sync Canvas / status check).
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message || message.type !== CANVAS_MSG.REPARSE) return false;
+    lastPayloadKey = '';
+    parseAndReport('forced');
+    sendResponse({ ok: true, url: location.href.slice(0, 500) });
+    return true;
+  });
+
+  window.addEventListener('pagehide', () => observer.stop(), { once: true });
+
+  return observer;
+}

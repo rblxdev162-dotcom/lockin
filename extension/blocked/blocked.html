@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blocked by LockIn</title>
+    <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="blocked.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="glow" aria-hidden="true"></div>
+
+      <header class="head">
+        <span class="lk-mark">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="10" width="16" height="10" rx="2.5" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+        </span>
+        <span class="wordmark">LOCKIN</span>
+      </header>
+
+      <p class="kicker" id="kicker">Focus Mode is active.</p>
+      <h1 class="title">You tried to open<br /><span id="site-name">this site</span></h1>
+      <p class="site-domain" id="site-domain"></p>
+
+      <section class="lk-card panel" id="progress-panel" hidden>
+        <p class="label">Required progress</p>
+        <p class="progress-text"><strong id="progress-count">0 / 0</strong> tasks completed</p>
+        <div class="lk-bar"><span id="progress-fill" style="width: 0%"></span></div>
+        <div class="task" id="task-row" hidden>
+          <p class="label">Current task</p>
+          <p class="task-title" id="task-title"></p>
+        </div>
+      </section>
+
+      <p class="hint" id="hint">Finish your required work to unlock distractions.</p>
+
+      <div class="actions">
+        <button class="lk-btn lk-btn-primary" id="open-lockin">OPEN LOCKIN</button>
+        <button class="lk-btn lk-btn-secondary" id="go-back">Go back</button>
+      </div>
+
+      <section class="school">
+        <button class="lk-btn lk-btn-ghost" id="school-toggle" aria-expanded="false">
+          This site is needed for school
+        </button>
+        <div class="school-panel lk-card" id="school-panel" hidden>
+          <p class="school-copy">
+            LockIn can’t change your allowlist from here — that decision lives in the app (and in
+            Strict Mode it needs the parent PIN).
+          </p>
+          <div class="school-actions">
+            <button class="lk-btn lk-btn-secondary" id="request-temp">Request temporary access</button>
+            <button class="lk-btn lk-btn-secondary" id="request-allow">Add to school allowlist</button>
+            <button class="lk-btn lk-btn-ghost" id="school-cancel">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="foot">
+        <span id="mode-note">Nothing about your browsing is uploaded. LockIn counts blocks, not pages.</span>
+      </footer>
+    </main>
+
+    <script src="blocked.js" type="module"></script>
+  </body>
+</html>

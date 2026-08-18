@@ -1,0 +1,106 @@
+.pop {
+  width: 17.5rem;
+  padding: 1rem 1.1rem 1.1rem;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 1.1rem;
+}
+
+.wordmark {
+  flex: 1;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.pill.on {
+  background: color-mix(in oklch, var(--brand-500) 18%, transparent);
+  border-color: color-mix(in oklch, var(--brand-500) 40%, transparent);
+  color: var(--brand-600);
+}
+.pill.paused {
+  background: color-mix(in oklch, var(--mint-500) 20%, transparent);
+  border-color: color-mix(in oklch, var(--mint-500) 45%, transparent);
+  color: var(--mint-500);
+}
+.pill.test {
+  background: color-mix(in oklch, var(--amber-500) 22%, transparent);
+  border-color: color-mix(in oklch, var(--amber-500) 45%, transparent);
+  color: var(--amber-500);
+}
+
+.label {
+  margin: 0 0 0.15rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.state {
+  margin: 0 0 0.9rem;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+
+.task {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.task-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.idle {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.full {
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.foot {
+  margin: 0.7rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--muted);
+}

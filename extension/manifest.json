@@ -1,0 +1,86 @@
+{
+  "manifest_version": 3,
+  "name": "LockIn \u2014 Focus Blocker",
+  "version": "1.2.1",
+  "description": "Blocks distracting websites while LockIn Focus Mode is active. School sites and Google always stay open.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "declarativeNetRequest",
+    "storage",
+    "alarms",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "LockIn",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "js": [
+        "shared/build-config.js",
+        "content/bridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "blocked/blocked.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    },
+    {
+      "resources": [
+        "canvas/main.js",
+        "canvas/detector.js",
+        "canvas/parser.js",
+        "canvas/observer.js",
+        "canvas/messaging.js",
+        "canvas/status.js",
+        "canvas/urls.js",
+        "canvas/types.js",
+        "edgenuity/main.js",
+        "edgenuity/detector.js",
+        "edgenuity/parser.js",
+        "edgenuity/messaging.js",
+        "edgenuity/urls.js",
+        "edgenuity/types.js"
+      ],
+      "matches": [
+        "https://*/*"
+      ]
+    }
+  ]
+}

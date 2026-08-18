@@ -1,0 +1,149 @@
+.wrap {
+  position: relative;
+  max-width: 30rem;
+  margin: 0 auto;
+  padding: clamp(2.5rem, 8vh, 5rem) 1.5rem 3rem;
+  text-align: center;
+  animation: rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.glow {
+  position: fixed;
+  top: -14rem;
+  left: 50%;
+  width: 34rem;
+  height: 34rem;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--brand-500) 22%, transparent);
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  margin-bottom: 1.75rem;
+}
+
+.wordmark {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.kicker {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--brand-600);
+}
+
+.title {
+  margin: 0 0 1.75rem;
+  font-size: clamp(1.6rem, 5vw, 2.15rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+#site-name { color: var(--brand-600); }
+
+.panel {
+  padding: 1.15rem 1.25rem;
+  text-align: left;
+  margin-bottom: 1.25rem;
+}
+
+.label {
+  margin: 0 0 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.progress-text {
+  margin: 0 0 0.7rem;
+  font-size: 0.95rem;
+}
+.progress-text strong { font-size: 1.1rem; }
+
+.task {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.task-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.hint {
+  margin: 0 0 1.5rem;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-bottom: 2rem;
+}
+.actions .lk-btn { min-width: 8.5rem; }
+
+.school-panel {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  text-align: left;
+}
+
+.school-copy {
+  margin: 0 0 0.85rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.school-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.foot {
+  margin-top: 2.5rem;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+@media (max-width: 380px) {
+  .actions .lk-btn { width: 100%; }
+}
+
+/* The exact hostname under the friendly name. Muted: it is a fact to check,
+   not the headline. */
+.site-domain {
+  margin: 0.35rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  word-break: break-all;
+}

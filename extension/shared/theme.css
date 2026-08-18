@@ -1,0 +1,104 @@
+/* Shared visual language with the LockIn website (see web/src/index.css). */
+:root {
+  --brand-100: oklch(0.94 0.04 275);
+  --brand-400: oklch(0.71 0.15 275);
+  --brand-500: oklch(0.62 0.19 275);
+  --brand-600: oklch(0.55 0.2 275);
+  --brand-700: oklch(0.47 0.18 275);
+  --mint-500: oklch(0.7 0.15 165);
+  --flame-500: oklch(0.68 0.18 35);
+  --amber-500: oklch(0.75 0.15 75);
+
+  --surface: oklch(0.985 0.003 275);
+  --raised: oklch(1 0 0);
+  --sunken: oklch(0.96 0.005 275);
+  --border: oklch(0.9 0.008 275);
+  --text: oklch(0.22 0.02 275);
+  --muted: oklch(0.52 0.02 275);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: oklch(0.19 0.014 275);
+    --raised: oklch(0.235 0.017 275);
+    --sunken: oklch(0.16 0.012 275);
+    --border: oklch(0.32 0.02 275);
+    --text: oklch(0.97 0.005 275);
+    --muted: oklch(0.72 0.015 275);
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.lk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.85rem;
+  padding: 0.7rem 1.1rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.lk-btn:active { transform: scale(0.98); }
+.lk-btn-primary { background: var(--brand-600); color: #fff; }
+.lk-btn-primary:hover { background: var(--brand-500); }
+.lk-btn-secondary {
+  background: var(--raised);
+  color: var(--text);
+  border-color: var(--border);
+}
+.lk-btn-secondary:hover { border-color: var(--brand-400); }
+.lk-btn-ghost { background: transparent; color: var(--muted); }
+.lk-btn-ghost:hover { color: var(--text); }
+
+.lk-mark {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.75rem;
+  background: var(--brand-600);
+  color: #fff;
+}
+
+.lk-card {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 1.1rem;
+}
+
+.lk-muted { color: var(--muted); }
+
+.lk-bar {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+.lk-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand-500);
+  transition: width 0.4s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

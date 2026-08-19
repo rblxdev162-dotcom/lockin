@@ -28,10 +28,13 @@ Tagline: *Finish what matters before distractions take over.*
 | 2 | Manifest V3 extension, real `declarativeNetRequest` blocking, school allowlist, block page, popup, web↔extension bridge, Chrome-restart persistence, cross-tab sync | **Done** |
 | 3 | **Canvas Browser Detection** — detect/import/link Canvas assignments, verify submissions, feed Focus Mode, auto-unlock | **Done** |
 | 4 | **Edgenuity live-camera verification** — camera capture, local OCR, before/after progress comparison, cumulative progress, Focus Mode unlock | **Done** |
-| 5 | **Enhanced Proof** — one-time challenge codes issued per capture, machine-detected in the photo, trust levels, anti-replay | **Done** |
+| 5 | **Enhanced Proof** — one-time challenge codes photographed with the screen | **Removed in Phase 15** |
 | 6 | **Parent Accountability Dashboard** — PIN-gated `/parent`, verification review, focus history, parent-controlled proof requirements, local export | **Done** |
 | 7 | **Smart Study Planner** — deterministic daily schedule from due dates, estimates, exams and availability; adaptive rescheduling; `/planner` | **Done** |
 | 9 | **Focus Guard + consent + capture** — Page Visibility honor mode, permission-style blocking consent, one-field assignment capture with learned estimates, four-step onboarding | **Done** |
+| 15 | **Camera and Enhanced Proof removed** — screen sharing and page reading are the only sources; no strength setting remains | **Done** |
+| 14 | **The bridge** — a local service reads Edgenuity progress from any Chrome window, across profiles | **Built, unproven against real Chrome** |
+| 13 | **OS reminders** — fired by the extension's alarm, so they survive every LockIn tab being closed | **Done** |
 | 12 | **Screen-capture proofs** — share the Edgenuity window instead of photographing it; for Edgenuity and LockIn on one machine, and across two Chrome profiles | **Done** |
 | 11 | **Edgenuity browser reading** — read course progress off the Edgenuity page the student opens, no camera; assessment-inert; activity-count targets | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
@@ -42,7 +45,7 @@ Tagline: *Finish what matters before distractions take over.*
 
 | Suite | Checks | Command |
 | --- | --- | --- |
-| Blocking, Canvas, Edgenuity, challenges, Enhanced Proof, parent, planner | 291 | (the ten suites `npm test` chains) |
+| Blocking, reminders, bridge, Canvas, Edgenuity, parent, planner | (see `npm test`) | (the suites `npm test` chains) |
 | Storage recovery: corruption, migration, retention, quota | 18 | `npm run test:storage` |
 | Security: the ten bypass paths | 22 | `npm run test:security` |
 | Date/time boundaries and clock changes | 19 | `npm run test:time` |
@@ -59,7 +62,6 @@ dev server on `:5173`:
 | Canvas e2e | 57 | `npm run test:canvas-e2e` |
 | Edgenuity OCR (real engine, real images) | 42 | `npm run test:edgenuity-ocr` |
 | Edgenuity e2e (real camera API) | 31 | `npm run test:edgenuity-e2e` |
-| Enhanced Proof e2e (real camera + codes) | 34 | `npm run test:edgenuity-enhanced-e2e` |
 | Parent Dashboard e2e (PIN, controls, enforcement) | 51 | `npm run test:parent-e2e` |
 | Planner e2e (plan → start → partial → recalculate) | 54 | `npm run test:planner-e2e` |
 | **Release e2e** (production build + packaged zip) | 22 | `npm run test:release-e2e` |
@@ -143,10 +145,10 @@ one.
    no tracking, no browsing history — block stats are per-domain counts only.
 8. **Schema migrations, never wipes.** Bump `SCHEMA_VERSION` in
    `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v6**.
-9. **Only a machine-read measurement can verify Edgenuity progress** — a live
-   camera frame (Phase 4), a frame from a window the student shared with
-   `getDisplayMedia` (Phase 12), or a DOM read from their own authenticated
-   Edgenuity session (Phase 11). Anything else — a typed correction, a test
+9. **Only a machine-read measurement can verify Edgenuity progress** — a frame
+   from a window the student shared with `getDisplayMedia` (Phase 12), or a DOM
+   read from their own authenticated Edgenuity session (Phase 11, or Phase 14's
+   bridge). The camera frame this rule was written for is gone (Phase 15). Anything else — a typed correction, a test
    fixture, a tampered save file — is recorded as unverified and refused.
    Never add a path that turns a student-supplied number into a verified
    result. *(Amended in Phase 11. The rule was "only a live camera frame"; the
@@ -168,9 +170,11 @@ one.
 12. **Both halves of a session carry their own code, and the second is issued
     only when the student taps Verify progress.** Generating both up front
     would let a student stage two photos in one sitting.
-13. **An Enhanced requirement refuses a Standard capture outright** rather than
-    banking the progress — otherwise a target could be filled at Standard
-    strength and finished with one Enhanced photo under an Enhanced badge.
+13. **Nothing can require Enhanced.** `requiredTrustFor()` returns `standard`
+    unconditionally and ignores any stored requirement. Enhanced was a
+    handwritten code photographed beside the screen; with no camera it cannot
+    be produced, and honouring an old `enhanced` value would leave an
+    assignment permanently unverifiable with nothing able to explain why.
 14. **The Parent Dashboard is accountability, not surveillance.** It may show
     work and verification events. Never add browsing history, screenshots,
     webcam, location, keystrokes or message monitoring — and note that most of
@@ -287,6 +291,41 @@ one.
 ⚠️ `web/src/lib/domains.ts` ↔ `extension/shared/domains.js` and
 `web/src/lib/canvas/verification.ts` ↔ `extension/canvas/status.js` are
 hand-synced mirrors (the extension has no build step). Change both together.
+
+---
+
+## Phase 15 — Camera and Enhanced Proof removed (done)
+
+The camera assumed two machines — a school computer showing Edgenuity, the
+student's own device holding the camera. On one Mac the camera faces the
+student, so it could never photograph the screen beside it: the path was not
+merely superseded, it never worked on this setup at all.
+
+Enhanced Proof went with it, because it *was* the camera: a one-time code
+written by hand and photographed in the same frame. A shared window cannot hold
+up a piece of paper.
+
+### What replaced them
+Screen sharing (Phase 12) for an image, page reading (Phases 11 and 14) for the
+numbers. Both are machine-read; neither can be satisfied by typing.
+
+### Things that will bite you if you don't know them
+- **`requiredTrustFor()` is now a constant `'standard'`** and deliberately
+  ignores stored `requiredVerificationTrust` and `edgenuityProofMode`. A save
+  file predating this still says `enhanced`; honouring it would strand the
+  assignment forever. There is a test for exactly this.
+- **`settings.edgenuityProofMode` and `parentControls.lockVerificationSettings`
+  still exist but are inert.** Removing them means a storage sweep, and the
+  reducer's locked-field mechanism is worth keeping for the next lockable
+  setting. Nothing in the UI sets either any more.
+- **Five of the ten security bypass tests went with the feature they guarded**
+  (Enhanced satisfaction, challenge replay, cross-assignment codes). The other
+  twelve pass unchanged. Do not read the smaller number as weaker coverage —
+  read it as fewer things to bypass.
+- **Deleting `AssignmentTrustRow` from `ParentControlsPanel` took the whole
+  component with it, twice**, because a naive "delete from here to the next
+  function" walked backwards into the main component's doc comment. The
+  compiler caught it both times. Cut by explicit function boundaries.
 
 ---
 

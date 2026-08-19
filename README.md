@@ -96,10 +96,9 @@ dead button.
 | **Focus Guard** | With no extension at all, notices when you leave the LockIn tab during Focus Mode and times it. It cannot block, and cannot see where you went — and says both. |
 | **Chrome extension** | Does the blocking for real, with `declarativeNetRequest`. Survives closing LockIn and restarting Chrome. |
 | **Canvas verification** | Reads submission status from Canvas pages you open yourself, and counts a verified submission as done. |
-| **Edgenuity verification** | A live photo of the progress screen before and after, read on-device with a bundled OCR engine. |
+| **Edgenuity verification** | A before-and-after reading of your course progress, taken on this device. |
 | **Screen-capture proof** | When Edgenuity runs on the same computer as LockIn, share that window instead of photographing it. One frame, read by the same OCR. Chrome asks every time, and nothing is captured in the background. |
 | **Edgenuity browser reading** | When Edgenuity runs in the same Chrome, the extension reads how many activities are done straight off the course page you opened — no photo. It never loads an Edgenuity page itself, and stays switched off during quizzes, tests and exams. |
-| **Enhanced Proof** | A one-time code, written by hand and photographed with the screen, so yesterday's screenshot cannot be reused today. |
 | **Parent View** | A PIN-gated local dashboard of work, verification and Focus Mode history. |
 | **Emergency exit** | Always available, no PIN, no progress required. |
 
@@ -230,7 +229,6 @@ serves the production site itself on `:4173`.
 | Canvas E2E | Detection → verification → unlock | `npm run test:canvas-e2e` |
 | Edgenuity OCR | The real engine on real images | `npm run test:edgenuity-ocr` |
 | Edgenuity E2E | Real camera API | `npm run test:edgenuity-e2e` |
-| Enhanced Proof E2E | Codes end to end | `npm run test:edgenuity-enhanced-e2e` |
 | Parent E2E | PIN, controls, enforcement | `npm run test:parent-e2e` |
 | Planner E2E | Plan → start → partial → recalculate | `npm run test:planner-e2e` |
 | Release E2E | Production build + packaged zip | `npm run test:release-e2e` |
@@ -286,9 +284,6 @@ minutes and stop trusting everything else the app says.
 - **Edgenuity OCR can fail** on glare, unusual school themes, or handwriting.
   Fixtures print the code; real students write it, so field reliability is lower
   than the test suite suggests.
-- **Enhanced Proof narrows replay, not identity.** A photo taken before the code
-  existed cannot contain it. Someone standing in front of the right screen with
-  a pen still satisfies it, by design and by necessity.
 - **The parent PIN is accountability, not device security.**
 - **The planner works from your estimates**, and cannot know about homework set
   an hour ago.

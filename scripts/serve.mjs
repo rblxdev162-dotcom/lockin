@@ -20,6 +20,7 @@
  * so serving anywhere else silently breaks blocking and Canvas.
  */
 import { createServer } from 'node:http';
+import { MAX_BODY_BYTES, contextBridge } from './context-bridge.mjs';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,7 +71,15 @@ if (!existsSync(join(DIST, 'index.html'))) {
  * set is the correct default: a route that has to be named to exist cannot be
  * created by accident.
  */
-const BRIDGE_ROUTES = new Set();
+const BRIDGE_ROUTES = new Set([
+  /** School Companion → here. The only route that accepts a body. */
+  '/api/context/report',
+  /** LockIn → here. Reads the latest context back. */
+  '/api/context',
+  /** LockIn → here. Issues or revokes the pairing secret. */
+  '/api/context/pair',
+  '/api/context/unpair',
+]);
 
 export function bridgeCallerAllowed(headers, port = PORT) {
   if (headers['x-lockin-bridge'] !== '1') return false;
@@ -87,6 +96,70 @@ function sendJson(res, status, body) {
     'cache-control': 'no-store',
   });
   res.end(JSON.stringify(body));
+}
+
+/**
+ * The context routes.
+ *
+ * `/report` is the only one that reads a body, and it reads at most
+ * `MAX_BODY_BYTES` before giving up — a local endpoint that will buffer an
+ * unbounded upload is a denial-of-service waiting to happen, even on loopback.
+ *
+ * The pairing routes are reachable only from LockIn's own origin, which
+ * `bridgeCallerAllowed` has already checked: the secret is issued to the page
+ * that asked for it, and the School Companion never learns it from here — a
+ * person carries it across, deliberately.
+ */
+async function handleContext(pathname, req, res) {
+  if (pathname === '/api/context' && req.method === 'GET') {
+    sendJson(res, 200, contextBridge.snapshot());
+    return;
+  }
+
+  if (pathname === '/api/context/pair' && req.method === 'POST') {
+    sendJson(res, 200, { ok: true, secret: contextBridge.pair() });
+    return;
+  }
+
+  if (pathname === '/api/context/unpair' && req.method === 'POST') {
+    contextBridge.unpair();
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (pathname === '/api/context/report' && req.method === 'POST') {
+    let body = '';
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      body += chunk;
+      if (body.length > MAX_BODY_BYTES) {
+        tooLarge = true;
+        body = '';
+      }
+    });
+    req.on('end', () => {
+      if (tooLarge) {
+        sendJson(res, 413, { ok: false, reason: 'too-large' });
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        sendJson(res, 400, { ok: false, reason: 'schema' });
+        return;
+      }
+      const result = contextBridge.report(parsed, req.headers);
+      // A refusal is 200 with a reason rather than 401: the School Companion
+      // shows the reason to its own user, and a status code says nothing
+      // useful to anything else that might be probing.
+      sendJson(res, 200, result);
+    });
+    return;
+  }
+
+  sendJson(res, 405, { ok: false, reason: 'method' });
 }
 
 const server = createServer((req, res) => {
@@ -112,7 +185,7 @@ const server = createServer((req, res) => {
       res.writeHead(403, { 'cache-control': 'no-store' }).end('forbidden');
       return;
     }
-    res.writeHead(404, { 'cache-control': 'no-store' }).end('not found');
+    void handleContext(pathname, req, res);
     return;
   }
 

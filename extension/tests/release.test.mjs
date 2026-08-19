@@ -321,14 +321,25 @@ test('no LockIn source file can make a network request', () => {
     /importScripts\s*\(/,
   ];
   /**
-   * Phase 16 note. The website still makes no network requests of its own —
-   * the Canvas calendar feed is fetched by the *extension*, which has host
-   * permissions and keeps the feed URL out of any page's reach. If a file here
-   * ever needs an exception, name it explicitly rather than loosening the
-   * pattern.
+   * One file is allowed to call `fetch`, and it is named here rather than
+   * pattern-matched, so adding a second one has to be a deliberate edit to
+   * this test.
+   *
+   * `lib/context/client.ts` talks to LockIn's own service on 127.0.0.1 — the
+   * process already serving this page. That is inter-process communication on
+   * one machine, not a network request: nothing leaves the device, and the
+   * privacy page's claim is unchanged. The check below proves it stays that
+   * way.
+   *
+   * The Canvas calendar feed is deliberately *not* here: it is fetched by the
+   * extension, which has host permissions and keeps the feed URL out of any
+   * page's reach.
    */
-  const offenders = sources.filter(({ text }) =>
-    NETWORK.some((pattern) => pattern.test(stripComments(text))),
+  const LOOPBACK_ONLY = 'lib/context/client.ts';
+
+  const offenders = sources.filter(
+    ({ file, text }) =>
+      file !== LOOPBACK_ONLY && NETWORK.some((pattern) => pattern.test(stripComments(text))),
   );
   assert.deepEqual(
     offenders.map((o) => o.file),

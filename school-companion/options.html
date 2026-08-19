@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LockIn School Companion</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>LockIn School Companion</h1>
+      <p class="lede">
+        This tells LockIn whether Canvas or Edgenuity is open in this Chrome
+        profile. That is all it does, and all it can do.
+      </p>
+
+      <!--
+        The authorization gate comes first, before any field that could be
+        filled in. It is a checkbox rather than prose because the point is that
+        somebody has to make the claim deliberately, and a claim nobody had to
+        make is not a claim.
+      -->
+      <section class="card warn">
+        <h2>Before you turn this on</h2>
+        <p>
+          Many school Chrome profiles are managed by the district, and many
+          districts do not allow extensions to be installed on them. This
+          package is for the case where installing it is
+          <strong>allowed or approved by your school</strong>.
+        </p>
+        <p>
+          LockIn will not help you get around an administrator setting, and it
+          does not need this extension — everything else works without it.
+        </p>
+        <label class="check">
+          <input type="checkbox" id="authorized" />
+          <span>Installing this on this profile is allowed by my school.</span>
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>What it sends</h2>
+        <pre class="code">{
+  provider: "edgenuity",
+  activity: "active",
+  startedAt: 1773251400000,
+  lastActiveAt: 1773251460000
+}</pre>
+        <p class="sub">
+          Four facts, once a minute, to LockIn on this computer only
+          (127.0.0.1). It has no permission to reach anything else.
+        </p>
+        <h2 class="second">What it cannot send</h2>
+        <ul class="facts">
+          <li>Assignments, lessons, questions, answers or grades — it has no content script and no scripting permission, so it cannot read a page at all.</li>
+          <li>Web addresses. It reads a tab's address to tell Canvas from Edgenuity from neither, and the message it sends has no field to put one in.</li>
+          <li>Cookies, logins or session data. It never touches them.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Pair with LockIn</h2>
+        <p class="sub">
+          In LockIn, open <strong>Integrations → School Companion</strong> and
+          choose <em>Show pairing code</em>. Paste it here.
+        </p>
+        <label class="field">
+          <span>Pairing code</span>
+          <input type="password" id="secret" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="field short">
+          <span>LockIn port</span>
+          <input type="number" id="port" min="1" max="65535" value="5173" />
+        </label>
+        <div class="row">
+          <button class="btn primary" id="save">Save and connect</button>
+          <button class="btn" id="test">Test now</button>
+        </div>
+        <p class="status" id="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Turn it on</h2>
+        <label class="check">
+          <input type="checkbox" id="enabled" />
+          <span>Send study context to LockIn</span>
+        </label>
+        <p class="sub">
+          Off by default. Turning it off stops everything immediately; nothing
+          is kept once LockIn's service restarts, because the context is only
+          ever held in memory.
+        </p>
+      </section>
+    </main>
+    <script src="options.js" type="module"></script>
+  </body>
+</html>

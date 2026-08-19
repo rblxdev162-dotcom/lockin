@@ -32,21 +32,12 @@ import {
   refreshCanvasPermission,
   syncCanvasNow,
 } from './canvas.js';
-import { EDGENUITY_MSG } from '../edgenuity/messaging.js';
 import {
   onNotificationClicked,
   pruneFired,
   runReminderCheck,
   setSchedule,
 } from './reminders.js';
-import {
-  connectEdgenuity,
-  disconnectEdgenuity,
-  getEdgenuityView,
-  handleEdgenuityContentMessage,
-  refreshEdgenuityPermission,
-  syncEdgenuityNow,
-} from './edgenuity.js';
 
 const VERSION = chrome.runtime.getManifest().version;
 const EXPIRY_ALARM = 'lockin-expiry';
@@ -108,10 +99,8 @@ async function scheduleExpiry(state, now) {
 
 chrome.runtime.onInstalled.addListener(() => {
   void refresh();
-  // Re-assert the Canvas and Edgenuity content-script registrations and
-  // permission flags.
+  // Re-assert the Canvas content-script registration and permission flag.
   void refreshCanvasPermission();
-  void refreshEdgenuityPermission();
   // A slow heartbeat re-asserts rules if Chrome ever drops dynamic rules.
   chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
 });
@@ -121,19 +110,16 @@ chrome.runtime.onStartup.addListener(() => {
   // Focus Mode keeps blocking without the web app being opened first.
   void refresh();
   void refreshCanvasPermission();
-  void refreshEdgenuityPermission();
   chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
 });
 
-// If the student revokes Canvas or Edgenuity access from chrome://extensions, stop the
+// If the student revokes Canvas access from chrome://extensions, stop the
 // content script rather than leaving a dead registration behind.
 chrome.permissions.onRemoved.addListener(() => {
   void refreshCanvasPermission();
-  void refreshEdgenuityPermission();
 });
 chrome.permissions.onAdded.addListener(() => {
   void refreshCanvasPermission();
-  void refreshEdgenuityPermission();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -230,51 +216,12 @@ async function handlePageMessage(envelope, sender) {
       return { type: MSG.CANVAS_VIEW, payload: { ...(await getCanvasView()), open: result } };
     }
 
-    /* ---- Edgenuity Browser Connection ---- */
-
-    case MSG.EDGENUITY_GET_VIEW:
-      return { type: MSG.EDGENUITY_VIEW, payload: await getEdgenuityView() };
-
-    case MSG.EDGENUITY_CONNECT: {
-      const result = await connectEdgenuity();
-      return {
-        type: MSG.EDGENUITY_VIEW,
-        payload: { ...(await getEdgenuityView()), connectOk: result.ok },
-      };
-    }
-
-    /** Same reason as Canvas: a web page cannot raise Chrome's prompt. */
-    case MSG.EDGENUITY_REQUEST_PERMISSION: {
-      await connectEdgenuity();
-      await chrome.tabs.create({ url: chrome.runtime.getURL('edgenuity/connect.html') });
-      return {
-        type: MSG.EDGENUITY_VIEW,
-        payload: { ...(await getEdgenuityView()), promptOpened: true },
-      };
-    }
-
-    case MSG.EDGENUITY_SYNC: {
-      const result = await syncEdgenuityNow();
-      return { type: MSG.EDGENUITY_VIEW, payload: { ...(await getEdgenuityView()), sync: result } };
-    }
-
-    /**
-     * The reminder schedule. Stored and evaluated on the heartbeat alarm, so
-     * notifications keep arriving with every LockIn tab closed.
-     */
     case MSG.REMINDER_SCHEDULE: {
       const count = await setSchedule(envelope.payload?.items);
       await pruneFired();
       return { type: MSG.STATE_ACK, payload: { ok: true, scheduled: count } };
     }
 
-    case MSG.EDGENUITY_DISCONNECT: {
-      const result = await disconnectEdgenuity();
-      return {
-        type: MSG.EDGENUITY_VIEW,
-        payload: { ...(await getEdgenuityView()), disconnect: result },
-      };
-    }
 
     default:
       return { type: MSG.STATE_ACK, payload: { ok: false, reason: 'unknown-type' } };
@@ -354,54 +301,12 @@ async function handleInternalMessage(message) {
       return { ok: true, permissionGranted: config?.permissionGranted === true };
     }
 
-    /** Same, for the Edgenuity consent page. */
-    case INTERNAL.EDGENUITY_PERMISSION_RESULT: {
-      const config = await refreshEdgenuityPermission();
-      await notifyAppOfEdgenuity();
-      return { ok: true, permissionGranted: config?.permissionGranted === true };
-    }
 
     default:
       return { ok: false, reason: 'unknown-internal' };
   }
 }
 
-/**
- * Pushes a fresh Edgenuity view into every open LockIn tab, so progress read
- * while the student is on Edgenuity reaches the app without a refresh.
- */
-async function notifyAppOfEdgenuity() {
-  let view;
-  try {
-    view = await getEdgenuityView();
-  } catch {
-    return;
-  }
-  let tabs = [];
-  try {
-    const state = await getState();
-    const origin = new URL(state.appUrl || DEFAULT_APP_URL).origin;
-    tabs = await chrome.tabs.query({ url: `${origin}/*` });
-  } catch {
-    return;
-  }
-  await Promise.all(
-    tabs.map((tab) =>
-      tab.id === undefined
-        ? Promise.resolve()
-        : chrome.tabs
-            .sendMessage(tab.id, {
-              source: EXT_SOURCE,
-              version: PROTOCOL_VERSION,
-              type: MSG.EDGENUITY_PUSH,
-              payload: view,
-            })
-            .catch(() => {
-              /* that tab has no bridge yet */
-            }),
-    ),
-  );
-}
 
 /**
  * Pushes a fresh Canvas view into every open LockIn tab, so a submission
@@ -467,29 +372,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  /**
-   * Edgenuity readings from the Edgenuity content script.
-   * `handleEdgenuityContentMessage` re-verifies the sending tab's origin and
-   * the live host permission before trusting a single field.
-   */
-  if (
-    message &&
-    typeof message === 'object' &&
-    (message.type === EDGENUITY_MSG.DETECTION || message.type === EDGENUITY_MSG.UNREADABLE)
-  ) {
-    if (sender.id !== chrome.runtime.id) return false;
-    handleEdgenuityContentMessage(message, sender)
-      .then(async (result) => {
-        // Only wake the web app when a number actually moved.
-        if (result.ok && result.changed > 0) await notifyAppOfEdgenuity();
-        sendResponse(result);
-      })
-      .catch((error) => {
-        console.error('[LockIn] Edgenuity message failed', error);
-        sendResponse({ ok: false });
-      });
-    return true;
-  }
 
   // Internal pages (popup, block page) have no tab origin restriction, but they
   // must come from this extension.

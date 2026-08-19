@@ -6,9 +6,8 @@
  * the interesting failure is not "it didn't read a course", it is "something
  * that should never have been able to call it, did".
  *
- * Live Apple Events are deliberately not exercised. They need a real Chrome, a
- * real Edgenuity session and two macOS permission grants, so they are verified
- * by hand — see MANUAL_QA.md.
+ * Phase 16 removed the Edgenuity reading endpoints; what remains — and what is
+ * tested here — is the fence itself, which the School Companion bridge reuses.
  *
  * Run: npm run test:bridge
  */
@@ -49,25 +48,3 @@ test('a foreign origin is refused even with the header', { skip: !bridgeCallerAl
   );
 });
 
-/* ------------------------------------------------------------------ */
-/* What it will look at                                                */
-/* ------------------------------------------------------------------ */
-
-const bridge = await import('../../scripts/bridge.mjs');
-
-test('the injected script is a constant, not built from input', () => {
-  /**
-   * The single most important property of this file: `readProgress()` takes no
-   * arguments, so there is no parameter anywhere that could carry JavaScript
-   * from an HTTP request into the browser. If this ever gains a parameter,
-   * that is the moment to look very hard at where it comes from.
-   */
-  assert.equal(bridge.readProgress.length, 0);
-  assert.equal(bridge.diagnose.length, 0);
-});
-
-test('only the documented functions are exported', () => {
-  // A helper leaking out is how "runs one fixed script" quietly stops being
-  // true — an exported runner could be called with anything.
-  assert.deepEqual(Object.keys(bridge).sort(), ['diagnose', 'readProgress']);
-});

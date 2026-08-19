@@ -20,7 +20,6 @@ import { MSG, checkCompatibility } from '../lib/protocol';
 import { toBridgeState } from '../lib/selectors';
 import { canvasProvider, sanitizeView } from '../lib/canvas/pageProvider';
 import { applyCanvasView } from '../lib/canvas/reconcile';
-import { sanitizeEdgenuityView } from '../lib/edgenuity/browserProvider';
 import { buildReminderSchedule, scheduleKey } from '../lib/reminderSchedule';
 
 const CHANNEL_NAME = 'lockin-sync';
@@ -219,17 +218,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (env.type === MSG.CANVAS_PUSH) {
         const view = sanitizeView(env.payload);
         applyCanvasView(rawDispatch, view);
-      }
-      /**
-       * The extension read new progress off an Edgenuity page. Each course
-       * reading is dispatched separately; the reducer decides which
-       * assignments it belongs to and lets `recompute()` do the rest.
-       */
-      if (env.type === MSG.EDGENUITY_PUSH) {
-        const view = sanitizeEdgenuityView(env.payload);
-        for (const reading of view.courses) {
-          rawDispatch({ type: 'EDGENUITY_BROWSER_READING', reading });
-        }
       }
       if (env.type === MSG.ALLOWLIST_REQUEST) {
         const payload = env.payload as { domain?: string } | undefined;

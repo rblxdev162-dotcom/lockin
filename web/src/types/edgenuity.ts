@@ -29,14 +29,14 @@
  * Where a reading came from (Phase 11).
  *
  * `camera`  — Phase 4: a photo of the Edgenuity screen, read locally with OCR.
- * `browser` — the LockIn extension read the number off the Edgenuity page the
- *             student themselves opened, in their own logged-in session.
  *
- * Neither is "the real one". A camera works when Edgenuity runs on a school
- * computer LockIn cannot see; a browser read works when it runs in the same
- * Chrome. An assignment picks one.
+ * `browser` was Phase 11: the extension read the number off the Edgenuity page
+ * the student had open. It was removed in Phase 16 — reading Edgenuity's own
+ * markup is off the table however carefully it is done, and the legitimate
+ * channels (a progress report email, a course report the student downloaded)
+ * replace it. Existing configs are migrated back to `camera` by schema v9.
  */
-export const EDGENUITY_SOURCES = ['camera', 'browser'] as const;
+export const EDGENUITY_SOURCES = ['camera'] as const;
 export type EdgenuitySource = (typeof EDGENUITY_SOURCES)[number];
 
 export const EDGENUITY_TARGET_TYPES = [
@@ -145,15 +145,6 @@ export interface EdgenuityLink {
   lastVerifiedProgress: number | null;
   /** Activities credited so far (target type `activities`). */
   verifiedActivities: number;
-  /**
-   * `browser` only: the reading this assignment started from, and the highest
-   * reading credited since.
-   *
-   * The baseline exists because connecting mid-course must credit nothing —
-   * without it, a student 30 activities into Biology would have the target met
-   * the instant the extension read the page. Invariant 10 in its browser form.
-   */
-  browserBaseline?: { activitiesCompleted?: number; progressPercent?: number; at: string };
   /** Highest completed-activity count ever credited. New work is measured from here. */
   lastVerifiedActivityCount?: number;
   /**

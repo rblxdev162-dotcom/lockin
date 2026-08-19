@@ -10,11 +10,15 @@ import type { CanvasLink, CanvasState } from './canvas';
 import type { EdgenuityLink, EdgenuityState, RequirableTrust } from './edgenuity';
 import type { FocusRun, ParentControls } from './parent';
 import type { PlannerState } from './planner';
+import type { IntegrationsState } from './integrations';
+import type { SourceRecord } from './source';
 
 export * from './canvas';
 export * from './edgenuity';
 export * from './parent';
 export * from './planner';
+export * from './source';
+export * from './integrations';
 
 /* ------------------------------------------------------------------ */
 /* Assignments                                                         */
@@ -128,6 +132,16 @@ export interface Assignment {
   externalCourseId?: string;
   verificationStatus: VerificationStatus;
   verificationRecords: VerificationRecord[];
+
+  /**
+   * Where this assignment came from, and how fresh that is (Phase 16).
+   *
+   * Absent on assignments created before schema v9; `MANUAL` from then on for
+   * anything typed. Freshness is never stored here — `lib/sources/freshness.ts`
+   * derives it from `lastSyncedAt` and the current time, so a record cannot go
+   * on claiming to be live after its connection stopped answering.
+   */
+  source?: SourceRecord;
 
   /** Present only when this assignment is linked to a Canvas assignment. */
   canvas?: CanvasLink;
@@ -272,14 +286,6 @@ export interface Settings {
    */
   edgenuityProofMode: RequirableTrust;
   /**
-   * Let the local service read Edgenuity from any Chrome window (Phase 14).
-   *
-   * Off by default and never turned on implicitly: it is the one feature that
-   * reaches outside the browser LockIn is running in, so it is a decision the
-   * student makes rather than a default they inherit.
-   */
-  edgenuityBridgeEnabled: boolean;
-  /**
    * True once the Chrome extension has answered on this device (Phase 8).
    *
    * It is the difference between two very different sentences: "Browser
@@ -395,4 +401,6 @@ export interface AppState {
   focusRuns: FocusRun[];
   /** Smart Study Planner: settings, the current plan, history (schema v6). */
   planner: PlannerState;
+  /** Connections to school systems, and the courses they describe (schema v9). */
+  integrations: IntegrationsState;
 }

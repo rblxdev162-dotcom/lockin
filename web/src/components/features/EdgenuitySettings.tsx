@@ -11,8 +11,6 @@
  * and a requirement nobody can satisfy is worse than no requirement at all.
  *
  * Setting up the two ways progress is actually read now lives in its own
- * cards: `EdgenuityBrowserSettings` (the extension, same Chrome profile) and
- * `EdgenuityBridgeSettings` (the local service, any Chrome profile).
  */
 import { Card, CardHeader } from '../ui/Card';
 import { Button } from '../ui/Button';

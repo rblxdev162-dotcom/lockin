@@ -14,8 +14,6 @@ import { BrowserProtectionSetup } from '../components/features/BrowserProtection
 import { BlockingConsent } from '../components/features/BlockingConsent';
 import { CanvasSettings } from '../components/features/CanvasSettings';
 import { EdgenuitySettings } from '../components/features/EdgenuitySettings';
-import { EdgenuityBrowserSettings } from '../components/features/EdgenuityBrowserSettings';
-import { EdgenuityBridgeSettings } from '../components/features/EdgenuityBridgeSettings';
 import { CanvasImportModal } from '../components/features/CanvasImportModal';
 import { ParentPinDialog } from '../components/features/ParentPinDialog';
 import { toast } from '../components/ui/Toast';
@@ -329,8 +327,6 @@ export function SettingsPage() {
       <CanvasImportModal open={importOpen} onClose={() => setImportOpen(false)} />
 
       {/* ---------------- Edgenuity ---------------- */}
-      <EdgenuityBrowserSettings />
-      <EdgenuityBridgeSettings />
       <EdgenuitySettings />
 
       {/* ---------------- Blocked websites ---------------- */}

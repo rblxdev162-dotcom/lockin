@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import type { Assignment, EdgenuityConfig, EdgenuityTargetType } from '../../types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
-import { Field, TextInput, Toggle } from '../ui/Field';
+import { Field, TextInput } from '../ui/Field';
 import { Icon } from '../ui/Icon';
 import { useApp } from '../../store/context';
 import { toast } from '../ui/Toast';
@@ -62,16 +62,6 @@ export function EdgenuitySetup({
   const [activities, setActivities] = useState(String(existing?.requiredActivities ?? 2));
   const [minutes, setMinutes] = useState(String(existing?.requiredFocusMinutes ?? 25));
   const [courseName, setCourseName] = useState(existing?.courseName ?? assignment.subject ?? '');
-  /**
-   * Where the number comes from.
-   *
-   * Browser reading needs Edgenuity open in *this* Chrome profile, because a
-   * content script cannot see across profiles. A course signed in on another
-   * profile is reached by the local bridge instead (Settings → Read Edgenuity
-   * from any Chrome window), and failing both, the student shares the window
-   * and the same OCR reads it.
-   */
-  const [readFromBrowser, setReadFromBrowser] = useState(existing?.source === 'browser');
 
   useEffect(() => {
     if (!open) return;
@@ -80,12 +70,10 @@ export function EdgenuitySetup({
     setActivities(String(existing?.requiredActivities ?? 2));
     setMinutes(String(existing?.requiredFocusMinutes ?? 25));
     setCourseName(existing?.courseName ?? assignment.subject ?? '');
-    setReadFromBrowser(existing?.source === 'browser');
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = () => {
     const config: EdgenuityConfig = {
-      source: readFromBrowser ? 'browser' : undefined,
       // Keep the course this assignment already claimed; a source switch must
       // not silently re-point it at whatever page is open next.
       externalCourseId: existing?.externalCourseId,
@@ -179,18 +167,6 @@ export function EdgenuitySetup({
           })}
         </div>
 
-        <div className="rounded-2xl border p-3.5 lk-border">
-          <Toggle
-            checked={readFromBrowser}
-            onChange={setReadFromBrowser}
-            label="Read this from Edgenuity automatically"
-          />
-          <p className="mt-1.5 text-xs lk-muted">
-            {readFromBrowser
-              ? 'LockIn will read this course’s progress from the Edgenuity page you open in this browser — no photos. Turn on Edgenuity reading in Settings first. Your first visit records a starting point; only work after that counts.'
-              : 'Off: share your Edgenuity window when you verify, and LockIn reads that. Use this when the course is signed in on a different Chrome profile.'}
-          </p>
-        </div>
 
         {targetType === 'progress_percent' && (
           <Field label="Percentage points of new progress required">

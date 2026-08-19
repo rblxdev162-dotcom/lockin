@@ -45,9 +45,6 @@ import {
   sessionExpiryFrom,
 } from '../lib/edgenuity/verification';
 import type { EdgenuityCheckResult } from '../lib/edgenuity/verification';
-import type { EdgenuityLink } from '../types/edgenuity';
-import { checkBrowserProgress, isBrowserSource, readingMatches } from '../lib/edgenuity/browserVerification';
-import type { EdgenuityReading } from '../lib/edgenuity/browserVerification';
 import { createAssignmentFromCanvas } from './factories';
 import { MAX_ACTIVITY, MAX_COMPLETED_SESSIONS, trimActivity } from '../lib/retention';
 import { AWAY_GRACE_MS } from '../lib/focusGuard';
@@ -147,15 +144,6 @@ export type Action =
       type: 'EDGENUITY_SUBMIT_PROOF';
       sessionId: string;
       after: EdgenuityProof;
-    }
-  | {
-      /**
-       * A reading from the LockIn extension for one Edgenuity course.
-       * Dispatched once per changed reading; the reducer decides which
-       * assignments (if any) it belongs to.
-       */
-      type: 'EDGENUITY_BROWSER_READING';
-      reading: EdgenuityReading;
     }
   | { type: 'EDGENUITY_CANCEL_SESSION'; sessionId: string }
   /**
@@ -1724,122 +1712,6 @@ export function reducer(state: AppState, action: Action): AppState {
       return applyEdgenuityProgress(state, session, assignment, after, result);
     }
 
-    /**
-     * Progress read off the Edgenuity page by the extension.
-     *
-     * The same chain every other verification source uses — no second unblock
-     * path (invariant 1): this produces a completed assignment and lets
-     * `recompute()` end Focus Mode.
-     *
-     * A reading is applied to every assignment configured for `browser` source
-     * that claims this course. Assignments already Completed are skipped, so a
-     * page left open cannot keep crediting work.
-     */
-    case 'EDGENUITY_BROWSER_READING': {
-      const reading = action.reading;
-      const targets = state.assignments.filter(
-        (a) =>
-          a.edgenuity &&
-          isBrowserSource(a.edgenuity.config) &&
-          a.status !== 'Completed' &&
-          readingMatches(a.edgenuity.config, reading),
-      );
-      if (targets.length === 0) return state;
-
-      let next = state;
-      for (const assignment of targets) {
-        const link = next.assignments.find((a) => a.id === assignment.id)?.edgenuity;
-        if (!link) continue;
-
-        const result = checkBrowserProgress({ config: link.config, link, reading });
-        if (result.outcome === 'rejected') continue;
-
-        const now = reading.readAt;
-        const ledger: EdgenuityLink = {
-          ...link,
-          config: {
-            ...link.config,
-            // The first reading claims the course, so later readings for other
-            // courses can be refused by id rather than by name.
-            externalCourseId: link.config.externalCourseId ?? reading.externalCourseId,
-            courseName: link.config.courseName ?? reading.courseName,
-          },
-          verifiedProgressDelta: result.totalVerified,
-          verifiedActivities: result.totalActivities,
-          lastVerifiedActivityCount: result.lastVerifiedActivityCount,
-          lastVerifiedProgress: result.lastVerifiedProgress,
-          observedCourseName: reading.courseName ?? link.observedCourseName,
-          // Pace, not evidence: it only ever shapes what a reminder says.
-          targetProgressPercent: reading.targetPercent ?? link.targetProgressPercent,
-          browserBaseline: link.browserBaseline ?? {
-            activitiesCompleted: reading.activitiesCompleted,
-            progressPercent: reading.progressPercent,
-            at: now,
-          },
-          lastVerifiedAt: result.outcome === 'accepted' ? now : link.lastVerifiedAt,
-          lastVerifiedTrust: result.outcome === 'accepted' ? 'browser' : link.lastVerifiedTrust,
-        };
-
-        const met = result.requirementMet;
-        const patch: Partial<Assignment> = {
-          edgenuity: ledger,
-          verificationStatus: met ? 'verified' : assignment.verificationStatus,
-        };
-
-        if (met) {
-          Object.assign(patch, {
-            status: 'Completed' as const,
-            completionMethod: 'edgenuity' as const,
-            verificationMethod: 'edgenuity' as const,
-            completedAt: now,
-            verificationRecords: [
-              ...assignment.verificationRecords,
-              {
-                id: uid('ver'),
-                type: 'edgenuity_browser',
-                timestamp: now,
-                status: 'verified' as const,
-                progressBefore: link.lastVerifiedProgress ?? undefined,
-                progressAfter: reading.progressPercent,
-                // Two numbers and a course name. Never page text, never scores.
-                evidence: {
-                  verificationType: 'browser_read',
-                  trust: 'browser',
-                  activities: result.totalActivities,
-                  requiredActivities: link.config.requiredActivities,
-                  progressDelta: result.newProgress,
-                  totalVerified: result.totalVerified,
-                  courseName: (reading.courseName ?? link.config.courseName ?? '').slice(0, 120),
-                  externalCourseId: reading.externalCourseId.slice(0, 64),
-                },
-              },
-            ],
-          });
-        }
-
-        next = updateAssignment(next, assignment.id, patch);
-
-        if (result.outcome === 'baseline') {
-          next = log(
-            next,
-            'edgenuity_verification_started',
-            `Now tracking “${assignment.title}” from Edgenuity. Work from here counts.`,
-            { source: 'browser' },
-          );
-        } else if (result.outcome === 'accepted') {
-          next = log(
-            next,
-            met ? 'edgenuity_progress_verified' : 'edgenuity_verification_started',
-            met
-              ? `“${assignment.title}” verified from Edgenuity — ${result.message}`
-              : `Edgenuity progress on “${assignment.title}” — ${result.message}`,
-            { source: 'browser', activities: result.totalActivities },
-          );
-        }
-      }
-
-      return recompute(next);
-    }
 
     case 'EDGENUITY_CANCEL_SESSION': {
       const session = state.edgenuity.sessions.find((s) => s.id === action.sessionId);

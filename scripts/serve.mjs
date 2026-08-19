@@ -20,7 +20,6 @@
  * so serving anywhere else silently breaks blocking and Canvas.
  */
 import { createServer } from 'node:http';
-import { diagnose, readProgress } from './bridge.mjs';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,10 +51,11 @@ if (!existsSync(join(DIST, 'index.html'))) {
 }
 
 /**
- * The bridge endpoints.
+ * The local bridge fence.
  *
- * The only routes here that *do* something rather than return a file, so they
- * are fenced deliberately:
+ * Phase 16 removed the Edgenuity reading endpoints this originally guarded;
+ * the fence itself is kept, unchanged, because the School Companion bridge
+ * (see HANDOFF, Phase 16 Part 8) mounts behind exactly these rules:
  *
  *   - loopback only (the listener below binds 127.0.0.1);
  *   - the request must carry `x-lockin-bridge`, which is not a CORS-simple
@@ -64,11 +64,13 @@ if (!existsSync(join(DIST, 'index.html'))) {
  *     even though the port is guessable;
  *   - `Origin`, when present, must be this server's own;
  *   - no CORS headers ever come back, so nothing off-origin can read a reply
- *     even if it manages to send a request;
- *   - the request body is ignored entirely. Nothing a caller sends is ever
- *     executed — `bridge.mjs` runs one fixed script that lives in that file.
+ *     even if it manages to send a request.
+ *
+ * `BRIDGE_ROUTES` is empty until a route is deliberately added to it. An empty
+ * set is the correct default: a route that has to be named to exist cannot be
+ * created by accident.
  */
-const BRIDGE_ROUTES = new Set(['/api/edgenuity/status', '/api/edgenuity/read']);
+const BRIDGE_ROUTES = new Set();
 
 export function bridgeCallerAllowed(headers, port = PORT) {
   if (headers['x-lockin-bridge'] !== '1') return false;
@@ -85,26 +87,6 @@ function sendJson(res, status, body) {
     'cache-control': 'no-store',
   });
   res.end(JSON.stringify(body));
-}
-
-/** One bridge call at a time. Chrome is not a database; queue rather than pile up. */
-let bridgeBusy = false;
-
-async function handleBridge(pathname, res) {
-  if (bridgeBusy) {
-    sendJson(res, 429, { ok: false, problem: 'busy', detail: 'Already reading Chrome.' });
-    return;
-  }
-  bridgeBusy = true;
-  try {
-    const result = pathname === '/api/edgenuity/status' ? await diagnose() : await readProgress();
-    sendJson(res, 200, result);
-  } catch (error) {
-    console.error('[LockIn] bridge failed', error);
-    sendJson(res, 200, { ok: false, problem: 'unknown', detail: 'The bridge failed.' });
-  } finally {
-    bridgeBusy = false;
-  }
 }
 
 const server = createServer((req, res) => {
@@ -130,7 +112,7 @@ const server = createServer((req, res) => {
       res.writeHead(403, { 'cache-control': 'no-store' }).end('forbidden');
       return;
     }
-    void handleBridge(pathname, res);
+    res.writeHead(404, { 'cache-control': 'no-store' }).end('not found');
     return;
   }
 

@@ -74,16 +74,6 @@ export const MSG = {
   /** Pushed by the extension when a Canvas detection changes something. */
   CANVAS_PUSH: 'CANVAS_PUSH',
 
-  /* --- Edgenuity Browser Connection (Phase 11) --- */
-  EDGENUITY_CONNECT: 'EDGENUITY_CONNECT',
-  EDGENUITY_REQUEST_PERMISSION: 'EDGENUITY_REQUEST_PERMISSION',
-  EDGENUITY_GET_VIEW: 'EDGENUITY_GET_VIEW',
-  EDGENUITY_SYNC: 'EDGENUITY_SYNC',
-  EDGENUITY_DISCONNECT: 'EDGENUITY_DISCONNECT',
-  EDGENUITY_VIEW: 'EDGENUITY_VIEW',
-  /** Pushed by the extension when a new Edgenuity reading lands. */
-  EDGENUITY_PUSH: 'EDGENUITY_PUSH',
-
   /* --- Reminders (Phase 13) --- */
   /** Hands the extension the schedule it fires OS notifications from. */
   REMINDER_SCHEDULE: 'REMINDER_SCHEDULE',

@@ -321,20 +321,14 @@ test('no LockIn source file can make a network request', () => {
     /importScripts\s*\(/,
   ];
   /**
-   * One file is allowed to call `fetch`, and it is named here rather than
-   * pattern-matched, so adding a second one has to be a deliberate edit to
-   * this test.
-   *
-   * `nativeBridge.ts` talks to LockIn's own service on 127.0.0.1 — the process
-   * already serving this page. That is inter-process communication on one
-   * machine, not a network request: nothing leaves the device, and the privacy
-   * page's claim is unchanged. The check below proves it stays that way.
+   * Phase 16 note. The website still makes no network requests of its own —
+   * the Canvas calendar feed is fetched by the *extension*, which has host
+   * permissions and keeps the feed URL out of any page's reach. If a file here
+   * ever needs an exception, name it explicitly rather than loosening the
+   * pattern.
    */
-  const LOOPBACK_ONLY = 'lib/edgenuity/nativeBridge.ts';
-
-  const offenders = sources.filter(
-    ({ file, text }) =>
-      file !== LOOPBACK_ONLY && NETWORK.some((pattern) => pattern.test(stripComments(text))),
+  const offenders = sources.filter(({ text }) =>
+    NETWORK.some((pattern) => pattern.test(stripComments(text))),
   );
   assert.deepEqual(
     offenders.map((o) => o.file),
@@ -342,19 +336,6 @@ test('no LockIn source file can make a network request', () => {
     'a source file can reach the network; the privacy page says nothing is sent',
   );
 
-  // And the exception really is loopback-only: relative paths, no host.
-  const bridge = sources.find(({ file }) => file === LOOPBACK_ONLY);
-  assert.ok(bridge, `${LOOPBACK_ONLY} is missing — remove it from this test too`);
-  const urls = [...stripComments(bridge.text).matchAll(/fetch\s*\(\s*([^,)]+)/g)].map((m) =>
-    m[1].trim(),
-  );
-  assert.ok(urls.length > 0, 'the bridge no longer fetches; drop the exception');
-  for (const url of urls) {
-    assert.ok(
-      !/https?:|\/\//.test(url),
-      `the bridge builds an absolute URL (${url}) — it must only ever call same-origin paths`,
-    );
-  }
 });
 
 test('the OCR engine is loaded from our own origin, never a CDN', () => {

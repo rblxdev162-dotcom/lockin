@@ -32,7 +32,6 @@ export const SHIPPING_ENTRIES = [
   'blocked',
   'canvas',
   'content',
-  'edgenuity',
   'popup',
   'shared',
 ];

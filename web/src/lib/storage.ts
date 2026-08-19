@@ -40,7 +40,19 @@ import type {
   VerificationChallenge,
   VerificationTrust,
   RequirableTrust,
+  CanvasCalendarConfig,
+  CourseActivity,
+  CourseProgress,
+  IntegrationRecord,
+  IntegrationsState,
+  SourceRecord,
 } from '../types';
+import {
+  COURSE_PRODUCTS,
+  INTEGRATION_IDS,
+  INTEGRATION_STATUSES,
+} from '../types/integrations';
+import { CONFIDENCES, SOURCE_KINDS } from '../types/source';
 import { CANVAS_SUBMISSION_STATUSES, defaultCanvasState } from '../types/canvas';
 import { FOCUS_RUN_OUTCOMES, MAX_FOCUS_RUNS, defaultParentControls } from '../types/parent';
 import {
@@ -79,7 +91,7 @@ import {
  */
 export const STORAGE_KEY = 'lockin.state.v1';
 export const CORRUPT_KEY = 'lockin.state.corrupt';
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export function defaultSettings(): Settings {
   return {
@@ -95,7 +107,6 @@ export function defaultSettings(): Settings {
     // paper for every check, which is the right trade only when someone has
     // decided it is.
     edgenuityProofMode: 'standard',
-    edgenuityBridgeEnabled: false,
     extensionSeen: false,
     // On by default: it is observation, not obstruction, and it is the option
     // students actually keep. Onboarding still announces it.
@@ -133,6 +144,27 @@ export function defaultState(): AppState {
     parentControls: defaultParentControls(),
     focusRuns: [],
     planner: defaultPlannerState(),
+    integrations: defaultIntegrationsState(),
+  };
+}
+
+/**
+ * No connections, no courses. Every integration starts `not_configured`
+ * except the two that cannot be configured on this install at all.
+ */
+export function defaultIntegrationsState(): IntegrationsState {
+  return {
+    records: INTEGRATION_IDS.map((id) => ({
+      id,
+      // `unavailable` is not the same as "off": these need an authorization
+      // nobody has, so the UI must explain rather than offer a dead button.
+      status:
+        id === 'canvas_oauth' || id === 'edgenuity_api'
+          ? ('unavailable' as const)
+          : ('not_configured' as const),
+    })),
+    canvasCalendar: { configured: false, refreshMinutes: 180, horizonDays: 120 },
+    courses: [],
   };
 }
 
@@ -258,6 +290,54 @@ const MIGRATIONS: Record<number, Migration> = {
       awayMs: Number.isFinite(run?.awayMs) ? run.awayMs : 0,
     })),
   }),
+  // 8 -> 9 (Phase 16): provenance, integrations, and the end of the browser
+  // reading path.
+  //
+  // Three things happen here, and each is a decision rather than a rename:
+  //
+  //  1. **Every existing assignment gains a `source`.** Anything Canvas ever
+  //     linked is stamped CANVAS_CALENDAR with no `lastSyncedAt` — which
+  //     classifies as UNAVAILABLE until a feed is actually connected, rather
+  //     than as fresh data nobody has checked. Everything else is MANUAL,
+  //     because that is what it was.
+  //  2. **`integrations` is created empty.** No connection is ever inferred
+  //     from the presence of old data.
+  //  3. **Edgenuity configs pointing at the removed browser source are moved
+  //     back to the screen path**, and the ledger fields that only the browser
+  //     path wrote are dropped. Leaving `source: 'browser'` behind would strand
+  //     the assignment on a code path that no longer exists — the same class of
+  //     bug as the `enhanced` requirement Phase 15 had to defuse.
+  8: (s) => ({
+    ...s,
+    schemaVersion: 9,
+    assignments: asArray<Record<string, unknown>>(s.assignments).map((a) => {
+      const linkedToCanvas = !!a?.canvas;
+      const edgenuity = a?.edgenuity as Record<string, unknown> | undefined;
+      return {
+        ...a,
+        source: a?.source ?? {
+          kind: linkedToCanvas ? 'CANVAS_CALENDAR' : 'MANUAL',
+          sourceId: linkedToCanvas ? 'canvas-legacy' : 'manual',
+          confidence: 'low',
+          isLive: false,
+          rawDataRetained: false,
+        },
+        edgenuity: edgenuity
+          ? (() => {
+              const { browserBaseline: _b, lastVerifiedActivityCount: _c, ...rest } = edgenuity;
+              const config = (rest.config ?? {}) as Record<string, unknown>;
+              return { ...rest, config: { ...config, source: undefined } };
+            })()
+          : undefined,
+      };
+    }),
+    settings: (() => {
+      const { edgenuityBridgeEnabled: _drop, ...settings } = (s.settings ??
+        {}) as Record<string, unknown>;
+      return settings;
+    })(),
+    integrations: defaultIntegrationsState(),
+  }),
 };
 
 function migrate(raw: Record<string, unknown>): Record<string, unknown> {
@@ -319,6 +399,10 @@ function coerceAssignment(raw: unknown): Assignment | null {
     verificationRecords: trimVerificationRecords(asArray(a.verificationRecords)),
     canvas: coerceCanvasLink(a.canvas),
     edgenuity: coerceEdgenuityLink(a.edgenuity),
+    // Rebuilt like everything else: a `source` added to the type but not
+    // rebuilt here would be silently dropped on every reload, which is the
+    // exact bug `lastVerifiedTrust` shipped with in Phase 5.
+    source: coerceSource(a.source),
   };
 }
 
@@ -367,9 +451,9 @@ function coerceEdgenuityLink(raw: unknown): EdgenuityLink | undefined {
         ? Math.min(240, Math.max(1, Math.round(Number(config.requiredFocusMinutes))))
         : undefined,
       requiredVerificationTrust: coerceRequiredTrust(config.requiredVerificationTrust),
-      // Phase 11. Anything unrecognised is `camera`, so a corrupted value can
-      // never silently switch an assignment onto the browser path.
-      source: config.source === 'browser' ? 'browser' : undefined,
+      // Phase 16 removed the browser path; `camera` (a shared-screen frame)
+      // is the only source left, so this is always undefined.
+      source: undefined,
       externalCourseId:
         typeof config.externalCourseId === 'string'
           ? config.externalCourseId.slice(0, 64) || undefined
@@ -391,32 +475,10 @@ function coerceEdgenuityLink(raw: unknown): EdgenuityLink | undefined {
     // the badge to Standard on every reload. Anything unrecognised degrades
     // downward rather than inventing a stronger claim.
     lastVerifiedTrust: coerceTrust(e.lastVerifiedTrust),
-    /**
-     * Phase 11's anti-double-count ledger. Same lesson as `lastVerifiedTrust`
-     * above: a field added to the type but not rebuilt here is silently
-     * dropped on every reload — which would reset the baseline and re-credit
-     * work that was already counted.
-     */
-    browserBaseline: coerceBrowserBaseline(e.browserBaseline),
     lastVerifiedActivityCount: Number.isFinite(e.lastVerifiedActivityCount)
       ? Math.max(0, Math.round(Number(e.lastVerifiedActivityCount)))
       : undefined,
     targetProgressPercent: coercePercent(e.targetProgressPercent) ?? undefined,
-  };
-}
-
-/** The reading a browser-tracked assignment started from. */
-function coerceBrowserBaseline(value: unknown): EdgenuityLink['browserBaseline'] {
-  if (!value || typeof value !== 'object') return undefined;
-  const raw = value as Record<string, unknown>;
-  const at = typeof raw.at === 'string' ? raw.at : undefined;
-  if (!at) return undefined;
-  return {
-    at,
-    activitiesCompleted: Number.isFinite(raw.activitiesCompleted)
-      ? Math.max(0, Math.round(Number(raw.activitiesCompleted)))
-      : undefined,
-    progressPercent: coercePercent(raw.progressPercent) ?? undefined,
   };
 }
 
@@ -499,6 +561,172 @@ export function isSignificantRecovery(r: StorageRecovery): boolean {
   return assignments + exams + focusRuns + edgenuitySessions > 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Integrations and provenance (Phase 16)                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Rebuilds a provenance stamp field by field.
+ *
+ * An unrecognised `kind` becomes MANUAL rather than being dropped: losing the
+ * stamp entirely would make the record look like it had never had a source,
+ * and MANUAL is the value that claims the least.
+ *
+ * `isLive` is forced false on load, always. A save file cannot assert that a
+ * connection is answering — only a live handshake can, and one has not
+ * happened yet at load time.
+ */
+function coerceSource(value: unknown): SourceRecord | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const kind = SOURCE_KINDS.includes(raw.kind as never) ? (raw.kind as SourceRecord['kind']) : 'MANUAL';
+  return {
+    kind,
+    sourceId: typeof raw.sourceId === 'string' ? raw.sourceId.slice(0, 64) : 'manual',
+    externalId: typeof raw.externalId === 'string' ? raw.externalId.slice(0, 256) : undefined,
+    lastSyncedAt: typeof raw.lastSyncedAt === 'string' ? raw.lastSyncedAt : undefined,
+    lastVerifiedAt: typeof raw.lastVerifiedAt === 'string' ? raw.lastVerifiedAt : undefined,
+    confidence: CONFIDENCES.includes(raw.confidence as never)
+      ? (raw.confidence as SourceRecord['confidence'])
+      : 'low',
+    isLive: false,
+    syncError: typeof raw.syncError === 'string' ? raw.syncError.slice(0, 160) : undefined,
+    rawDataRetained: raw.rawDataRetained === true,
+  };
+}
+
+function coerceFieldValue<T>(
+  value: unknown,
+  coerceInner: (v: unknown) => T | undefined,
+): { value: T; source: SourceRecord } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const inner = coerceInner(raw.value);
+  const source = coerceSource(raw.source);
+  if (inner === undefined || !source) return undefined;
+  return { value: inner, source };
+}
+
+const boundedPercent = (v: unknown): number | undefined =>
+  Number.isFinite(v) ? Math.min(100, Math.max(0, Number(v))) : undefined;
+const isoDate = (v: unknown): string | undefined =>
+  typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
+
+function coerceCourseActivity(value: unknown): CourseActivity | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const name = typeof raw.name === 'string' ? raw.name.slice(0, 160).trim() : '';
+  if (!name) return null;
+  return {
+    id: typeof raw.id === 'string' ? raw.id.slice(0, 96) : name.toLowerCase().slice(0, 96),
+    name,
+    scheduledDate: isoDate(raw.scheduledDate),
+    // Deliberately tri-state: `undefined` means the report did not say, which
+    // is not the same as "not completed".
+    completed: raw.completed === true ? true : raw.completed === false ? false : undefined,
+  };
+}
+
+/** Caps: a pathological import must not be able to fill storage. */
+const MAX_COURSES = 40;
+const MAX_ACTIVITIES_PER_COURSE = 400;
+
+function coerceCourse(value: unknown): CourseProgress | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const name = typeof raw.name === 'string' ? raw.name.slice(0, 160).trim() : '';
+  const id = typeof raw.id === 'string' ? raw.id.slice(0, 64) : '';
+  if (!name || !id) return null;
+
+  return {
+    id,
+    provider: 'edgenuity',
+    product: COURSE_PRODUCTS.includes(raw.product as never)
+      ? (raw.product as CourseProgress['product'])
+      : 'UNKNOWN',
+    name,
+    externalCourseId:
+      typeof raw.externalCourseId === 'string' ? raw.externalCourseId.slice(0, 64) : undefined,
+    actualProgressPercent: coerceFieldValue(raw.actualProgressPercent, boundedPercent),
+    targetProgressPercent: coerceFieldValue(raw.targetProgressPercent, boundedPercent),
+    overallGrade: coerceFieldValue(raw.overallGrade, boundedPercent),
+    actualGrade: coerceFieldValue(raw.actualGrade, boundedPercent),
+    relativeGrade: coerceFieldValue(raw.relativeGrade, boundedPercent),
+    startDate: coerceFieldValue(raw.startDate, isoDate),
+    targetEndDate: coerceFieldValue(raw.targetEndDate, isoDate),
+    activities: asArray<unknown>(raw.activities)
+      .map(coerceCourseActivity)
+      .filter((a): a is CourseActivity => a !== null)
+      .slice(0, MAX_ACTIVITIES_PER_COURSE),
+    activitySource: coerceSource(raw.activitySource),
+    reportedAt: typeof raw.reportedAt === 'string' ? raw.reportedAt : undefined,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
+  };
+}
+
+function coerceIntegrationRecord(value: unknown, id: IntegrationRecord['id']): IntegrationRecord {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  return {
+    id,
+    status: INTEGRATION_STATUSES.includes(raw.status as never)
+      ? (raw.status as IntegrationRecord['status'])
+      : 'not_configured',
+    lastSyncedAt: typeof raw.lastSyncedAt === 'string' ? raw.lastSyncedAt : undefined,
+    lastAttemptAt: typeof raw.lastAttemptAt === 'string' ? raw.lastAttemptAt : undefined,
+    lastError: typeof raw.lastError === 'string' ? raw.lastError.slice(0, 160) : undefined,
+    lastItemCount: Number.isFinite(raw.lastItemCount)
+      ? Math.max(0, Math.round(Number(raw.lastItemCount)))
+      : undefined,
+    account: typeof raw.account === 'string' ? raw.account.slice(0, 120) : undefined,
+  };
+}
+
+function coerceCanvasCalendarConfig(value: unknown): CanvasCalendarConfig {
+  const raw = (value ?? {}) as Record<string, unknown>;
+  return {
+    configured: raw.configured === true,
+    // Host only, and only ever a hostname — never a path, which is where the
+    // secret in a feed URL lives.
+    host:
+      typeof raw.host === 'string' && /^[a-z0-9.-]{1,253}$/i.test(raw.host)
+        ? raw.host.toLowerCase()
+        : undefined,
+    connectedAt: typeof raw.connectedAt === 'string' ? raw.connectedAt : undefined,
+    refreshMinutes: Number.isFinite(raw.refreshMinutes)
+      ? Math.min(24 * 60, Math.max(30, Math.round(Number(raw.refreshMinutes))))
+      : 180,
+    horizonDays: Number.isFinite(raw.horizonDays)
+      ? Math.min(365, Math.max(7, Math.round(Number(raw.horizonDays))))
+      : 120,
+  };
+}
+
+function coerceIntegrations(value: unknown): IntegrationsState {
+  const base = defaultIntegrationsState();
+  if (!value || typeof value !== 'object') return base;
+  const raw = value as Record<string, unknown>;
+  const stored = asArray<Record<string, unknown>>(raw.records);
+
+  return {
+    // Driven by INTEGRATION_IDS rather than by what was stored, so a new
+    // integration appears for existing users and a deleted one disappears.
+    records: INTEGRATION_IDS.map((id) => {
+      const found = stored.find((r) => r?.id === id);
+      const record = coerceIntegrationRecord(found, id);
+      // These two have no authorization on any install; a save file must not
+      // be able to claim otherwise.
+      if (id === 'canvas_oauth' || id === 'edgenuity_api') record.status = 'unavailable';
+      return record;
+    }),
+    canvasCalendar: coerceCanvasCalendarConfig(raw.canvasCalendar),
+    courses: asArray<unknown>(raw.courses)
+      .map(coerceCourse)
+      .filter((c): c is CourseProgress => c !== null)
+      .slice(0, MAX_COURSES),
+  };
+}
+
 function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppState {
   const base = defaultState();
   const settings = { ...base.settings, ...(raw.settings as object | undefined) } as Settings;
@@ -511,9 +739,6 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
   // An unrecognised proof mode falls back to `standard`, never to something
   // stricter that would strand the student, nor to a value the UI can't render.
   settings.edgenuityProofMode = settings.edgenuityProofMode === 'enhanced' ? 'enhanced' : 'standard';
-  // Anything but a literal true is off — a corrupted save file must not switch
-  // on the one feature that reaches outside this browser.
-  settings.edgenuityBridgeEnabled = settings.edgenuityBridgeEnabled === true;
   settings.focusGuard = settings.focusGuard !== false;
   settings.blockingAsked = settings.blockingAsked === true;
 
@@ -584,6 +809,7 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
     parentControls: coerceParentControls(raw.parentControls),
     focusRuns,
     planner,
+    integrations: coerceIntegrations(raw.integrations),
   };
 }
 

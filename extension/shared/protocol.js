@@ -36,21 +36,6 @@ export const MSG = {
   /** ext → web: pushed when new detections land, so no refresh is needed */
   CANVAS_PUSH: 'CANVAS_PUSH',
 
-  /* --- Edgenuity Browser Connection (Phase 11) --- */
-  /** web → ext: turn Edgenuity reading on */
-  EDGENUITY_CONNECT: 'EDGENUITY_CONNECT',
-  /** web → ext: open the extension consent page so Chrome can prompt */
-  EDGENUITY_REQUEST_PERMISSION: 'EDGENUITY_REQUEST_PERMISSION',
-  /** web → ext: current config, permission and cached readings */
-  EDGENUITY_GET_VIEW: 'EDGENUITY_GET_VIEW',
-  /** web → ext: re-read every open Edgenuity tab now */
-  EDGENUITY_SYNC: 'EDGENUITY_SYNC',
-  /** web → ext: forget it all — permission, cache, config */
-  EDGENUITY_DISCONNECT: 'EDGENUITY_DISCONNECT',
-  /** ext → web: the reply carrying an Edgenuity view */
-  EDGENUITY_VIEW: 'EDGENUITY_VIEW',
-  /** ext → web: pushed when a new reading lands, so no refresh is needed */
-  EDGENUITY_PUSH: 'EDGENUITY_PUSH',
 
   /* --- Reminders (Phase 13) --- */
   /**
@@ -75,8 +60,6 @@ export const INTERNAL = {
   REQUEST_TEMP_ACCESS: 'INTERNAL_REQUEST_TEMP_ACCESS',
   /** connect.html → worker: the outcome of chrome.permissions.request */
   CANVAS_PERMISSION_RESULT: 'INTERNAL_CANVAS_PERMISSION_RESULT',
-  /** edgenuity/connect.html → worker: the outcome of chrome.permissions.request */
-  EDGENUITY_PERMISSION_RESULT: 'INTERNAL_EDGENUITY_PERMISSION_RESULT',
 };
 
 const KNOWN_TYPES = new Set(Object.values(MSG));

@@ -71,13 +71,7 @@
         "canvas/messaging.js",
         "canvas/status.js",
         "canvas/urls.js",
-        "canvas/types.js",
-        "edgenuity/main.js",
-        "edgenuity/detector.js",
-        "edgenuity/parser.js",
-        "edgenuity/messaging.js",
-        "edgenuity/urls.js",
-        "edgenuity/types.js"
+        "canvas/types.js"
       ],
       "matches": [
         "https://*/*"

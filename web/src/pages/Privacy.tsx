@@ -109,7 +109,7 @@ export function PrivacyPage() {
       <Card>
         <CardHeader title="Edgenuity" />
         <p className="text-sm leading-relaxed lk-muted">
-          Edgenuity verification processes live camera images locally on your device, using a
+          Edgenuity verification processes the shared window locally on your device, using a
           text-recognition engine bundled with the app. The image is discarded as soon as it has
           been read; it is never saved and never leaves the device. LockIn is not affiliated with
           Edgenuity or Imagine Learning.
@@ -122,7 +122,7 @@ export function PrivacyPage() {
           Parent View is local to this browser. LockIn does not send reports to parents remotely —
           there is no email, no notification and no cloud dashboard. It shows schoolwork and
           verification history, and deliberately shows nothing about browsing, messages, location
-          or the camera, because none of that is collected.
+          or your camera, because none of that is collected.
         </p>
       </Card>
 

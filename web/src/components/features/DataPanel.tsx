@@ -73,8 +73,8 @@ export function DataPanel() {
           <p className="text-sm font-bold lk-strong">Export my LockIn data</p>
           <p className="mt-1 text-sm leading-relaxed lk-muted">
             Downloads a readable JSON file with your assignments, exams, plan, focus history and
-            verification summaries. It deliberately leaves out your parent PIN, verification
-            challenge codes and anything camera-related — LockIn can’t import the file back.
+            verification summaries. It deliberately leaves out your parent PIN and any image ever
+            read on this device — LockIn can’t import the file back.
           </p>
           <Button
             className="mt-3"

@@ -119,7 +119,7 @@ export function ParentWorkReview({ state, now }: { state: AppState; now: Date })
         )}
         <p className="mt-3 text-xs lk-muted">
           A refused attempt means the evidence didn’t meet the requirement. Glare, handwriting and
-          camera shake all cause this, so it is not by itself a sign of anything.
+          a small window all cause this, so it is not by itself a sign of anything.
         </p>
       </Card>
 

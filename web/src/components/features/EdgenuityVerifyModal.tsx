@@ -1,5 +1,5 @@
 /**
- * The Edgenuity verification flow: guidance → live camera → local OCR → review.
+ * The Edgenuity verification flow: guidance → shared window → local OCR → review.
  *
  * Used twice per verification session — once for the starting proof and once
  * for the final one — because the two are the same act with different
@@ -276,8 +276,6 @@ function GuidanceStep({
         </p>
       </div>
 
-      {/* For Edgenuity running on this same computer, where the camera faces
-          the student and cannot photograph their own screen. */}
       <Button
         size="lg"
         block

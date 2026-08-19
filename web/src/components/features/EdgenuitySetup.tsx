@@ -13,7 +13,6 @@ import { Button } from '../ui/Button';
 import { Field, TextInput, Toggle } from '../ui/Field';
 import { Icon } from '../ui/Icon';
 import { useApp } from '../../store/context';
-import { ParentPinDialog } from './ParentPinDialog';
 import { toast } from '../ui/Toast';
 import { cx } from '../../lib/cx';
 
@@ -33,7 +32,7 @@ const OPTIONS: {
     type: 'activities',
     title: 'Complete activities',
     example: 'Example: 2 activities',
-    note: 'Experimental — it only counts when the activity name is read clearly in both photos.',
+    note: 'Experimental — it only counts when the activity name is read clearly both times.',
   },
   {
     type: 'session_progress',
@@ -52,14 +51,9 @@ export function EdgenuitySetup({
   assignment: Assignment;
   onClose: () => void;
 }) {
-  const { state, dispatch } = useApp();
+  const { dispatch } = useApp();
   const existing = assignment.edgenuity?.config;
-  /** The global floor. When it's on, the per-assignment switch can't turn it off. */
-  const globalEnhanced = state.settings.edgenuityProofMode === 'enhanced';
   /** A parent has locked verification strength; changing it needs the PIN. */
-  const managed = state.parentControls.lockVerificationSettings && !!state.parentPin;
-  const [pinOpen, setPinOpen] = useState(false);
-  const [approved, setApproved] = useState(false);
 
   const [targetType, setTargetType] = useState<EdgenuityTargetType>(
     existing?.targetType ?? 'progress_percent',
@@ -68,13 +62,14 @@ export function EdgenuitySetup({
   const [activities, setActivities] = useState(String(existing?.requiredActivities ?? 2));
   const [minutes, setMinutes] = useState(String(existing?.requiredFocusMinutes ?? 25));
   const [courseName, setCourseName] = useState(existing?.courseName ?? assignment.subject ?? '');
-  const [requireEnhanced, setRequireEnhanced] = useState(
-    existing?.requiredVerificationTrust === 'enhanced',
-  );
   /**
-   * Where the number comes from. Browser reading needs Edgenuity to be running
-   * in this Chrome; a school computer LockIn cannot see still needs the camera,
-   * which is why the photo path stays rather than being replaced.
+   * Where the number comes from.
+   *
+   * Browser reading needs Edgenuity open in *this* Chrome profile, because a
+   * content script cannot see across profiles. A course signed in on another
+   * profile is reached by the local bridge instead (Settings → Read Edgenuity
+   * from any Chrome window), and failing both, the student shares the window
+   * and the same OCR reads it.
    */
   const [readFromBrowser, setReadFromBrowser] = useState(existing?.source === 'browser');
 
@@ -85,23 +80,10 @@ export function EdgenuitySetup({
     setActivities(String(existing?.requiredActivities ?? 2));
     setMinutes(String(existing?.requiredFocusMinutes ?? 25));
     setCourseName(existing?.courseName ?? assignment.subject ?? '');
-    setRequireEnhanced(existing?.requiredVerificationTrust === 'enhanced');
     setReadFromBrowser(existing?.source === 'browser');
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = () => {
-    /**
-     * The requirement is the only locked field here. Everything else — the
-     * target type, the percentage, the course name — stays the student's, so a
-     * locked device still lets them plan their own work.
-     */
-    const existingTrust = existing?.requiredVerificationTrust ?? 'standard';
-    const wantsTrustChange = (requireEnhanced ? 'enhanced' : 'standard') !== existingTrust;
-    if (managed && wantsTrustChange && !approved) {
-      setPinOpen(true);
-      return;
-    }
-
     const config: EdgenuityConfig = {
       source: readFromBrowser ? 'browser' : undefined,
       // Keep the course this assignment already claimed; a source switch must
@@ -119,11 +101,12 @@ export function EdgenuitySetup({
         targetType === 'session_progress'
           ? Math.min(240, Math.max(1, Number(minutes) || 25))
           : undefined,
-      requiredVerificationTrust:
-        managed && !approved ? existingTrust : requireEnhanced ? 'enhanced' : 'standard',
+      // Always standard since Phase 15: Enhanced needed a handwritten code in
+      // the same frame, and there is no camera to photograph one with.
+      requiredVerificationTrust: 'standard',
     };
     dispatch({ type: 'EDGENUITY_CONFIGURE', assignmentId: assignment.id, config });
-    toast('Edgenuity verification set up. Take a starting photo when you begin.', 'success');
+    toast('Edgenuity verification set up. Show your progress when you begin.', 'success');
     onClose();
   };
 
@@ -156,7 +139,7 @@ export function EdgenuitySetup({
       }
     >
       <div className="space-y-4">
-        <Field label="Course name as Edgenuity shows it" hint="Used to check both photos show the same course.">
+        <Field label="Course name as Edgenuity shows it" hint="Used to check both readings show the same course.">
           <TextInput
             value={courseName}
             maxLength={120}
@@ -205,7 +188,7 @@ export function EdgenuitySetup({
           <p className="mt-1.5 text-xs lk-muted">
             {readFromBrowser
               ? 'LockIn will read this course’s progress from the Edgenuity page you open in this browser — no photos. Turn on Edgenuity reading in Settings first. Your first visit records a starting point; only work after that counts.'
-              : 'Off: verify with a live photo of the Edgenuity screen instead. Use this when Edgenuity runs on a school computer LockIn cannot see.'}
+              : 'Off: share your Edgenuity window when you verify, and LockIn reads that. Use this when the course is signed in on a different Chrome profile.'}
           </p>
         </div>
 
@@ -232,7 +215,7 @@ export function EdgenuitySetup({
           </Field>
         )}
         {targetType === 'session_progress' && (
-          <Field label="Focus minutes required" hint="Plus a before and after photo of the same course.">
+          <Field label="Focus minutes required" hint="Plus a before and after reading of the same course.">
             <TextInput
               type="number"
               min={1}
@@ -243,35 +226,8 @@ export function EdgenuitySetup({
           </Field>
         )}
 
-        <div className="rounded-2xl border lk-border p-3.5">
-          <Toggle
-            checked={requireEnhanced || globalEnhanced}
-            onChange={setRequireEnhanced}
-            label="Require Enhanced Proof"
-            description={
-              globalEnhanced
-                ? 'Enhanced Proof is on for every assignment in Settings, so this assignment already requires it.'
-                : managed
-                  ? 'Managed by Parent Controls — saving a change to this needs the parent PIN.'
-                  : 'Each capture must also show a one-time code issued moments before. Harder to fake with a prepared photo; slower for the student.'
-            }
-          />
-        </div>
       </div>
 
-      <ParentPinDialog
-        open={pinOpen}
-        title="Parent approval required"
-        description="A parent has locked verification requirements on this device."
-        confirmLabel="Approve change"
-        onCancel={() => setPinOpen(false)}
-        onVerified={() => {
-          setPinOpen(false);
-          setApproved(true);
-          // Re-run the save now that the change is approved.
-          window.setTimeout(save, 0);
-        }}
-      />
     </Modal>
   );
 }

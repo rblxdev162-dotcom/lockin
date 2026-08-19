@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LockIn Companion</title>
+    <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="head">
+        <span class="lk-mark" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="10" width="16" height="10" rx="2.5" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+        </span>
+        <div>
+          <h1>LockIn Companion</h1>
+          <p class="sub" id="version">…</p>
+        </div>
+      </header>
+
+      <!--
+        The order here is deliberate: what it does for you, then what it can
+        see, then how to switch parts off. A settings page that leads with
+        toggles and buries the privacy answer is asking to be distrusted.
+      -->
+      <section class="lk-card">
+        <h2>Where settings live</h2>
+        <p>
+          Blocked sites, allowed school sites, reminder timing and Focus Mode
+          rules are all part of your LockIn data, so they are edited in the app
+          rather than here. That keeps one copy of every setting instead of two
+          that can disagree.
+        </p>
+        <button class="lk-btn lk-btn-primary" id="open-app">Open LockIn settings</button>
+      </section>
+
+      <section class="lk-card">
+        <h2>What this extension can see</h2>
+        <ul class="facts">
+          <li><strong>The address of the tab you are looking at</strong> — the site name only, to tell school work from distractions. Never the page, never what you type, never a history.</li>
+          <li><strong>Which sites you asked to block</strong>, so it can block them in every Chrome window of this profile.</li>
+          <li><strong>Your assignment titles and due times</strong>, so a reminder can say what is due while LockIn is closed.</li>
+          <li><strong>Your Canvas calendar feed address</strong>, if you connected one. It is kept here and never handed back to the web page.</li>
+        </ul>
+        <h2 class="second">What it cannot see</h2>
+        <ul class="facts muted-list">
+          <li>Anything in another Chrome profile — including a school profile. Chrome keeps profiles apart and LockIn does not try to get around that.</li>
+          <li>Page contents, form fields, passwords, messages or documents.</li>
+          <li>Your browsing history. Block counts are per-site totals, nothing more.</li>
+        </ul>
+      </section>
+
+      <section class="lk-card">
+        <h2>Today</h2>
+        <dl class="stats" id="stats">
+          <div><dt>Productive</dt><dd id="stat-productive">—</dd></div>
+          <div><dt>Distracting</dt><dd id="stat-distracting">—</dd></div>
+          <div><dt>Blocked attempts</dt><dd id="stat-blocked">—</dd></div>
+        </dl>
+        <p class="sub">Counters reset each day and are stored on this device only.</p>
+      </section>
+
+      <section class="lk-card">
+        <h2>Permissions</h2>
+        <p id="perm-canvas" class="sub">…</p>
+        <button class="lk-btn" id="drop-canvas" hidden>Remove Canvas access</button>
+        <p class="sub second">
+          Broad site access is required by Chrome for the blocking rules to work
+          at all; it is not used to read anything. Removing it turns blocking
+          off — do it from
+          <code>chrome://extensions</code> if you want that.
+        </p>
+      </section>
+
+      <section class="lk-card">
+        <h2>Reset</h2>
+        <p class="sub">
+          Clears this extension's own storage — block counters, the reminder
+          schedule, activity counters, and the Canvas feed address. Your
+          assignments live in LockIn and are not touched.
+        </p>
+        <button class="lk-btn danger" id="reset">Clear companion data</button>
+        <p class="sub" id="reset-note" hidden>Cleared. Reload LockIn to reconnect.</p>
+      </section>
+    </main>
+
+    <script src="options.js" type="module"></script>
+  </body>
+</html>

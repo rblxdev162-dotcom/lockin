@@ -47,7 +47,15 @@ import {
   pruneFired,
   runReminderCheck,
   setSchedule,
+  snooze,
 } from './reminders.js';
+import {
+  getActivity,
+  registerActivityListeners,
+  resetRunCounters,
+  resyncActive,
+  studyPresence,
+} from './activity.js';
 
 const VERSION = chrome.runtime.getManifest().version;
 const EXPIRY_ALARM = 'lockin-expiry';
@@ -156,7 +164,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
     // Reminders ride the existing one-minute heartbeat rather than adding an
     // alarm of their own; the check is a storage read and some arithmetic.
-    void runReminderCheck();
+    // `studyPresence` is passed in so a student already working is not
+    // interrupted about the thing they are visibly doing.
+    void runReminderCheck(Date.now(), studyPresence);
   }
   if (alarm.name === EXPIRY_ALARM || alarm.name === HEARTBEAT_ALARM) {
     void refresh();
@@ -262,10 +272,22 @@ async function handlePageMessage(envelope, sender) {
  * Brings LockIn to the front, reusing an existing tab rather than piling up
  * new ones. Shared by the popup, the block page and a clicked reminder.
  */
-async function openApp() {
+/**
+ * Brings LockIn to the front, optionally at one assignment.
+ *
+ * `focus` opens the Focus screen with the assignment pre-selected rather than
+ * starting a session from here. Focus Mode belongs to the app — the extension
+ * enforces it, it does not decide it — and a second start path would be a
+ * second thing to keep in step with `recompute()`.
+ */
+async function openApp(assignmentId = null, { focus = false } = {}) {
   const state = await getState();
-  const url = state.appUrl || DEFAULT_APP_URL;
-  const tabs = await chrome.tabs.query({ url: `${new URL(url).origin}/*` });
+  const base = state.appUrl || DEFAULT_APP_URL;
+  const origin = new URL(base).origin;
+  const url = assignmentId
+    ? `${origin}${focus ? '/focus' : '/assignments'}?assignment=${encodeURIComponent(assignmentId)}`
+    : base;
+  const tabs = await chrome.tabs.query({ url: `${origin}/*` });
   if (tabs.length > 0 && tabs[0].id !== undefined) {
     await chrome.tabs.update(tabs[0].id, { active: true, url });
     if (tabs[0].windowId !== undefined) {
@@ -278,6 +300,16 @@ async function openApp() {
 
 // A reminder is only useful if it takes you to the work.
 onNotificationClicked(openApp);
+
+/**
+ * Tab and window listeners are registered at the top level, not inside a
+ * lifecycle callback: MV3 only guarantees a listener receives events if it was
+ * attached during the worker's synchronous startup.
+ */
+registerActivityListeners();
+
+// The worker has no idea what is on screen when it wakes up, so it asks.
+void resyncActive();
 
 async function handleInternalMessage(message) {
   switch (message.type) {
@@ -300,8 +332,17 @@ async function handleInternalMessage(message) {
     }
 
     case INTERNAL.OPEN_APP: {
-      await openApp();
+      // The popup may name an assignment. It is only ever used to build a URL,
+      // so a bad value produces a wrong page, never a wrong action.
+      const assignmentId =
+        typeof message.assignmentId === 'string' ? message.assignmentId.slice(0, 64) : null;
+      await openApp(assignmentId, { focus: message.focus === true });
       return { ok: true };
+    }
+
+    /** The popup's summary of today. Counters and a category, never a history. */
+    case INTERNAL.GET_ACTIVITY: {
+      return { ok: true, activity: await getActivity(), presence: await studyPresence() };
     }
 
     /**

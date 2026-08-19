@@ -91,6 +91,16 @@ export const MSG = {
   /** ext → web: the reply carrying feed text */
   CALENDAR_TEXT: 'CALENDAR_TEXT',
 
+  /* --- Activity awareness (Phase 16) --- */
+  /** web → ext: today's category counters. Never a site, never a history. */
+  ACTIVITY_GET: 'ACTIVITY_GET',
+  /** ext → web: the reply carrying those counters */
+  ACTIVITY_VIEW: 'ACTIVITY_VIEW',
+  /** web → ext: a Focus Mode run began; reset the per-run counters */
+  FOCUS_RUN_STARTED: 'FOCUS_RUN_STARTED',
+  /** web → ext: silence one assignment's reminders for a while */
+  REMINDER_SNOOZE: 'REMINDER_SNOOZE',
+
   /* --- Reminders (Phase 13) --- */
   /** Hands the extension the schedule it fires OS notifications from. */
   REMINDER_SCHEDULE: 'REMINDER_SCHEDULE',

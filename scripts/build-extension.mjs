@@ -33,6 +33,7 @@ export const SHIPPING_ENTRIES = [
   'canvas',
   'content',
   'popup',
+  'options',
   'shared',
 ];
 

@@ -35,6 +35,36 @@
 
 const SCHEDULE_KEY = 'lockin_reminder_schedule';
 const FIRED_KEY = 'lockin_reminders_fired';
+/** id -> epoch ms until which this assignment is silent. */
+const SNOOZE_KEY = 'lockin_reminders_snoozed';
+/** Cross-subsystem delivery record, so nothing can buzz twice in a row. */
+const LAST_SENT_KEY = 'lockin_last_notification';
+/** Praise is rationed separately from nags; the two must not crowd each other. */
+const PRAISE_KEY = 'lockin_last_praise';
+
+/**
+ * No two notifications from LockIn within this window, whatever fired them.
+ *
+ * This is the rule that stops the failure the brief names explicitly: five
+ * reminders about one assignment because five subsystems each noticed it. The
+ * schedule, the pace nudge and the praise path all pass through `deliver()`,
+ * and `deliver()` is the only thing that calls `chrome.notifications.create`.
+ */
+export const GLOBAL_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** One snooze is 20 minutes. Long enough to matter, short enough to return. */
+export const SNOOZE_MS = 20 * 60 * 1000;
+
+/** At most one piece of positive feedback a day. */
+export const PRAISE_COOLDOWN_MS = 20 * 60 * 60 * 1000;
+
+/**
+ * How long a student has to be working before reminders hold their tongue.
+ *
+ * "You're already working on it, I'll stop reminding you" is only true if they
+ * really are — two seconds on a school tab is a click, not a study session.
+ */
+export const PRESENCE_QUIET_MS = 3 * 60 * 1000;
 
 /** Caps. A schedule is untrusted input like any other message payload. */
 const LIMITS = {
@@ -170,11 +200,16 @@ function wording(item, stage) {
  *
  * @returns {{ key: string, title: string, body: string }[]}
  */
-export function dueNotifications(items, fired, now) {
+export function dueNotifications(items, fired, now, options = {}) {
   const already = new Set(fired);
+  const snoozed = options.snoozed ?? {};
   const out = [];
 
   for (const item of items) {
+    // A snoozed assignment is silent until its own deadline passes, and then
+    // only for the stage it was snoozed at. Snooze is a promise to come back,
+    // not a way to lose an assignment.
+    if (typeof snoozed[item.id] === 'number' && snoozed[item.id] > now) continue;
     const due = Date.parse(item.dueAt);
     if (Number.isNaN(due)) continue;
     const minutesLeft = (due - now) / 60_000;
@@ -198,6 +233,8 @@ export function dueNotifications(items, fired, now) {
     const { title, body } = wording(item, stage);
     out.push({
       key,
+      stage,
+      assignmentId: item.id,
       title,
       body,
       // Earlier stages are consumed silently so they cannot fire later.
@@ -212,20 +249,94 @@ export function dueNotifications(items, fired, now) {
 /* Delivery                                                            */
 /* ------------------------------------------------------------------ */
 
-async function notify(entry) {
+async function readKey(key, fallback) {
+  try {
+    const stored = await chrome.storage.local.get(key);
+    return stored[key] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function getSnoozes() {
+  const raw = await readKey(SNOOZE_KEY, {});
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+/**
+ * Silences one assignment for `SNOOZE_MS`.
+ *
+ * Stored per assignment rather than globally: snoozing biology should not also
+ * silence the maths homework due in an hour, which is the behaviour that makes
+ * people stop trusting a snooze button.
+ */
+export async function snooze(id, now = Date.now()) {
+  if (typeof id !== 'string' || !id) return null;
+  const snoozes = await getSnoozes();
+  const live = Object.fromEntries(
+    Object.entries(snoozes).filter(([, until]) => typeof until === 'number' && until > now),
+  );
+  live[id.slice(0, 64)] = now + SNOOZE_MS;
+  await chrome.storage.local.set({ [SNOOZE_KEY]: live });
+  // The stage mark is cleared so the same stage can speak again after the
+  // snooze — otherwise "remind me in 20 minutes" would mean "never".
+  const fired = await getFired();
+  await chrome.storage.local.set({
+    [FIRED_KEY]: fired.filter((key) => key.split('|')[0] !== id),
+  });
+  return live[id];
+}
+
+/**
+ * The single gate every LockIn notification passes through.
+ *
+ * Nothing else in the extension may call `chrome.notifications.create`. That is
+ * the whole mechanism behind "a student never gets five reminders because five
+ * subsystems noticed the same thing": there is one door, and it is timed.
+ */
+export async function deliver(entry, now = Date.now(), { bypassCooldown = false } = {}) {
+  const lastSent = Number(await readKey(LAST_SENT_KEY, 0)) || 0;
+  if (!bypassCooldown && now - lastSent < GLOBAL_COOLDOWN_MS) {
+    return { sent: false, reason: 'cooldown' };
+  }
+
+  const buttons = [];
+  if (entry.assignmentId) {
+    buttons.push({ title: 'Start Focus' }, { title: 'Snooze 20m' });
+  }
+
   try {
     await chrome.notifications.create(`lockin-${entry.key}`, {
       type: 'basic',
       iconUrl: chrome.runtime.getURL('assets/icon-128.png'),
       title: entry.title,
       message: entry.body,
-      priority: 1,
+      priority: entry.priority ?? 1,
+      ...(buttons.length > 0 ? { buttons } : {}),
     });
-    return true;
   } catch (error) {
     // Notifications can be refused at the OS level. That is not fatal, and it
     // must not stop the rest of the schedule from being evaluated.
     console.warn('[LockIn] notification refused', error);
+  }
+
+  await chrome.storage.local.set({ [LAST_SENT_KEY]: now });
+  return { sent: true };
+}
+
+/**
+ * Whether the student is visibly working, and so should be left alone.
+ *
+ * Takes the presence reader as an argument rather than importing it, so this
+ * file stays testable without a browser and so the dependency runs one way:
+ * reminders know about presence, presence knows nothing about reminders.
+ */
+export async function shouldStayQuiet(presenceReader, now = Date.now()) {
+  if (typeof presenceReader !== 'function') return false;
+  try {
+    const presence = await presenceReader(now);
+    return presence.working === true && presence.forMs >= PRESENCE_QUIET_MS;
+  } catch {
     return false;
   }
 }
@@ -233,33 +344,102 @@ async function notify(entry) {
 /**
  * Called from the heartbeat alarm. Cheap when nothing is due, which is almost
  * always: one storage read and some arithmetic.
+ *
+ * `presenceReader` is optional. When it is supplied and says the student is
+ * already working, the *early* stages hold their tongue — but the last stage
+ * before a deadline always speaks. Being deep in one assignment is exactly how
+ * people miss a different one.
  */
-export async function runReminderCheck(now = Date.now()) {
+export async function runReminderCheck(now = Date.now(), presenceReader = null) {
   const items = await getSchedule();
   if (items.length === 0) return { fired: 0 };
 
   const fired = await getFired();
-  const owed = dueNotifications(items, fired, now);
+  const snoozed = await getSnoozes();
+  const owed = dueNotifications(items, fired, now, { snoozed });
   if (owed.length === 0) return { fired: 0 };
 
+  const quiet = await shouldStayQuiet(presenceReader, now);
+
+  let sent = 0;
   const keys = [];
   for (const entry of owed) {
-    // Mark regardless of whether the OS showed it. A notification the system
-    // swallowed is not worth re-attempting every minute forever.
+    if (quiet && entry.stage !== 'warning') continue;
+    const result = await deliver(entry, now);
+    if (!result.sent) continue;
+    sent += 1;
+    // Marked only once it actually went out. A notification held back by the
+    // cooldown has not been delivered, and marking it would lose it entirely.
     keys.push(entry.key, ...entry.alsoMark);
-    await notify(entry);
+    // One buzz per check. The next heartbeat is a minute away and the cooldown
+    // governs the pace from there.
+    break;
   }
-  await markFired(keys);
-  return { fired: owed.length };
+  if (keys.length > 0) await markFired(keys);
+  return { fired: sent };
 }
 
-/** Notification clicked → open LockIn. Registered once, from the worker. */
+/**
+ * Positive feedback, rationed hard.
+ *
+ * Praise that arrives for everything means nothing, so this is capped at once
+ * a day *and* passes the same global cooldown as every nag. The caller decides
+ * whether something is worth saying; this decides whether it may be said now.
+ */
+export async function praise(text, now = Date.now()) {
+  const last = Number(await readKey(PRAISE_KEY, 0)) || 0;
+  if (now - last < PRAISE_COOLDOWN_MS) return { sent: false, reason: 'cooldown' };
+
+  const result = await deliver(
+    { key: `praise-${now}`, title: 'LockIn', body: text, priority: 0 },
+    now,
+  );
+  if (result.sent) await chrome.storage.local.set({ [PRAISE_KEY]: now });
+  return result;
+}
+
+/**
+ * Clicks and button presses.
+ *
+ * A notification with no way to act on it is a nag; the two buttons are what
+ * make it useful. `Start Focus` opens LockIn at the assignment rather than
+ * starting a session behind the student's back — the extension does not own
+ * Focus Mode, the app does, and inventing a second way to start one would
+ * break the "one timer, one blocker" invariant.
+ *
+ * The notification id carries the assignment id, so the handlers need no state
+ * of their own and survive the worker being killed between showing a
+ * notification and the student pressing a button on it.
+ */
 export function onNotificationClicked(openApp) {
+  const idFrom = (notificationId) => {
+    // `lockin-<assignmentId>|<stage>`
+    const rest = notificationId.slice('lockin-'.length);
+    const [assignmentId] = rest.split('|');
+    return assignmentId || null;
+  };
+
   chrome.notifications.onClicked.addListener((id) => {
     if (!id.startsWith('lockin-')) return;
     chrome.notifications.clear(id).catch(() => {});
-    void openApp();
+    void openApp(idFrom(id));
   });
+
+  chrome.notifications.onButtonClicked.addListener((id, buttonIndex) => {
+    if (!id.startsWith('lockin-')) return;
+    const assignmentId = idFrom(id);
+    chrome.notifications.clear(id).catch(() => {});
+
+    if (buttonIndex === 0) {
+      void openApp(assignmentId, { focus: true });
+    } else {
+      void snooze(assignmentId);
+    }
+  });
+
+  // A dismissed notification is an answer too: it is not snoozed, but it is
+  // not re-shown either — `firedKeys` already recorded it.
+  chrome.notifications.onClosed.addListener(() => {});
 }
 
-export const REMINDER_STORAGE_KEYS = { SCHEDULE_KEY, FIRED_KEY };
+export const REMINDER_STORAGE_KEYS = { SCHEDULE_KEY, FIRED_KEY, SNOOZE_KEY, LAST_SENT_KEY, PRAISE_KEY };

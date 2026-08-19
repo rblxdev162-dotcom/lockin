@@ -9,7 +9,7 @@
   <body>
     <div class="pop">
       <header class="head">
-        <span class="lk-mark">
+        <span class="lk-mark" aria-hidden="true">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <rect x="4" y="10" width="16" height="10" rx="2.5" />
             <path d="M8 10V7a4 4 0 0 1 8 0v3" />
@@ -19,31 +19,34 @@
         <span class="pill" id="pill">…</span>
       </header>
 
-      <p class="label">Focus Mode</p>
-      <p class="state" id="state">…</p>
+      <!-- One region, three faces: focusing, idle-with-work, idle-and-clear. -->
+      <main id="main" aria-live="polite">
+        <section id="focus-view" hidden>
+          <p class="eyebrow">Focus</p>
+          <p class="headline" id="focus-task">…</p>
+          <p class="timer" id="focus-timer">—</p>
+          <div class="lk-bar" id="bar-wrap" hidden><span id="bar" style="width: 0%"></span></div>
+          <p class="sub" id="focus-sub"></p>
+        </section>
 
-      <div id="active-block" hidden>
-        <div class="rows">
-          <div class="row">
-            <span class="lk-muted">Tasks remaining</span>
-            <strong id="tasks-remaining">0</strong>
+        <section id="idle-view" hidden>
+          <p class="headline" id="idle-headline">You’re on track.</p>
+          <div class="next" id="next-row" hidden>
+            <p class="eyebrow">Next</p>
+            <p class="next-title" id="next-title"></p>
+            <p class="sub" id="next-due"></p>
           </div>
-          <div class="row">
-            <span class="lk-muted">Blocked sites</span>
-            <strong id="blocked-count">0</strong>
-          </div>
-        </div>
-        <div class="lk-bar" id="bar-wrap" hidden><span id="bar" style="width: 0%"></span></div>
-        <div class="task lk-card" id="task-row" hidden>
-          <p class="label">Current task</p>
-          <p class="task-title" id="task-title"></p>
-        </div>
-      </div>
+          <p class="sub" id="idle-sub"></p>
+        </section>
+      </main>
 
-      <p class="idle" id="idle-note" hidden>No websites are currently blocked.</p>
+      <button class="lk-btn lk-btn-primary full" id="primary">Open LockIn</button>
+      <button class="linkish full" id="open-lockin" hidden>Open LockIn</button>
 
-      <button class="lk-btn lk-btn-primary full" id="open-lockin">OPEN LOCKIN</button>
-      <p class="foot" id="foot"></p>
+      <footer class="foot-row">
+        <span class="conn" id="conn"></span>
+        <button class="linkish" id="open-options">Settings</button>
+      </footer>
     </div>
 
     <script src="popup.js" type="module"></script>

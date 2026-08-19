@@ -169,6 +169,57 @@ Do these with the mouse **unplugged**, or your hands off it.
       block page, and the extension popup.
 - [ ] Nothing is unreadable in either theme.
 
+### 17 · Phase 16: the Canvas calendar feed
+
+Needs a real Canvas account and the Companion installed.
+
+- [ ] Integrations → Canvas → **Connect Canvas Calendar**. Paste the feed
+      address from Canvas → Calendar → Calendar Feed.
+- [ ] The review screen lists real assignments before anything is added.
+- [ ] Apply. The assignments appear with the right due dates *in your own time
+      zone* — check one that is due at 11:59pm.
+- [ ] **Sync again immediately.** It says everything is up to date and creates
+      no duplicates.
+- [ ] Move an assignment's due date in Canvas, wait for the feed, sync again.
+      The existing assignment moves; a second copy is not created; any logged
+      time survives.
+- [ ] Search `localStorage` in DevTools for a fragment of the feed URL. It must
+      not be there. Export your data and search that too.
+- [ ] Disconnect. The assignments stay.
+
+### 18 · Phase 16: Edgenuity import
+
+- [ ] Save a real Edgenuity progress email as `.html` and import it.
+      Every course and every percentage matches the email.
+- [ ] If it reads nothing, that is the expected failure for a first real
+      report — note which labels the email actually uses, so the matchers in
+      `lib/edgenuity/progressEmail.ts` can be adjusted.
+- [ ] Import a downloaded course report. Activities and dates match.
+- [ ] Progress page: each course shows current versus target, and
+      "Where this came from" names the right source per field.
+- [ ] Import the same file twice. Nothing duplicates.
+
+### 19 · Phase 16: reminders and the popup
+
+- [ ] Close every LockIn tab. A reminder still arrives.
+- [ ] It has **Start Focus** and **Snooze 20m** buttons.
+- [ ] Start Focus opens LockIn at that assignment.
+- [ ] Snooze silences that assignment only, and it returns ~20 minutes later.
+- [ ] Two assignments due at once produce **one** notification, not two.
+- [ ] Open the extension popup while a session runs: the task and countdown.
+      Idle: the next assignment and a Start Focus button.
+- [ ] Extension options page opens and reports today's counters.
+
+### 20 · Phase 16: the School Companion (only where allowed)
+
+- [ ] Confirm first that installing an extension on the school profile is
+      permitted. If it is not, stop — that is the answer.
+- [ ] Integrations → School Companion → Show pairing code.
+- [ ] In the school profile, load `school-companion/` unpacked, tick the
+      authorization box, paste the code, enable it, press **Test now**.
+- [ ] LockIn shows it reporting while an Edgenuity tab is in front.
+- [ ] Revoke pairing in LockIn. The companion's next test says unauthorized.
+
 ---
 
 ## Reporting

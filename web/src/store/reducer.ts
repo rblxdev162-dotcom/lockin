@@ -27,7 +27,7 @@ import { buildPlan, statusContext, unfinishedBefore } from '../lib/planner';
 import { orderItems } from '../lib/planner/engine';
 import { canvasKey, defaultCanvasState } from '../types/canvas';
 import type { FeedDiff } from '../lib/canvas/calendarReconcile';
-import type { IntegrationId, IntegrationStatus } from '../types/integrations';
+import type { CourseProgress, IntegrationId, IntegrationStatus } from '../types/integrations';
 import {
   MAX_EDGENUITY_SESSIONS,
   meetsTrust,
@@ -135,6 +135,16 @@ export type Action =
    * not know.
    */
   | { type: 'FEED_APPLY'; diff: FeedDiff; sourceId: string; syncedAt: string; live: boolean }
+  /**
+   * Fold parsed Edgenuity course data in, with per-field provenance.
+   *
+   * The merge itself is done by `lib/edgenuity/merge.ts`, which is pure and
+   * decides field by field whether an incoming value should win. This case
+   * stores the result and logs it.
+   */
+  | { type: 'COURSES_MERGE'; courses: CourseProgress[]; summary: string }
+  /** Forget one imported course entirely. */
+  | { type: 'COURSE_REMOVE'; courseId: string }
   /** Record the outcome of a sync attempt against one integration. */
   | {
       type: 'INTEGRATION_STATUS';
@@ -1512,6 +1522,27 @@ export function reducer(state: AppState, action: Action): AppState {
 
       if (!touched) return next === state ? state : next;
       return settle(next, 'assignment_added');
+    }
+
+    /* ---- Edgenuity course progress (Phase 16) ---- */
+
+    case 'COURSES_MERGE': {
+      if (action.courses.length === 0) return state;
+      return log(
+        {
+          ...state,
+          integrations: { ...state.integrations, courses: action.courses },
+        },
+        'course_progress_updated',
+        action.summary,
+        { courses: action.courses.length },
+      );
+    }
+
+    case 'COURSE_REMOVE': {
+      const courses = state.integrations.courses.filter((c) => c.id !== action.courseId);
+      if (courses.length === state.integrations.courses.length) return state;
+      return { ...state, integrations: { ...state.integrations, courses } };
     }
 
     /**

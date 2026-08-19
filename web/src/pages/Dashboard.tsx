@@ -18,6 +18,7 @@ import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../store/context';
 import { usePace } from '../hooks/usePace';
+import { useFeedback } from '../hooks/useFeedback';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Icon } from '../components/ui/Icon';
@@ -37,6 +38,7 @@ export function Dashboard() {
   const { state, now, extension } = useApp();
   const navigate = useNavigate();
   const { report } = usePace();
+  const { feedback, dismiss } = useFeedback();
 
   const soon = useMemo(() => dueSoon(state, 2, new Date(now)), [state.assignments, now]);
   const fm = state.focusMode;
@@ -76,6 +78,26 @@ export function Dashboard() {
           Add work
         </Button>
       </header>
+
+      {/*
+        Positive feedback, when there is something true to say.
+        It sits above the primary card rather than inside it: praise attached
+        to the next action reads as a reward for work not yet done.
+      */}
+      {feedback && (
+        <div className="animate-fade flex items-start gap-2.5 rounded-2xl lk-status-ahead lk-status-chip px-4 py-3">
+          <Icon name="check" size={16} className="mt-0.5 shrink-0" />
+          <p className="min-w-0 flex-1 text-body font-semibold">{feedback.text}</p>
+          <button
+            type="button"
+            onClick={dismiss}
+            aria-label="Dismiss"
+            className="shrink-0 rounded-lg p-0.5 opacity-70 transition-opacity hover:opacity-100"
+          >
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+      )}
 
       {/* ---- The one primary thing ---- */}
       {fm.active ? (

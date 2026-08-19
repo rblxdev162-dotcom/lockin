@@ -51,7 +51,7 @@ export function Onboarding() {
    * used the app once. They live in Settings now. Onboarding asks only what
    * changes what LockIn *does* on day one.
    */
-  const steps = ['Name', 'Your work', 'Your time', 'How LockIn helps'];
+  const steps = ['Name', 'Your work', 'Your time', 'How LockIn helps', 'Companion'];
   /**
    * Writes the availability a preset implies, and marks the planner as
    * configured so `/planner` opens with a real schedule instead of the
@@ -335,6 +335,65 @@ export function Onboarding() {
               School sites always stay open — Canvas, Edgenuity, Imagine Learning, Google Docs,
               Drive, Classroom, Clever and Google Search can never be blocked. Setting this up for
               someone else? A parent PIN lives in Settings.
+            </p>
+
+            <div className="mt-7 flex gap-2">
+              <Button variant="secondary" onClick={back}>
+                Back
+              </Button>
+              <Button block size="lg" onClick={next}>
+                Continue
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- Step 5: the Companion ----------
+            Phase 16. This is the one thing about LockIn a student cannot work
+            out by using it: the difference between the website on its own and
+            the website with its browser half. Canvas setup is still absent on
+            purpose — Phase 10's finding was that setup should be triggered by
+            behaviour, not by a step counter — but the *existence* of the
+            Companion has to be said once, because reminders and blocking both
+            depend on it and neither failure is visible until it matters. */}
+        {step === 4 && (
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
+              One last thing
+            </h1>
+            <p className="mt-1.5 text-sm lk-muted">
+              LockIn works as a website. It works better with its Chrome
+              companion — and it will tell you honestly which one you have.
+            </p>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border lk-border p-4">
+                <p className="text-caption font-bold tracking-wide lk-muted uppercase">
+                  Basic LockIn
+                </p>
+                <ul className="mt-2 space-y-1.5 text-sm lk-strong">
+                  <li>Plan and track your work</li>
+                  <li>Focus timer and Focus Guard</li>
+                  <li>Reminders while this tab is open</li>
+                </ul>
+              </div>
+              <div className="rounded-2xl border border-brand-500/50 lk-raised p-4">
+                <p className="text-caption font-bold tracking-wide uppercase text-brand-600 dark:text-brand-300">
+                  With the Companion
+                </p>
+                <ul className="mt-2 space-y-1.5 text-sm lk-strong">
+                  <li>Distracting sites actually blocked</li>
+                  <li>Reminders when LockIn is closed</li>
+                  <li>Canvas calendar imported automatically</li>
+                </ul>
+              </div>
+            </div>
+
+            <p className="mt-5 rounded-2xl border border-dashed lk-border p-3.5 text-xs leading-relaxed lk-muted">
+              You can add it later from Integrations, and nothing here breaks
+              without it. Whenever Focus Mode is running and the Companion is
+              not answering, LockIn says so across every screen rather than
+              letting you believe sites are blocked.
             </p>
 
             <div className="mt-7 flex gap-2">

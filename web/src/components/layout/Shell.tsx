@@ -1,5 +1,6 @@
 /** App chrome: sidebar on desktop, bottom nav on mobile, focus banner on top. */
 import { NavLink, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cx } from '../../lib/cx';
 import { Icon } from '../ui/Icon';
@@ -154,9 +155,61 @@ function Sidebar() {
   );
 }
 
+/**
+ * The phone bar.
+ *
+ * Six destinations plus a More sheet. The sheet is not a nicety: Parent,
+ * Settings, Help and Privacy live in the sidebar on desktop, and without it
+ * they would be unreachable on a phone entirely — which is exactly what
+ * happened when the sidebar gained a secondary row and this bar did not.
+ * Caught by opening the app at 375px, not by a test.
+ */
 function BottomNav() {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const location = useLocation();
+
+  // Any navigation closes the sheet; leaving it open over the new page is the
+  // classic bottom-sheet bug.
+  useEffect(() => setMoreOpen(false), [location.pathname]);
+
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t lk-border lk-raised pb-[env(safe-area-inset-bottom)] lg:hidden">
+    <>
+      {moreOpen && (
+        <>
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMoreOpen(false)}
+            className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          />
+          <div
+            className="animate-rise fixed inset-x-0 bottom-[4.25rem] z-50 mx-3 rounded-2xl border lk-border lk-raised p-2 shadow-lg lg:hidden"
+            role="dialog"
+            aria-label="More"
+          >
+            {[...SECONDARY, { to: '/help', label: 'Help', icon: 'search' as IconName }, { to: '/privacy', label: 'Privacy', icon: 'shield' as IconName }].map(
+              (item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-body font-semibold lk-strong hover:lk-sunken"
+                >
+                  <Icon name={item.icon} size={17} />
+                  {item.label}
+                </NavLink>
+              ),
+            )}
+            <div className="border-t lk-border p-2 pt-3">
+              <ThemeToggle />
+            </div>
+          </div>
+        </>
+      )}
+
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 border-t lk-border lk-raised pb-[env(safe-area-inset-bottom)] lg:hidden"
+        aria-label="Main"
+      >
       <div className="mx-auto flex max-w-lg items-stretch justify-between px-1">
         {NAV.map((item) => (
           <NavLink
@@ -184,8 +237,30 @@ function BottomNav() {
             )}
           </NavLink>
         ))}
+
+        <button
+          type="button"
+          onClick={() => setMoreOpen((open) => !open)}
+          aria-expanded={moreOpen}
+          aria-label="More"
+          className={cx(
+            'flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[0.66rem] font-bold transition-colors',
+            moreOpen ? 'text-brand-600 dark:text-brand-300' : 'lk-muted',
+          )}
+        >
+          <span
+            className={cx(
+              'rounded-lg px-3 py-1 transition-colors',
+              moreOpen && 'bg-brand-100 dark:bg-brand-900/60',
+            )}
+          >
+            <Icon name="settings" size={19} />
+          </span>
+          More
+        </button>
       </div>
-    </nav>
+      </nav>
+    </>
   );
 }
 

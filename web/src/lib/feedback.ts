@@ -95,11 +95,23 @@ function candidates(input: FeedbackInput): Feedback[] {
   const out: Feedback[] = [];
 
   const open = state.assignments.filter((a) => !isComplete(a));
+  /**
+   * Work that stands between the student and "you're done".
+   *
+   * Undated work counts. Excluding it produced "Everything due tomorrow is
+   * handled" on a screen that also showed an unfinished undated assignment —
+   * found by looking at the phone layout, not by a test, and the second time
+   * the same MAX_SAFE_INTEGER assumption caused it.
+   */
   const dueTomorrow = open.filter((a) => {
     const due = dueTimestamp(a);
-    return Number.isFinite(due) && due !== Number.MAX_SAFE_INTEGER && due <= now + 36 * 3600_000;
+    if (!Number.isFinite(due) || due === Number.MAX_SAFE_INTEGER) return true;
+    return due <= now + 36 * 3600_000;
   });
-  const overdue = open.filter((a) => dueTimestamp(a) < now);
+  const overdue = open.filter((a) => {
+    const due = dueTimestamp(a);
+    return Number.isFinite(due) && due !== Number.MAX_SAFE_INTEGER && due < now;
+  });
 
   // Strongest first.
   if (report.status === 'AHEAD' && overdue.length === 0) {
@@ -113,6 +125,13 @@ function candidates(input: FeedbackInput): Feedback[] {
 
   if (dueTomorrow.length === 0 && overdue.length === 0 && state.assignments.length > 0) {
     out.push({ kind: 'tomorrow_clear', text: 'Everything due tomorrow is handled.' });
+  }
+
+  // "Ahead for the week" makes the same claim in stronger words, so it is
+  // withdrawn on the same condition rather than being allowed to contradict it.
+  if (dueTomorrow.length > 0) {
+    const index = out.findIndex((f) => f.kind === 'week_ahead');
+    if (index >= 0) out.splice(index, 1);
   }
 
   const days = daysWithoutOverdue(state, now);

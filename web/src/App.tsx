@@ -14,6 +14,8 @@ import { ExamsPage } from './pages/Exams';
 import { FocusPage } from './pages/Focus';
 import { PlannerPage } from './pages/Planner';
 import { ActivityPage } from './pages/Activity';
+import { ProgressPage } from './pages/Progress';
+import { IntegrationsPage } from './pages/Integrations';
 import { SettingsPage } from './pages/Settings';
 import { PrivacyPage } from './pages/Privacy';
 import { HelpPage } from './pages/Help';
@@ -87,6 +89,22 @@ export default function App() {
           element={
             <Protected>
               <PlannerPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/progress"
+          element={
+            <Protected>
+              <ProgressPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/integrations"
+          element={
+            <Protected>
+              <IntegrationsPage />
             </Protected>
           }
         />

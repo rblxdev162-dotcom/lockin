@@ -16,13 +16,29 @@ interface NavItem {
   icon: IconName;
 }
 
+/**
+ * Six destinations, and no more.
+ *
+ * Exams moved inside Plan and Activity inside Progress in Phase 16. Both were
+ * top-level items because they were built as phases, not because a student
+ * thinks of them as places — and seven flat items on a 375px phone leaves
+ * every tap target too small to hit reliably.
+ *
+ * Parent and Settings sit apart at the bottom: they are not destinations you
+ * move between, they are somewhere you go for a reason and come back from.
+ */
 const NAV: NavItem[] = [
   { to: '/home', label: 'Home', icon: 'home' },
   { to: '/assignments', label: 'Work', icon: 'list' },
   { to: '/planner', label: 'Plan', icon: 'calendar' },
-  { to: '/exams', label: 'Exams', icon: 'exam' },
   { to: '/focus', label: 'Focus', icon: 'timer' },
-  { to: '/activity', label: 'Activity', icon: 'activity' },
+  { to: '/progress', label: 'Progress', icon: 'activity' },
+  { to: '/integrations', label: 'Connect', icon: 'link' },
+];
+
+/** Bottom of the sidebar, and behind a "More" row on a phone. */
+const SECONDARY: NavItem[] = [
+  { to: '/parent', label: 'Parent', icon: 'shield' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ];
 
@@ -71,14 +87,15 @@ function Sidebar() {
         </p>
       </div>
 
-      <nav className="mt-7 flex flex-1 flex-col gap-1">
+      <nav className="mt-7 flex flex-1 flex-col gap-1" aria-label="Main">
         {NAV.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             className={({ isActive }) =>
               cx(
-                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all',
+                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-body font-semibold',
+                'transition-colors duration-150',
                 isActive
                   ? 'bg-brand-600 text-white shadow-sm shadow-brand-900/25'
                   : 'lk-muted hover:lk-sunken hover:lk-strong',
@@ -86,12 +103,30 @@ function Sidebar() {
             }
           >
             <Icon name={item.icon} size={19} />
-            {item.label === 'Work' ? 'Assignments' : item.label}
+            {item.label === 'Work' ? 'Assignments' : item.label === 'Connect' ? 'Integrations' : item.label}
           </NavLink>
         ))}
       </nav>
 
       <div className="mt-4 space-y-3 border-t lk-border pt-4">
+        <div className="flex flex-col gap-0.5">
+          {SECONDARY.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                cx(
+                  'flex items-center gap-3 rounded-xl px-3 py-2 text-caption font-bold',
+                  'transition-colors duration-150',
+                  isActive ? 'lk-sunken lk-strong' : 'lk-muted hover:lk-strong',
+                )
+              }
+            >
+              <Icon name={item.icon} size={16} />
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
         {/* Help and Privacy sit here rather than in NAV: the bottom bar on a
             375px phone already carries seven destinations, and an eighth makes
             every tap target too small to hit reliably. */}

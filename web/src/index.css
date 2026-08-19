@@ -6,6 +6,11 @@
  * in the app is expressed in these tokens so both themes stay consistent.
  */
 @theme {
+  /*
+   * The stack is deliberately system-first. Inter is named because macOS and
+   * most Chromebooks have it, but nothing is downloaded: a font request is a
+   * network request, and LockIn does not make those.
+   */
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --color-brand-50: oklch(0.97 0.02 275);
@@ -27,7 +32,44 @@
   --color-flame-500: oklch(0.68 0.18 35);
   --color-flame-600: oklch(0.58 0.19 30);
 
-  --radius-card: 1.25rem;
+  /*
+   * Type scale. Five steps and no more — the point of a scale is that a new
+   * screen picks from it rather than inventing a sixth size.
+   *
+   *   display  a single number the eye lands on (a timer, a percentage)
+   *   title    the page heading
+   *   heading  a card heading
+   *   body     everything read in sentences
+   *   caption  labels, timestamps, provenance
+   */
+  --text-display: 2.25rem;
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.03em;
+  --text-title: 1.6rem;
+  --text-title--line-height: 1.15;
+  --text-title--letter-spacing: -0.02em;
+  --text-heading: 0.95rem;
+  --text-heading--line-height: 1.35;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.6;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.45;
+
+  /*
+   * Radii. Three steps: controls, cards, and the pill.
+   */
+  --radius-control: 0.7rem;
+  --radius-card: 1.1rem;
+
+  /*
+   * Motion. Everything in the app uses one of these three durations, all
+   * inside the 150–250ms band where a transition reads as responsive rather
+   * than as an animation someone is waiting for.
+   */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 250ms;
 
   --animate-rise: rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-fade: fade 0.25s ease-out both;
@@ -63,6 +105,24 @@
   --text-strong: oklch(0.22 0.02 275);
   --text-muted: oklch(0.52 0.02 275);
   --ring-color: var(--color-brand-500);
+
+  /*
+   * Semantic status colours.
+   *
+   * Four meanings, one colour each, and they are reserved: `--status-behind`
+   * appears when something is genuinely late or behind pace, and nowhere else.
+   * The `-soft` variants are for backgrounds — a status is shown with a tinted
+   * edge and a coloured label, never by painting a whole card green or red.
+   */
+  --status-ahead: oklch(0.55 0.14 165);
+  --status-ahead-soft: oklch(0.94 0.05 165);
+  --status-risk: oklch(0.62 0.14 75);
+  --status-risk-soft: oklch(0.95 0.06 85);
+  --status-behind: oklch(0.58 0.19 30);
+  --status-behind-soft: oklch(0.95 0.05 35);
+  --status-info: var(--color-brand-600);
+  --status-info-soft: oklch(0.95 0.03 275);
+
   color-scheme: light;
 }
 
@@ -73,6 +133,17 @@
   --border-soft: oklch(0.32 0.02 275);
   --text-strong: oklch(0.97 0.005 275);
   --text-muted: oklch(0.72 0.015 275);
+
+  /* Lifted and desaturated for dark surfaces; the meanings do not move. */
+  --status-ahead: oklch(0.78 0.13 165);
+  --status-ahead-soft: oklch(0.28 0.05 165);
+  --status-risk: oklch(0.82 0.13 80);
+  --status-risk-soft: oklch(0.29 0.05 80);
+  --status-behind: oklch(0.75 0.15 35);
+  --status-behind-soft: oklch(0.29 0.06 35);
+  --status-info: oklch(0.78 0.11 275);
+  --status-info-soft: oklch(0.27 0.04 275);
+
   color-scheme: dark;
 }
 
@@ -119,7 +190,54 @@
     background: var(--surface-raised);
     border: 1px solid var(--border-soft);
     border-radius: var(--radius-card);
+    /* One shadow, very slight. Depth comes from the border and the surface
+       step, not from cards appearing to float. */
     box-shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 8px 24px -18px oklch(0 0 0 / 0.35);
+  }
+
+  /*
+   * The primary card — the one thing on a screen that is the next action.
+   * There is at most one of these per page, which is the whole point.
+   */
+  .lk-card-primary {
+    border-color: color-mix(in oklch, var(--color-brand-500) 45%, var(--border-soft));
+    box-shadow:
+      0 1px 2px oklch(0 0 0 / 0.05),
+      0 18px 40px -30px color-mix(in oklch, var(--color-brand-500) 70%, transparent);
+  }
+
+  /*
+   * Status treatment: a tinted left edge and a coloured label, never a filled
+   * card. Colour is always paired with a word — no status in LockIn is
+   * conveyed by colour alone.
+   */
+  .lk-status-ahead { --status: var(--status-ahead); --status-soft: var(--status-ahead-soft); }
+  .lk-status-on_track { --status: var(--status-info); --status-soft: var(--status-info-soft); }
+  .lk-status-at_risk { --status: var(--status-risk); --status-soft: var(--status-risk-soft); }
+  .lk-status-behind { --status: var(--status-behind); --status-soft: var(--status-behind-soft); }
+  .lk-status-unknown { --status: var(--text-muted); --status-soft: var(--surface-sunken); }
+
+  .lk-status-edge {
+    border-left: 3px solid var(--status, var(--border-soft));
+  }
+  .lk-status-text { color: var(--status, var(--text-muted)); }
+  .lk-status-chip {
+    background: var(--status-soft, var(--surface-sunken));
+    color: var(--status, var(--text-muted));
+  }
+
+  /* Hover lift, used by every clickable card. One definition, one feel. */
+  .lk-interactive {
+    transition:
+      border-color var(--duration-fast) ease,
+      background-color var(--duration-fast) ease,
+      transform var(--duration-fast) var(--ease-out-soft);
+  }
+  .lk-interactive:hover {
+    border-color: color-mix(in oklch, var(--color-brand-500) 35%, var(--border-soft));
+  }
+  .lk-interactive:active {
+    transform: scale(0.995);
   }
 
   .lk-input {

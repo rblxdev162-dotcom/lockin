@@ -1,59 +1,70 @@
+/**
+ * Home — five seconds to four answers.
+ *
+ *   1. What should I do now?      → NEXT UP, the one primary card
+ *   2. Am I ahead or behind?      → the line under the greeting
+ *   3. What's due next?           → TODAY, a plain list
+ *   4. Is LockIn connected?       → the integrations strip at the bottom
+ *
+ * ## The rule this page is built around
+ *
+ * **Exactly one thing is visually primary.** The old dashboard had a dozen
+ * cards of equal weight, which is the same as having none: a screen where
+ * everything is emphasised has nothing to land on. Focus Mode, the plan, exams
+ * and Canvas detections are all still reachable — they are just not competing
+ * with the next action.
+ */
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../store/context';
-import { Card, CardHeader, EmptyState } from '../components/ui/Card';
+import { usePace } from '../hooks/usePace';
+import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { ProgressBar } from '../components/ui/Progress';
-import { Badge } from '../components/ui/Badge';
 import { Icon } from '../components/ui/Icon';
+import { Badge } from '../components/ui/Badge';
 import { AssignmentCard } from '../components/features/AssignmentCard';
-import { useCanvas } from '../hooks/useCanvas';
 import { CanvasCallout } from '../components/features/CanvasCallout';
-import {
-  blockingActive,
-  dueSoon,
-  requiredAssignments,
-  todayProgress,
-  upcomingExams,
-} from '../lib/selectors';
-import { daysUntil, formatClock, formatDaysRemaining, greeting } from '../lib/time';
-import { cx } from '../lib/cx';
+import { PaceBadge, SectionHeader, SourceBadge, STATUS_CLASS } from '../components/ui/Status';
 import { TodayPlanCard } from '../components/features/planner/TodayPlanCard';
-import { PlanWarnings } from '../components/features/planner/PlanWarnings';
-import { livePlan } from '../lib/planner';
+import { dueSoon, requiredAssignments } from '../lib/selectors';
+import { paceHeadline } from '../lib/pace/engine';
+import { classify } from '../lib/sources/freshness';
+import { formatClock, greeting } from '../lib/time';
+import { cx } from '../lib/cx';
+import type { Assignment } from '../types';
 
 export function Dashboard() {
-  const { state, dispatch, now, extension } = useApp();
+  const { state, now, extension } = useApp();
   const navigate = useNavigate();
-  const { openInCanvas, checkStatus, busy: canvasBusy } = useCanvas();
+  const { report } = usePace();
 
-  // Memoised: `now` ticks every second, but the plan only changes with state.
-  const plan = useMemo(
-    () => livePlan(state, new Date(now)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.planner.plan, state.assignments, state.exams, state.completedSessions],
-  );
-  const soon = dueSoon(state, 2);
-  const progress = todayProgress(state);
-  const exams = upcomingExams(state);
+  const soon = useMemo(() => dueSoon(state, 2, new Date(now)), [state.assignments, now]);
   const fm = state.focusMode;
-  const required = requiredAssignments(state);
   const unlocked = fm.temporaryUnlockUntil !== null && fm.temporaryUnlockUntil > now;
 
+  /**
+   * The one assignment the page is about.
+   *
+   * It comes from the Pace Engine rather than being picked here, so the
+   * dashboard, the reminders and the popup can never disagree about what is
+   * next.
+   */
+  const nextId = report.suggestedAction.assignmentId;
+  const next = nextId ? state.assignments.find((a) => a.id === nextId) : undefined;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <CanvasCallout />
+
+      {/* ---- Greeting and verdict ---- */}
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight lk-strong">
+        <div className="min-w-0">
+          <h1 className="text-title font-extrabold lk-strong">
             {greeting()}, {state.profile?.firstName}
           </h1>
-          <p className="mt-1 text-sm lk-muted">
-            {soon.length === 0
-              ? 'Nothing due in the next couple of days. Nice.'
-              : soon.length === 1
-                ? '1 thing needs attention.'
-                : `${soon.length} things need attention.`}
+          <p className={cx('mt-1 flex flex-wrap items-center gap-2', STATUS_CLASS[report.status])}>
+            <span className="text-body font-semibold lk-status-text">{paceHeadline(report)}</span>
+            <PaceBadge status={report.status} official={report.official} size="sm" />
           </p>
         </div>
         <Button
@@ -66,249 +77,246 @@ export function Dashboard() {
         </Button>
       </header>
 
-      {/* ---- Focus Mode ---- */}
-      <Card
-        className={cx(
-          'relative overflow-hidden',
-          fm.active && !unlocked && 'border-brand-500 ring-1 ring-brand-500/30',
-        )}
-      >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span
-                className={cx(
-                  'grid h-9 w-9 place-items-center rounded-xl',
-                  fm.active
-                    ? 'bg-brand-600 text-white'
-                    : 'lk-sunken lk-muted border lk-border',
-                )}
-              >
-                <Icon name={fm.active ? 'lock' : 'unlock'} size={18} />
-              </span>
-              <div>
-                <p className="text-xs font-bold tracking-wide lk-muted uppercase">Focus Mode</p>
-                <p className="text-lg font-extrabold tracking-tight lk-strong">
-                  {fm.active ? (fm.isTest ? 'TEST MODE ACTIVE' : 'ACTIVE') : 'OFF'}
-                </p>
-              </div>
-            </div>
-
-            {fm.active ? (
-              <div className="mt-3 space-y-2">
-                {fm.requiredCompletionCount > 0 && (
-                  <>
-                    <p className="text-sm font-semibold lk-strong">
-                      Required work: {fm.completedCount} / {fm.requiredCompletionCount} completed
-                    </p>
-                    <ProgressBar
-                      value={fm.completedCount}
-                      max={fm.requiredCompletionCount}
-                      className="max-w-xs"
-                    />
-                  </>
-                )}
-                {unlocked && (
-                  <Badge tone="mint">
-                    Temporary unlock · {formatClock((fm.temporaryUnlockUntil ?? 0) - now)} left
-                  </Badge>
-                )}
-                {fm.isTest && fm.testExpiresAt && (
-                  <Badge tone="amber">
-                    Test ends in {formatClock(fm.testExpiresAt - now)}
-                  </Badge>
-                )}
-                <p className="text-xs lk-muted">
-                  {blockingActive(state, now)
-                    ? `${state.settings.blockedDomains.length} site${
-                        state.settings.blockedDomains.length === 1 ? '' : 's'
-                      } blocked right now.`
-                    : 'Blocking is paused.'}
-                </p>
-              </div>
-            ) : (
-              <p className="mt-3 max-w-sm text-sm lk-muted">
-                Turn on Focus Mode to block distracting sites until your required work is done.
-              </p>
-            )}
-          </div>
-
-          <Button variant={fm.active ? 'secondary' : 'primary'} onClick={() => navigate('/focus')}>
-            {fm.active ? 'Manage' : 'Start Focus Mode'}
-          </Button>
-        </div>
-
-        {extension.status === 'disconnected' && (
-          <Link
-            to="/settings"
-            className="mt-4 flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3.5 py-2.5 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-400/20 dark:text-amber-300"
-          >
-            <Icon name="alert" size={15} />
-            Chrome extension not connected — sites won’t actually be blocked. Set it up →
-          </Link>
-        )}
-
-        {required.length > 0 && fm.active && (
-          <div className="mt-4 space-y-2 border-t lk-border pt-4">
-            <p className="text-xs font-bold tracking-wide lk-muted uppercase">
-              Required to unlock
-            </p>
-            {required.map((a) => (
-              <AssignmentCard
-                key={a.id}
-                assignment={a}
-                required
-                onToggleComplete={() =>
-                  dispatch(
-                    a.status === 'Completed'
-                      ? { type: 'UNCOMPLETE_ASSIGNMENT', id: a.id }
-                      : { type: 'COMPLETE_ASSIGNMENT', id: a.id, method: 'manual' },
-                  )
-                }
-                onFocus={() => navigate(`/focus?assignment=${a.id}`)}
-                onOpenCanvas={(x) => x.canvas && openInCanvas(x.canvas.url)}
-                onCheckCanvas={checkStatus}
-                canvasBusy={canvasBusy === 'check' || canvasBusy === 'sync'}
-              />
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* ---- Today's plan (Phase 7) ----
-          The planner answers "what should I work on today?"; the card below
-          still answers "what is due". They are different questions and the
-          dashboard keeps both. */}
-      {plan && plan.warnings.length > 0 && (
-        <PlanWarnings warnings={plan.warnings} limit={2} onAdjust={() => navigate('/planner')} />
+      {/* ---- The one primary thing ---- */}
+      {fm.active ? (
+        <FocusRunningCard unlocked={unlocked} />
+      ) : next ? (
+        <NextUpCard assignment={next} actionText={report.suggestedAction.text} />
+      ) : (
+        <NothingDueCard reason={report.suggestedAction} />
       )}
-      <TodayPlanCard />
-
-      {/* ---- Progress ---- */}
-      <Card>
-        <CardHeader
-          title="Today’s progress"
-          subtitle={
-            progress.total === 0
-              ? 'Nothing is due today.'
-              : `${progress.done} / ${progress.total} tasks complete`
-          }
-        />
-        <ProgressBar
-          value={progress.done}
-          max={Math.max(1, progress.total)}
-          tone={progress.total > 0 && progress.done === progress.total ? 'mint' : 'brand'}
-        />
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          {[
-            { label: 'Due today', value: progress.total },
-            { label: 'Completed', value: progress.done },
-            {
-              label: 'Minutes logged',
-              value: state.completedSessions.reduce((sum, s) => sum + s.actualMinutes, 0),
-            },
-          ].map((stat) => (
-            <div key={stat.label} className="lk-sunken rounded-2xl border lk-border p-3 text-center">
-              <p className="text-2xl font-extrabold tracking-tight lk-strong">{stat.value}</p>
-              <p className="mt-0.5 text-[0.7rem] font-semibold lk-muted">{stat.label}</p>
-            </div>
-          ))}
-        </div>
-      </Card>
 
       {/* ---- Today ---- */}
-      <Card>
-        <CardHeader
+      <section aria-labelledby="today-heading">
+        <SectionHeader
+          id="today-heading"
           title="Today"
-          subtitle="Unfinished work due soon"
+          hint={
+            soon.length === 0
+              ? 'Nothing due in the next couple of days.'
+              : `${soon.length} thing${soon.length === 1 ? '' : 's'} due soon.`
+          }
           action={
             <Link
               to="/assignments"
-              className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300"
+              className="text-caption font-bold lk-muted underline-offset-2 hover:underline"
             >
-              See all
+              All work
             </Link>
           }
         />
         {soon.length === 0 ? (
-          <EmptyState
-            icon={<Icon name="check" size={28} />}
-            title="You’re clear for now"
-            hint="Nothing is due in the next two days."
-            action={
-              <Button size="sm" variant="secondary" onClick={() => navigate('/assignments?new=1')}>
-                Add an assignment
-              </Button>
-            }
-          />
+          <Card>
+            <p className="text-body lk-muted">
+              Nothing due right now.{' '}
+              <Link to="/planner" className="font-semibold underline underline-offset-2">
+                Look at the week
+              </Link>
+              .
+            </p>
+          </Card>
         ) : (
-          <div className="space-y-2.5">
-            {soon.map((a) => (
-              <AssignmentCard
-                key={a.id}
-                assignment={a}
-                required={fm.active && fm.requiredTaskIds.includes(a.id)}
-                onToggleComplete={() =>
-                  dispatch({ type: 'COMPLETE_ASSIGNMENT', id: a.id, method: 'manual' })
-                }
-                onFocus={() => navigate(`/focus?assignment=${a.id}`)}
-                onOpenCanvas={(x) => x.canvas && openInCanvas(x.canvas.url)}
-                onCheckCanvas={checkStatus}
-                canvasBusy={canvasBusy === 'check' || canvasBusy === 'sync'}
-              />
+          <div className="space-y-2">
+            {soon.slice(0, 5).map((assignment) => (
+              <AssignmentCard key={assignment.id} assignment={assignment} />
             ))}
           </div>
         )}
-      </Card>
+      </section>
 
-      {/* ---- Exams ---- */}
-      <Card>
-        <CardHeader
-          title="Upcoming exams"
+      {/* ---- The plan, when there is one ---- */}
+      <TodayPlanCard />
+
+      {/* ---- Connection strip ---- */}
+      <section aria-labelledby="connections-heading">
+        <SectionHeader
+          id="connections-heading"
+          title="Connections"
           action={
             <Link
-              to="/exams"
-              className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-300"
+              to="/integrations"
+              className="text-caption font-bold lk-muted underline-offset-2 hover:underline"
             >
               Manage
             </Link>
           }
         />
-        {exams.length === 0 ? (
-          <EmptyState
-            icon={<Icon name="exam" size={28} />}
-            title="No exams scheduled"
-            hint="Add one and LockIn will count down the days."
-            action={
-              <Button size="sm" variant="secondary" onClick={() => navigate('/exams?new=1')}>
-                Add an exam
-              </Button>
+        <Card className="flex flex-wrap items-center gap-x-6 gap-y-2.5">
+          <ConnectionDot
+            label="Canvas"
+            ok={state.integrations.records.find((r) => r.id === 'canvas_calendar')?.status === 'connected'}
+            detail={canvasDetail(state, now)}
+          />
+          <ConnectionDot
+            label="Edgenuity"
+            ok={state.integrations.courses.length > 0}
+            detail={edgenuityDetail(state, now)}
+          />
+          <ConnectionDot
+            label="Companion"
+            ok={extension.status === 'connected'}
+            detail={
+              extension.status === 'connected'
+                ? 'Connected'
+                : state.settings.extensionSeen
+                  ? 'Not answering'
+                  : 'Not installed'
             }
           />
-        ) : (
-          <div className="space-y-2.5">
-            {exams.slice(0, 4).map((exam) => {
-              const days = daysUntil(exam.examDate);
-              return (
-                <div
-                  key={exam.id}
-                  className="lk-sunken flex items-center justify-between gap-3 rounded-2xl border lk-border p-3.5"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-bold lk-strong">{exam.name}</p>
-                    <p className="text-xs lk-muted">
-                      {exam.subject} · {exam.materialAmount} material
-                    </p>
-                  </div>
-                  <Badge tone={days !== null && days <= 3 ? 'flame' : 'brand'}>
-                    {formatDaysRemaining(days)}
-                  </Badge>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
+        </Card>
+      </section>
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* The primary card, in its three states                               */
+/* ------------------------------------------------------------------ */
+
+function NextUpCard({
+  assignment,
+  actionText,
+}: {
+  assignment: Assignment;
+  actionText: string;
+}) {
+  const navigate = useNavigate();
+  const { now } = useApp();
+  const remaining = Math.max(0, assignment.estimatedMinutes - assignment.loggedMinutes);
+
+  return (
+    <Card className="lk-card-primary">
+      <p className="text-caption font-bold tracking-wide lk-muted uppercase">Next up</p>
+      <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-caption font-semibold lk-muted">{assignment.subject}</p>
+          <h2 className="mt-0.5 text-title font-extrabold lk-strong">{assignment.title}</h2>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-body lk-muted">
+            <span>{duePhrase(assignment, now)}</span>
+            <span aria-hidden>·</span>
+            <span>~{remaining} min</span>
+            <SourceBadge source={assignment.source} />
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            icon={<Icon name="timer" size={16} />}
+            onClick={() => navigate(`/focus?assignment=${assignment.id}`)}
+          >
+            Start Focus
+          </Button>
+        </div>
+      </div>
+      <p className="mt-3 text-caption lk-muted">{actionText}</p>
+    </Card>
+  );
+}
+
+function FocusRunningCard({ unlocked }: { unlocked: boolean }) {
+  const { state, now } = useApp();
+  const navigate = useNavigate();
+  const fm = state.focusMode;
+  const required = requiredAssignments(state);
+  const current = required.find((a) => a.status !== 'Completed');
+
+  return (
+    <Card className="lk-card-primary">
+      <p className="text-caption font-bold tracking-wide lk-muted uppercase">
+        {fm.isTest ? 'Blocking test' : 'Focus Mode'}
+      </p>
+      <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-title font-extrabold lk-strong">
+            {current ? current.title : 'Running'}
+          </h2>
+          <p className="mt-1 text-body lk-muted">
+            {fm.requiredCompletionCount > 0
+              ? `${fm.completedCount} of ${fm.requiredCompletionCount} required finished`
+              : `${state.settings.blockedDomains.length} sites blocked`}
+          </p>
+          {unlocked && (
+            <Badge tone="mint" className="mt-2">
+              Temporary unlock · {formatClock((fm.temporaryUnlockUntil ?? 0) - now)} left
+            </Badge>
+          )}
+        </div>
+        <Button variant="secondary" onClick={() => navigate('/focus')}>
+          Open Focus
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function NothingDueCard({ reason }: { reason: { kind: string; text: string } }) {
+  const navigate = useNavigate();
+  return (
+    <Card className="lk-card-primary">
+      <p className="text-caption font-bold tracking-wide lk-muted uppercase">Right now</p>
+      <h2 className="mt-2 text-title font-extrabold lk-strong">
+        {reason.kind === 'connect' ? 'Nothing here yet' : 'Nothing needs doing'}
+      </h2>
+      <p className="mt-1.5 text-body lk-muted">{reason.text}</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {reason.kind === 'connect' ? (
+          <Button onClick={() => navigate('/integrations')}>Connect your school tools</Button>
+        ) : reason.kind === 'sync' ? (
+          <Button onClick={() => navigate('/integrations')}>Sync now</Button>
+        ) : (
+          <Button variant="secondary" onClick={() => navigate('/planner')}>
+            Look at the week
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Small pieces                                                        */
+/* ------------------------------------------------------------------ */
+
+function ConnectionDot({ label, ok, detail }: { label: string; ok: boolean; detail: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      {/* The word carries the state; the dot only reinforces it. */}
+      <span
+        aria-hidden
+        className={cx('h-2 w-2 shrink-0 rounded-full', ok ? 'bg-mint-500' : 'lk-sunken border lk-border')}
+      />
+      <span className="text-caption font-bold lk-strong">{label}</span>
+      <span className="text-caption lk-muted">{detail}</span>
+    </div>
+  );
+}
+
+function duePhrase(assignment: Assignment, now: number): string {
+  const due = Date.parse(`${assignment.dueDate}T${assignment.dueTime || '23:59'}`);
+  if (Number.isNaN(due)) return 'No due date';
+  const time = new Date(due).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const days = Math.round(startOfDay(due) - startOfDay(now)) / 86_400_000;
+  if (days === 0) return `Due today, ${time}`;
+  if (days === 1) return `Due tomorrow, ${time}`;
+  if (days < 0) return `Overdue since ${new Date(due).toLocaleDateString()}`;
+  return `Due ${new Date(due).toLocaleDateString(undefined, { weekday: 'long' })}, ${time}`;
+}
+
+function startOfDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function canvasDetail(state: ReturnType<typeof useApp>['state'], now: number): string {
+  const record = state.integrations.records.find((r) => r.id === 'canvas_calendar');
+  if (!record || record.status === 'not_configured') return 'Not connected';
+  if (record.status === 'error') return 'Sync failed';
+  const source = state.assignments.find((a) => a.source?.kind === 'CANVAS_CALENDAR')?.source;
+  return classify(source, now).label;
+}
+
+function edgenuityDetail(state: ReturnType<typeof useApp>['state'], now: number): string {
+  const source = state.integrations.courses[0]?.actualProgressPercent?.source;
+  if (!source) return 'Not connected';
+  return classify(source, now).label;
 }

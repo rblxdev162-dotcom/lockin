@@ -76,9 +76,9 @@ To watch it work: add a site under **Blocked websites**, then press **Start
 > names that origin. If something else is holding the port, free it rather than
 > letting Vite pick 5174 — see [Origins](#origins-development-and-production).
 
-### Camera note
+### Screen-share note
 
-Edgenuity verification needs a secure context for `getUserMedia`.
+Edgenuity screen proof needs a secure context for `getDisplayMedia`.
 `http://localhost:5173` counts as secure; a LAN address like
 `http://192.168.1.5:5173` does not, and Settings says so instead of showing a
 dead button.
@@ -95,10 +95,12 @@ dead button.
 | **Focus Mode** | Blocks the sites you chose until the work you chose is done. |
 | **Focus Guard** | With no extension at all, notices when you leave the LockIn tab during Focus Mode and times it. It cannot block, and cannot see where you went — and says both. |
 | **Chrome extension** | Does the blocking for real, with `declarativeNetRequest`. Survives closing LockIn and restarting Chrome. |
+| **Canvas calendar feed** | Assignments, courses and due dates imported from Canvas's own calendar feed, and kept up to date. It never says whether something was submitted, and LockIn never pretends otherwise. |
 | **Canvas verification** | Reads submission status from Canvas pages you open yourself, and counts a verified submission as done. |
-| **Edgenuity verification** | A before-and-after reading of your course progress, taken on this device. |
-| **Screen-capture proof** | When Edgenuity runs on the same computer as LockIn, share that window instead of photographing it. One frame, read by the same OCR. Chrome asks every time, and nothing is captured in the background. |
-| **Edgenuity browser reading** | When Edgenuity runs in the same Chrome, the extension reads how many activities are done straight off the course page you opened — no photo. It never loads an Edgenuity page itself, and stays switched off during quizzes, tests and exams. |
+| **Edgenuity progress import** | A progress report email or a downloaded course report, parsed on this device. LockIn does not read the Edgenuity website. |
+| **Pace** | Ahead / on track / at risk / behind — with reasons, and with "not enough data" as a real answer when a sync failed or a report went stale. |
+| **Screen-capture proof** | When Edgenuity runs on the same computer as LockIn, share that window and one frame is read by local OCR. Chrome asks every time, and nothing is captured in the background. |
+| **School Companion** | Optional, off by default, for a school Chrome profile where installing it is allowed. Says whether Canvas or Edgenuity is open; cannot read a page. |
 | **Parent View** | A PIN-gated local dashboard of work, verification and Focus Mode history. |
 | **Emergency exit** | Always available, no PIN, no progress required. |
 
@@ -115,10 +117,17 @@ web/  (React + TypeScript + Vite + Tailwind)          extension/  (Manifest V3, 
 │  store/reducer.ts       every state  │  window      │  background/         the worker     │
 │                         transition   │◄─postMessage►│    service-worker.js messages       │
 │  lib/planner/           pure engine  │              │    rules.js          DNR rules      │
-│  lib/canvas/            what counts  │              │    canvas.js         trust boundary │
-│  lib/edgenuity/         as verified  │              │  canvas/             page reader    │
-│  lib/storage.ts         localStorage │              │  blocked/            block page     │
+│  lib/pace/              the verdict  │              │    calendar.js       feed + the URL │
+│  lib/sources/           provenance   │              │    activity.js       tab metadata   │
+│  lib/canvas/            what counts  │              │    reminders.js      one door       │
+│  lib/edgenuity/         as verified  │              │    canvas.js         trust boundary │
+│  lib/storage.ts         localStorage │              │  canvas/             page reader    │
 └──────────────────────────────────────┘              └────────────────────────────────────┘
+
+                    school-companion/  (separate, optional, off by default)
+                             │  context only, never content
+                             ▼
+                    scripts/context-bridge.mjs  on 127.0.0.1
 ```
 
 Five rules explain most of the code:
@@ -137,7 +146,14 @@ Five rules explain most of the code:
    `assignment.status`. Remaining work is always `estimate − logged`, derived,
    never stored.
 5. **Schema migrations, never wipes.** Bump `SCHEMA_VERSION` in
-   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v8**.
+   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v9**.
+6. **Freshness is derived, never stored.** `lib/sources/freshness.ts` takes
+   `now` and works out whether a record is live, synced, imported, stale or
+   unavailable every time it is asked. Nothing persists that state, so nothing
+   can go on claiming to be live after its source stops answering.
+7. **A missing sync is never bad news about the student.** Stale data produces
+   "not enough data" with the source named — never "behind". Nothing is called
+   overdue on a due date LockIn cannot currently believe.
 
 `HANDOFF.md` has the full list of invariants and the file-by-file map. Read it
 before changing anything structural.
@@ -200,7 +216,7 @@ the Chrome Web Store.
 ## Testing
 
 ```bash
-npm test          # 400 logic, state, security, storage, time and release checks (~4s)
+npm test          # ~520 logic, state, security, storage, time and release checks (~6s)
 npm run test:all  # everything, including 10 real-browser suites (~10 min)
 ```
 
@@ -216,7 +232,12 @@ serves the production site itself on `:4173`.
 | Suite | What it proves | Command |
 | --- | --- | --- |
 | Blocking, Canvas, Edgenuity, challenge, parent, planner logic | The rules are right | `npm test` |
-| Edgenuity browser reading | Origin gate, assessment refusal, crediting rules | `npm run test:edgenuity-browser` + `npm run test:edgenuity-browser-state` |
+| Provenance and the Pace Engine | Stale data never becomes "behind" | `npm run test:pace` |
+| Canvas calendar feed | Parsing, time zones, and update-not-duplicate | `npm run test:canvas-ics` |
+| Edgenuity import | Report parsing, tri-state completion, the merge | `npm run test:edgenuity-import` |
+| Companion | Categorisation, cooldowns, snooze, presence | `npm run test:companion` |
+| Context bridge | Every refusal: secret, replay, schema, smuggling | `npm run test:context-bridge` |
+| Phase 16 state | The v9 migration, and screens' empty/stale/error states | `npm run test:phase16` |
 | Screen-capture proofs | Trust ceiling, the live gate, source pairing | `npm run test:edgenuity-screen` |
 | Storage recovery | Corrupt, partial and oversized saves recover | `npm run test:storage` |
 | Security | The ten bypass paths stay closed | `npm run test:security` |
@@ -266,6 +287,24 @@ The in-app `/privacy` page says the same thing to students. Keep them in step.
 
 ## Known limitations
 
+**Phase 16 additions, stated plainly:**
+
+- **Canvas submission state needs OAuth nobody has.** The calendar feed carries
+  due dates and nothing else. A Developer Key needs a school administrator and
+  a confidential client secret, which needs a backend LockIn does not have. The
+  adapter boundary is real; the authorization is not.
+- **Automatic Edgenuity sync needs your own Google OAuth client id.** LockIn
+  ships none, because a shared one would let every install read mail through
+  this project's identity. Until then, file import.
+- **The Edgenuity parsers have never seen a real progress report.** They are
+  written against the documented field names and tested against synthetic
+  fixtures. The first real report may need the matchers adjusted.
+- **PDF course reports are refused**, with an instruction to export CSV. No PDF
+  text extractor is bundled, and OCR-ing a PDF that has perfectly good text
+  would be slow, lossy and confidently wrong about numbers.
+- **The School Companion needs the local service running**, and only makes
+  sense where installing an extension on the school profile is permitted.
+
 These are honest, and they are a product feature rather than an embarrassment —
 a student told that blocking is unbreakable will find out otherwise in ten
 minutes and stop trusting everything else the app says.
@@ -311,7 +350,9 @@ lockin/
 │   ├── manifest.json
 │   ├── shared/config.js    generated from lockin.config.json
 │   └── tests/              every automated suite lives here
-├── scripts/                config generation and release packaging
+├── school-companion/       optional, separate package for a school profile
+├── scripts/                config generation, release packaging, local service
+│   └── context-bridge.mjs  the loopback bridge and its threat model
 ├── lockin.config.json      where the app lives, per environment
 ├── docs/research/          evidence briefs behind design decisions
 ├── HANDOFF.md              architecture, invariants, and why

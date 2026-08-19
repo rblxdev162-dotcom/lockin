@@ -356,6 +356,15 @@ export const ACTIVITY_TYPES = [
   'plan_settings_changed',
   'plan_item_skipped',
   'plan_item_moved',
+  /* --- Integrations (Phase 16) --- */
+  'integration_connected',
+  'integration_disconnected',
+  'integration_synced',
+  'integration_error',
+  'feed_assignments_imported',
+  'feed_assignment_updated',
+  'feed_assignment_cancelled',
+  'course_progress_updated',
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 

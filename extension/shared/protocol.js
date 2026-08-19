@@ -37,6 +37,23 @@ export const MSG = {
   CANVAS_PUSH: 'CANVAS_PUSH',
 
 
+  /* --- Canvas Calendar Feed (Phase 16) --- */
+  /**
+   * web → ext: store a feed URL. The URL crosses this boundary exactly once,
+   * on the way in, and never comes back — see `toCalendarView`.
+   */
+  CALENDAR_CONFIGURE: 'CALENDAR_CONFIGURE',
+  /** web → ext: current configuration, minus the secret */
+  CALENDAR_GET_VIEW: 'CALENDAR_GET_VIEW',
+  /** web → ext: fetch now and hand back the raw ICS text for parsing */
+  CALENDAR_FETCH: 'CALENDAR_FETCH',
+  /** web → ext: forget the URL and the cached body entirely */
+  CALENDAR_DISCONNECT: 'CALENDAR_DISCONNECT',
+  /** ext → web: the reply carrying a calendar view */
+  CALENDAR_VIEW: 'CALENDAR_VIEW',
+  /** ext → web: the reply carrying feed text */
+  CALENDAR_TEXT: 'CALENDAR_TEXT',
+
   /* --- Reminders (Phase 13) --- */
   /**
    * web → ext: the reminder schedule.

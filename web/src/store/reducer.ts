@@ -26,6 +26,8 @@ import { MAX_PLAN_HISTORY, MAX_PLAN_SKIPS } from '../types/planner';
 import { buildPlan, statusContext, unfinishedBefore } from '../lib/planner';
 import { orderItems } from '../lib/planner/engine';
 import { canvasKey, defaultCanvasState } from '../types/canvas';
+import type { FeedDiff } from '../lib/canvas/calendarReconcile';
+import type { IntegrationId, IntegrationStatus } from '../types/integrations';
 import {
   MAX_EDGENUITY_SESSIONS,
   meetsTrust,
@@ -45,7 +47,7 @@ import {
   sessionExpiryFrom,
 } from '../lib/edgenuity/verification';
 import type { EdgenuityCheckResult } from '../lib/edgenuity/verification';
-import { createAssignmentFromCanvas } from './factories';
+import { createAssignmentFromCanvas, createAssignmentFromFeed } from './factories';
 import { MAX_ACTIVITY, MAX_COMPLETED_SESSIONS, trimActivity } from '../lib/retention';
 import { AWAY_GRACE_MS } from '../lib/focusGuard';
 
@@ -123,6 +125,26 @@ export type Action =
   | { type: 'CANVAS_LINK'; assignmentId: string; detected: CanvasDetectedAssignment }
   | { type: 'CANVAS_UNLINK'; assignmentId: string }
   | { type: 'CANVAS_SET_COURSE_NAME'; externalCourseId: string; displayName: string }
+  /* ---- Canvas Calendar Feed (Phase 16) ---- */
+  /**
+   * Apply a reconciled feed diff.
+   *
+   * The diff is computed by `reconcileFeed()`, which is pure and tested on its
+   * own. This case does exactly what the diff says and decides nothing — in
+   * particular it never marks anything complete, because a calendar feed does
+   * not know.
+   */
+  | { type: 'FEED_APPLY'; diff: FeedDiff; sourceId: string; syncedAt: string; live: boolean }
+  /** Record the outcome of a sync attempt against one integration. */
+  | {
+      type: 'INTEGRATION_STATUS';
+      id: IntegrationId;
+      status: IntegrationStatus;
+      account?: string;
+      error?: string;
+      itemCount?: number;
+      syncedAt?: string;
+    }
   /* ---- Edgenuity live-camera verification (Phase 4) ---- */
   /** Turn an assignment into an Edgenuity-verified one, or change its target. */
   | { type: 'EDGENUITY_CONFIGURE'; assignmentId: string; config: EdgenuityConfig }
@@ -1412,6 +1434,112 @@ export function reducer(state: AppState, action: Action): AppState {
         { count: imported, domain },
       );
       return settle(next, 'assignment_added');
+    }
+
+    /* ---- Canvas Calendar Feed (Phase 16) ---- */
+
+    /**
+     * Applies a reconciled diff.
+     *
+     * Three separate things happen and each is deliberately narrow:
+     *
+     *  - **create** builds assignments from feed items. Nothing else.
+     *  - **update** applies only the fields the feed owns — title, due date,
+     *    subject when it was blank, and the provenance stamp. Status, logged
+     *    minutes, the estimate and the priority are the student's, and a sync
+     *    must never touch them.
+     *  - **cancel** flags withdrawn work by dropping its reminders and saying
+     *    so in the activity log. It never deletes and never completes: the
+     *    student decides what to do with work their teacher pulled.
+     */
+    case 'FEED_APPLY': {
+      const { diff } = action;
+      let next = state;
+      let touched = false;
+
+      if (diff.create.length > 0) {
+        const created = diff.create.map((item) =>
+          createAssignmentFromFeed(item, {
+            sourceId: action.sourceId,
+            syncedAt: action.syncedAt,
+            live: action.live,
+          }),
+        );
+        next = { ...next, assignments: [...next.assignments, ...created] };
+        next = log(
+          next,
+          'feed_assignments_imported',
+          created.length === 1
+            ? `Imported “${created[0].title}” from your Canvas calendar`
+            : `Imported ${created.length} assignments from your Canvas calendar`,
+          { count: created.length },
+        );
+        touched = true;
+      }
+
+      for (const update of diff.update) {
+        const before = next.assignments.find((a) => a.id === update.assignmentId);
+        if (!before) continue;
+        next = updateAssignment(next, update.assignmentId, update.patch);
+        if (update.changes.length > 0) {
+          touched = true;
+          next = log(
+            next,
+            'feed_assignment_updated',
+            `Canvas updated “${before.title}” — ${update.changes.join('; ')}`,
+            { assignmentId: before.id },
+          );
+        }
+      }
+
+      for (const cancellation of diff.cancel) {
+        const target = next.assignments.find((a) => a.id === cancellation.assignmentId);
+        if (!target || target.status === 'Completed') continue;
+        touched = true;
+        next = updateAssignment(next, cancellation.assignmentId, {
+          // Reminders stop, because nagging about withdrawn work is the
+          // fastest way to teach someone to ignore reminders. The assignment
+          // itself stays, with its logged time intact.
+          reminders: { ...target.reminders, enabled: false },
+        });
+        next = log(
+          next,
+          'feed_assignment_cancelled',
+          `Canvas says “${target.title}” was cancelled. It is still here if you want it.`,
+          { assignmentId: target.id },
+        );
+      }
+
+      if (!touched) return next === state ? state : next;
+      return settle(next, 'assignment_added');
+    }
+
+    /**
+     * The state of one connection, after an attempt.
+     *
+     * Stored separately from the data the connection produced, on purpose: a
+     * feed can be erroring while the assignments it imported last week are
+     * still perfectly good, and both facts have to be sayable at once.
+     */
+    case 'INTEGRATION_STATUS': {
+      const now = new Date().toISOString();
+      const records = state.integrations.records.map((record) =>
+        record.id !== action.id
+          ? record
+          : {
+              ...record,
+              status: action.status,
+              account: action.account ?? record.account,
+              lastAttemptAt: now,
+              lastSyncedAt: action.syncedAt ?? (action.error ? record.lastSyncedAt : now),
+              // Cleared on success rather than left to linger: a stale error
+              // beside a fresh timestamp is the most confusing thing this card
+              // could show.
+              lastError: action.error ?? undefined,
+              lastItemCount: action.itemCount ?? record.lastItemCount,
+            },
+      );
+      return { ...state, integrations: { ...state.integrations, records } };
     }
 
     case 'CANVAS_IGNORE':

@@ -41,6 +41,14 @@ const ICONS: Record<ActivityType, IconName> = {
   plan_settings_changed: 'settings',
   plan_item_skipped: 'refresh',
   plan_item_moved: 'refresh',
+  integration_connected: 'link',
+  integration_disconnected: 'unlink',
+  integration_synced: 'refresh',
+  integration_error: 'alert',
+  feed_assignments_imported: 'calendar',
+  feed_assignment_updated: 'calendar',
+  feed_assignment_cancelled: 'close',
+  course_progress_updated: 'edgenuity',
 };
 
 const TONES: Partial<Record<ActivityType, 'brand' | 'mint' | 'flame' | 'amber'>> = {

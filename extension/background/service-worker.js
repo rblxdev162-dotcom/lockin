@@ -33,6 +33,16 @@ import {
   syncCanvasNow,
 } from './canvas.js';
 import {
+  CALENDAR_ALARM,
+  configureCalendar,
+  disconnectCalendar,
+  fetchCalendar,
+  getCalendarConfig,
+  runCalendarRefresh,
+  scheduleCalendarRefresh,
+  toCalendarView,
+} from './calendar.js';
+import {
   onNotificationClicked,
   pruneFired,
   runReminderCheck,
@@ -103,6 +113,7 @@ chrome.runtime.onInstalled.addListener(() => {
   void refreshCanvasPermission();
   // A slow heartbeat re-asserts rules if Chrome ever drops dynamic rules.
   chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
+  void reassertCalendarAlarm();
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -111,7 +122,18 @@ chrome.runtime.onStartup.addListener(() => {
   void refresh();
   void refreshCanvasPermission();
   chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
+  void reassertCalendarAlarm();
 });
+
+/**
+ * Alarms do not survive an update or a browser restart, so a configured feed
+ * re-arms its refresh in both lifecycle hooks. A feed that silently stopped
+ * refreshing is worse than one that never worked: it still looks connected.
+ */
+async function reassertCalendarAlarm() {
+  const config = await getCalendarConfig();
+  if (config.url) await scheduleCalendarRefresh(config.refreshMinutes);
+}
 
 // If the student revokes Canvas access from chrome://extensions, stop the
 // content script rather than leaving a dead registration behind.
@@ -123,6 +145,14 @@ chrome.permissions.onAdded.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  /**
+   * The calendar refresh rides its own alarm rather than the heartbeat: the
+   * heartbeat runs every minute, and a school's server should be asked a few
+   * times a day, not 1,440.
+   */
+  if (alarm.name === CALENDAR_ALARM) {
+    void runCalendarRefresh();
+  }
   if (alarm.name === HEARTBEAT_ALARM) {
     // Reminders ride the existing one-minute heartbeat rather than adding an
     // alarm of their own; the check is a storage read and some arithmetic.

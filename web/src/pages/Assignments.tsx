@@ -48,6 +48,16 @@ const EMPTY_TITLES: Record<ViewId, string> = {
   completed: 'Nothing finished yet',
 };
 
+/** The first view with work in it, in priority order. */
+export function initialView(assignments: Assignment[], now: number): ViewId {
+  const counts: Record<ViewId, number> = { today: 0, overdue: 0, upcoming: 0, completed: 0 };
+  for (const assignment of assignments) counts[viewOf(assignment, now)] += 1;
+  if (counts.overdue > 0) return 'overdue';
+  if (counts.today > 0) return 'today';
+  if (counts.upcoming > 0) return 'upcoming';
+  return 'today';
+}
+
 const EMPTY_HINTS: Record<ViewId, string> = {
   today: 'Check Upcoming to get ahead.',
   overdue: 'Everything with a due date is still in time.',
@@ -91,7 +101,18 @@ export function AssignmentsPage() {
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<string>(ALL);
   const [priority, setPriority] = useState<string>(ALL);
-  const [view, setView] = useState<ViewId>('today');
+  /**
+   * Which view to land on.
+   *
+   * Not always Today. A student whose next deadline is Thursday would open the
+   * page to an empty screen and have to go looking for their own work — so the
+   * first view with something in it wins, in the order that matters: anything
+   * late, then today, then what is coming.
+   *
+   * Chosen once, on mount. Re-deriving it as data changes would move the page
+   * out from under somebody who deliberately opened an empty tab.
+   */
+  const [view, setView] = useState<ViewId>(() => initialView(state.assignments, Date.now()));
   const [showFilters, setShowFilters] = useState(false);
 
   // Deep link from the dashboard: /assignments?new=1

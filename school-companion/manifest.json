@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LockIn School Companion",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Tells LockIn whether Canvas or Edgenuity is open, and nothing else. Optional, and only for use where your organization allows it.",
   "minimum_chrome_version": "116",
   "permissions": ["tabs", "alarms", "storage"],

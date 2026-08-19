@@ -34,12 +34,17 @@ const CANVAS_HOST = 'myschool.instructure.com';
 const UNGRANTED_HOST = 'canvas.schooldistrict.org';
 const APP_ORIGIN = 'http://localhost:5173';
 /**
- * Bumped with SCHEMA_VERSION in web/src/lib/storage.ts. It is duplicated
- * rather than imported because this file runs in a browser page, not in Node —
- * the release suite would be the place to assert they agree if it ever drifts
- * silently.
+ * Read out of the shipping source rather than typed here.
+ *
+ * The comment above says a pinned number "broke the moment Phase 4 added v3",
+ * and then it was pinned again and broke the moment Phase 16 added v9. Parsing
+ * the constant costs one regex and cannot go stale.
  */
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = Number(
+  /export const SCHEMA_VERSION = (\d+);/.exec(
+    readFileSync(new URL('../../web/src/lib/storage.ts', import.meta.url), 'utf8'),
+  )?.[1],
+);
 const TLS_PORT = 8455;
 const SITE_PORT = 8100;
 const CDP_PORT = 9390;

@@ -3,6 +3,79 @@
 User-visible changes only. Internal architecture and phase history live in
 `HANDOFF.md`.
 
+## 1.3.0
+
+### Your Canvas assignments, without typing them in
+
+Connect your Canvas calendar feed once and your work appears — titles, courses
+and due dates, kept up to date on its own. When Canvas moves a deadline, the
+assignment you already started moves with it: your logged time, your notes and
+your progress stay exactly where they were. Nothing is ever added without you
+seeing it first.
+
+- **The feed address is treated like a password**, because it is one — anyone
+  holding it can read your calendar without logging in. It is kept inside the
+  Companion extension, never by the website, and never included in an export.
+- **No Companion?** Download the `.ics` file from Canvas and drop it in. Same
+  import, same review screen.
+- **Canvas never says whether you handed something in**, so LockIn does not
+  pretend otherwise. An assignment disappearing from the feed is never treated
+  as finished.
+
+### Edgenuity progress, from the reports you already get
+
+Save the progress report Edgenuity emails, or download a course report, and drop
+the file in. LockIn reads it on your device and shows where each course actually
+stands: how far through you are, where the pacing schedule says you should be,
+and which of those came from where.
+
+LockIn no longer reads the Edgenuity website at all. The progress email and the
+course report are the two things you are meant to have, and they are enough.
+
+### It tells you where you stand — or admits it doesn't know
+
+A new Progress page answers one question honestly. Ahead, on track, at risk,
+behind — with the reasons written out, not a score.
+
+And a fourth answer that matters more than the others: **not enough data**. If a
+sync failed or a report is three weeks old, LockIn says so instead of telling
+you that you are behind. It will not call something overdue on a due date it has
+reason to doubt.
+
+### Reminders that behave like a person
+
+- **One at a time.** However many things notice the same deadline, you get one
+  notification.
+- **Snooze actually works** — twenty minutes, that assignment only, and it comes
+  back rather than disappearing.
+- **Start Focus straight from the notification.**
+- **It stays quiet while you are visibly working**, except for the last warning
+  before a deadline.
+
+### The rest of it
+
+- **Home is one screen with one obvious next thing** instead of a dozen cards
+  competing for attention.
+- **Assignments has four views** — Today, Overdue, Upcoming, Completed — and
+  opens on the one that has something in it.
+- **A focus session now fills the screen**: the work, the time, and an honest
+  line about whether anything is actually being blocked.
+- **A new Integrations page** where every connection says what it can see, what
+  it cannot, when it last worked, and how to disconnect.
+- **LockIn notices when things go well** — and says so rarely enough that it
+  still means something.
+
+### For a managed school computer
+
+There is now an optional **School Companion** for a school Chrome profile. It
+does one thing: tells LockIn on the same computer whether Canvas or Edgenuity is
+open, so a reminder can hold its tongue while you are already working. It cannot
+read a page — not by policy, but because it has no ability to. It is off until
+you turn it on, and it asks you to confirm your school allows it first.
+
+LockIn does not get around Chrome profile separation, and it will not help you
+work around anything your school has set up. Everything else works without it.
+
 ## 1.2.1
 
 ### LockIn can now just always be there

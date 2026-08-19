@@ -1,8 +1,9 @@
 import type { Assignment } from '../../types';
-import { PlatformBadge, PriorityBadge, StatusBadge, Badge } from '../ui/Badge';
+import { PriorityBadge, Badge } from '../ui/Badge';
 import { Icon } from '../ui/Icon';
 import { formatDue, parseDueDate } from '../../lib/time';
 import { cx } from '../../lib/cx';
+import { SourceBadge } from '../ui/Status';
 import { CanvasStatusBadge } from './CanvasStatusBadge';
 import { EdgenuityPanel } from './EdgenuityPanel';
 
@@ -49,8 +50,10 @@ export function AssignmentCard({
   return (
     <div
       className={cx(
-        'lk-card group flex gap-3.5 p-4 transition-all',
-        done && 'opacity-60',
+        'lk-card lk-interactive group flex gap-3.5 p-4',
+        // Completed work fades rather than vanishing: it is still evidence of
+        // a finished day, and a list that empties itself gives no credit.
+        done && 'opacity-55',
         required && !done && 'border-brand-400 ring-1 ring-brand-400/40',
       )}
     >
@@ -99,15 +102,15 @@ export function AssignmentCard({
           {assignment.title}
         </p>
 
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <PlatformBadge platform={assignment.platform} />
-          <PriorityBadge priority={assignment.priority} />
-          <StatusBadge status={assignment.status} />
-          {isOverdue && <Badge tone="flame">Overdue</Badge>}
-        </div>
-
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs lk-muted">
-          <span className={cx(isOverdue && 'font-bold text-flame-600 dark:text-flame-400')}>
+        {/*
+          One line of facts, in the order they are asked for: when, how long,
+          where it came from. The platform, priority and status badges that used
+          to sit above this are gone from the row — three coloured pills per row
+          turned a list of twelve into a legend, and each is still on the detail
+          view where somebody is actually asking.
+        */}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption lk-muted">
+          <span className={cx(isOverdue && 'lk-status-behind lk-status-text font-bold')}>
             {formatDue(assignment.dueDate, assignment.dueTime)}
           </span>
           <span>~{assignment.estimatedMinutes} min</span>
@@ -116,6 +119,8 @@ export function AssignmentCard({
               {assignment.loggedMinutes} min logged
             </span>
           )}
+          <SourceBadge source={assignment.source} />
+          {assignment.priority !== 'Normal' && <PriorityBadge priority={assignment.priority} />}
         </div>
 
         {canvas && (

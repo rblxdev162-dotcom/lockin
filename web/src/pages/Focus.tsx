@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import type { AppState, FocusSession } from '../types';
 import { useApp } from '../store/context';
 import { Card, CardHeader, EmptyState } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Chip, Field, TextInput } from '../components/ui/Field';
 import { Badge } from '../components/ui/Badge';
 import { Icon } from '../components/ui/Icon';
-import { RingProgress, ProgressBar } from '../components/ui/Progress';
+import { ProgressBar } from '../components/ui/Progress';
 import { ConfirmDialog, Modal } from '../components/ui/Modal';
 import { ParentPinDialog } from '../components/features/ParentPinDialog';
 import { EmergencyExit } from '../components/features/EmergencyExit';
@@ -15,6 +17,7 @@ import { toast } from '../components/ui/Toast';
 import {
   blockingActive,
   dueSoon,
+  dueTimestamp,
   isComplete,
   requiredAssignments,
   sessionElapsedMs,
@@ -93,13 +96,34 @@ export function FocusPage() {
     }
   }, [session, elapsedMs, plannedMs, chimed]);
 
+  /**
+   * What was just finished, held for the completion card.
+   *
+   * React state rather than derived from `completedSessions`: the summary
+   * belongs to *this* visit to the page, and a reload should land on the
+   * ordinary Focus screen rather than re-congratulating somebody for a session
+   * they finished an hour ago.
+   */
+  const [justFinished, setJustFinished] = useState<{
+    minutes: number;
+    label: string;
+    completedAssignment: boolean;
+  } | null>(null);
+
   const endSession = (alsoComplete: boolean) => {
     const assignmentId = session?.assignmentId ?? null;
+    const finishedMinutes = Math.max(1, Math.round(elapsedMs / 60_000));
+    const finishedLabel = sessionLabel;
     dispatch({ type: 'END_SESSION' });
     if (alsoComplete && assignmentId) {
       dispatch({ type: 'COMPLETE_ASSIGNMENT', id: assignmentId, method: 'timer' });
     }
     setConfirmEnd(false);
+    setJustFinished({
+      minutes: finishedMinutes,
+      label: finishedLabel,
+      completedAssignment: alsoComplete && !!assignmentId,
+    });
     toast('Study time logged.', 'success');
   };
 
@@ -122,78 +146,67 @@ export function FocusPage() {
   const [exitOpen, setExitOpen] = useState(false);
   const [confirmEndFocus, setConfirmEndFocus] = useState(false);
 
+  /**
+   * A running session takes the whole screen.
+   *
+   * The setup form, the history list and the Focus Mode controls are all one
+   * tap away when the session ends — but while it runs they are clutter
+   * competing with the only thing that matters. This is the difference between
+   * a timer that feels like a tool and one that feels like a dashboard widget.
+   */
+  if (session) {
+    return (
+      <FocusRunning
+        session={session}
+        label={sessionLabel}
+        subject={sessionAssignment?.subject}
+        elapsedMs={elapsedMs}
+        plannedMs={plannedMs}
+        overrun={overrun}
+        extensionConnected={extension.status === 'connected'}
+        blockingCount={fm.active ? state.settings.blockedDomains.length : 0}
+        onPause={() => dispatch({ type: 'PAUSE_SESSION' })}
+        onResume={() => dispatch({ type: 'RESUME_SESSION' })}
+        onEnd={() => setConfirmEnd(true)}
+        confirm={
+          <ConfirmDialog
+            open={confirmEnd}
+            title="End this session?"
+            message={`${Math.round(elapsedMs / 60_000)} minutes will be logged${
+              sessionAssignment || sessionExam ? ` against “${sessionLabel}”` : ''
+            }.`}
+            confirmLabel="End and log"
+            onCancel={() => setConfirmEnd(false)}
+            onConfirm={() => endSession(false)}
+          />
+        }
+      />
+    );
+  }
+
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-3xl font-extrabold tracking-tight lk-strong">Focus</h1>
-        <p className="mt-1 text-sm lk-muted">
+        <h1 className="text-title font-extrabold lk-strong">Focus</h1>
+        <p className="mt-1 text-body lk-muted">
           A timer logs study time. Focus Mode blocks distractions until the work is done.
         </p>
       </header>
 
+      {justFinished && (
+        <FocusComplete
+          minutes={justFinished.minutes}
+          label={justFinished.label}
+          completedAssignment={justFinished.completedAssignment}
+          nextLine={completionLine(state, now)}
+          onDismiss={() => setJustFinished(null)}
+        />
+      )}
+
       {/* ================= Timer ================= */}
       <Card>
-        <CardHeader
-          title="Focus session"
-          subtitle={session ? 'Timer is running on this device' : 'Pick something to work on'}
-        />
+        <CardHeader title="Focus session" subtitle="Pick something to work on" />
 
-        {session ? (
-          <div className="flex flex-col items-center gap-5">
-            <RingProgress value={Math.min(elapsedMs, plannedMs)} max={plannedMs} size={230}>
-              <span
-                className={cx(
-                  'font-mono text-4xl font-extrabold tracking-tight tabular-nums',
-                  overrun ? 'text-mint-600 dark:text-mint-400' : 'lk-strong',
-                )}
-              >
-                {formatClock(overrun ? elapsedMs - plannedMs : plannedMs - elapsedMs)}
-              </span>
-              <span className="mt-1 text-xs font-bold tracking-wide lk-muted uppercase">
-                {session.state === 'paused' ? 'Paused' : overrun ? 'Overtime' : 'Remaining'}
-              </span>
-              <span className="mt-2 max-w-[11rem] truncate text-center text-sm font-semibold lk-strong">
-                {sessionLabel}
-              </span>
-            </RingProgress>
-
-            <div className="flex flex-wrap justify-center gap-2">
-              {session.state === 'running' ? (
-                <Button
-                  variant="secondary"
-                  icon={<Icon name="pause" size={16} />}
-                  onClick={() => dispatch({ type: 'PAUSE_SESSION' })}
-                >
-                  Pause
-                </Button>
-              ) : (
-                <Button
-                  icon={<Icon name="play" size={16} />}
-                  onClick={() => dispatch({ type: 'RESUME_SESSION' })}
-                >
-                  Resume
-                </Button>
-              )}
-              <Button
-                variant="danger"
-                icon={<Icon name="stop" size={16} />}
-                onClick={() => setConfirmEnd(true)}
-              >
-                End session
-              </Button>
-            </div>
-
-            <p className="text-center text-xs lk-muted">
-              {Math.round(elapsedMs / 60_000)} min elapsed · started{' '}
-              {new Date(session.startedAt).toLocaleTimeString(undefined, {
-                hour: 'numeric',
-                minute: '2-digit',
-              })}
-              <br />
-              The timer survives a refresh — it’s stored as timestamps, not a countdown.
-            </p>
-          </div>
-        ) : (
           <div className="space-y-4">
             <Field label="What are you working on?">
               <select
@@ -267,7 +280,6 @@ export function FocusPage() {
               Start {minutes}-minute session
             </Button>
           </div>
-        )}
       </Card>
 
       {/* ================= Focus Mode ================= */}
@@ -825,4 +837,221 @@ function FocusSetupModal({
       </div>
     </Modal>
   );
+}
+
+
+/* ------------------------------------------------------------------ */
+/* The running session                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a focus session looks like while it is running.
+ *
+ * Four things and nothing else: what you are working on, how long is left,
+ * whether protection is actually on, and how to stop. No progress ring inside
+ * a card inside a page — the timer *is* the page.
+ */
+function FocusRunning({
+  session,
+  label,
+  subject,
+  elapsedMs,
+  plannedMs,
+  overrun,
+  extensionConnected,
+  blockingCount,
+  onPause,
+  onResume,
+  onEnd,
+  confirm,
+}: {
+  session: FocusSession;
+  label: string;
+  subject?: string;
+  elapsedMs: number;
+  plannedMs: number;
+  overrun: boolean;
+  extensionConnected: boolean;
+  blockingCount: number;
+  onPause: () => void;
+  onResume: () => void;
+  onEnd: () => void;
+  confirm: ReactNode;
+}) {
+  const paused = session.state === 'paused';
+  const remaining = overrun ? elapsedMs - plannedMs : plannedMs - elapsedMs;
+  const pct = plannedMs > 0 ? Math.min(100, (elapsedMs / plannedMs) * 100) : 0;
+
+  return (
+    <div className="animate-fade flex min-h-[70vh] flex-col items-center justify-center py-8 text-center">
+      <p className="text-caption font-bold tracking-[0.18em] lk-muted uppercase">
+        {paused ? 'Paused' : overrun ? 'Overtime' : 'Focus'}
+      </p>
+
+      {subject && <p className="mt-6 text-body font-semibold lk-muted">{subject}</p>}
+      <h1 className="mt-0.5 max-w-xl px-4 text-title font-extrabold text-balance lk-strong">
+        {label}
+      </h1>
+
+      {/*
+        The clock is the largest thing on screen by a wide margin. Tabular
+        figures so digits do not shift under each other every second — the
+        difference between a timer you can glance at and one that pulls the eye
+        back.
+      */}
+      <p
+        className={cx(
+          'mt-6 font-mono text-[clamp(3.5rem,16vw,6rem)] leading-none font-extrabold tabular-nums',
+          overrun ? 'text-mint-600 dark:text-mint-400' : 'lk-strong',
+          paused && 'opacity-50',
+        )}
+        aria-hidden
+      >
+        {formatClock(remaining)}
+      </p>
+      {/* The same value for a screen reader, once a minute rather than once a
+          second — a per-second live region is unusable. */}
+      <span className="sr-only" aria-live="polite">
+        {Math.ceil(remaining / 60_000)} minutes {overrun ? 'over' : 'remaining'}
+      </span>
+
+      {/* A hairline rather than a ring: quieter, and readable from across a
+          desk. */}
+      <div
+        className="mt-7 h-[3px] w-full max-w-md overflow-hidden rounded-full lk-sunken"
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Session progress"
+      >
+        <div
+          className={cx(
+            'h-full rounded-full transition-[width] duration-1000 ease-linear',
+            overrun ? 'bg-mint-500' : 'bg-brand-500',
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <div className="mt-8 flex flex-wrap justify-center gap-2">
+        {paused ? (
+          <Button size="lg" icon={<Icon name="play" size={17} />} onClick={onResume}>
+            Resume
+          </Button>
+        ) : (
+          <Button
+            size="lg"
+            variant="secondary"
+            icon={<Icon name="pause" size={17} />}
+            onClick={onPause}
+          >
+            Pause
+          </Button>
+        )}
+        <Button size="lg" variant="ghost" icon={<Icon name="stop" size={17} />} onClick={onEnd}>
+          End session
+        </Button>
+      </div>
+
+      {/*
+        Protection state, stated plainly. Invariant 20: LockIn never lets a
+        student believe sites are blocked when they are not — and the moment
+        that matters most is while they are sitting in front of a timer.
+      */}
+      <p className="mt-7 flex items-center gap-2 text-caption lk-muted">
+        <span
+          aria-hidden
+          className={cx(
+            'h-1.5 w-1.5 rounded-full',
+            extensionConnected ? 'bg-mint-500' : 'bg-flame-500',
+          )}
+        />
+        {extensionConnected
+          ? blockingCount > 0
+            ? `${blockingCount} sites blocked while this runs`
+            : 'Companion connected'
+          : 'Companion not connected — sites are not being blocked'}
+      </p>
+
+      <p className="mt-2 text-caption lk-muted">
+        Started{' '}
+        {new Date(session.startedAt).toLocaleTimeString(undefined, {
+          hour: 'numeric',
+          minute: '2-digit',
+        })}{' '}
+        · the timer survives a refresh
+      </p>
+
+      {confirm}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Completion                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The end of a session, said once and quietly.
+ *
+ * A short scale-in, a real number, one honest sentence about what is left. No
+ * confetti: Phase 9's research is that invented rewards invite arguing about
+ * the reward, and the minutes are the real thing that happened.
+ */
+function FocusComplete({
+  minutes,
+  label,
+  completedAssignment,
+  nextLine,
+  onDismiss,
+}: {
+  minutes: number;
+  label: string;
+  completedAssignment: boolean;
+  nextLine: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <Card className="lk-card-primary animate-pop relative overflow-hidden">
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="absolute top-3 right-3 rounded-lg p-1.5 lk-muted transition-colors hover:lk-strong"
+      >
+        <Icon name="close" size={15} />
+      </button>
+
+      <p className="text-caption font-bold tracking-[0.18em] lk-muted uppercase">Focus complete</p>
+      <p className="mt-2 text-display font-extrabold tabular-nums lk-strong">{minutes} min</p>
+      <p className="mt-1 text-body font-semibold lk-strong">{label}</p>
+      {completedAssignment && <p className="mt-1 text-body lk-muted">Marked complete.</p>}
+      <p className="mt-3 text-body lk-muted">{nextLine}</p>
+    </Card>
+  );
+}
+
+/**
+ * One true sentence about what is left tonight.
+ *
+ * Every branch has to be true of the state it is shown for. Praise for
+ * finishing everything, shown while three things are still due, is the fastest
+ * way to teach somebody to ignore the app.
+ */
+function completionLine(state: AppState, now: number): string {
+  const tomorrow = now + 36 * 60 * 60 * 1000;
+  const open = state.assignments.filter((a) => {
+    if (a.status === 'Completed') return false;
+    const due = dueTimestamp(a);
+    // Undated work counts. `dueTimestamp` returns MAX_SAFE_INTEGER when there
+    // is no due date, and excluding it here produced "you're done with
+    // everything due tomorrow" while an undated assignment sat unfinished on
+    // the same screen — caught in the browser, not by a test.
+    if (!Number.isFinite(due) || due === Number.MAX_SAFE_INTEGER) return true;
+    return due <= tomorrow;
+  });
+  if (open.length === 0) return 'You’re done with everything due tomorrow.';
+  if (open.length === 1) return `One more to go: “${open[0].title}”.`;
+  return `${open.length} more still open.`;
 }

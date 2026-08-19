@@ -9,8 +9,10 @@ import { AssignmentCard } from '../components/features/AssignmentCard';
 import { AssignmentForm } from '../components/features/AssignmentForm';
 import { createAssignment } from '../store/factories';
 import type { Assignment } from '../types';
-import { PLATFORMS, PRIORITIES, STATUSES } from '../types';
-import { sortByDue } from '../lib/selectors';
+import { PLATFORMS, PRIORITIES } from '../types';
+import { dueTimestamp, isComplete, sortByDue } from '../lib/selectors';
+import { SectionHeader } from '../components/ui/Status';
+import { cx } from '../lib/cx';
 import { toast } from '../components/ui/Toast';
 import { useCanvas } from '../hooks/useCanvas';
 import { CanvasLinkModal } from '../components/features/CanvasLinkModal';
@@ -19,8 +21,63 @@ import { CanvasCallout } from '../components/features/CanvasCallout';
 
 const ALL = 'All';
 
+/**
+ * The four views a student actually thinks in.
+ *
+ * These replaced a status dropdown and a priority dropdown. A dropdown makes
+ * you name the thing you want before you can see it; a tab shows you what is
+ * there. `overdue` comes second rather than last because it is the one people
+ * open the page to check.
+ */
+const VIEWS = [
+  { id: 'today', label: 'Today' },
+  { id: 'overdue', label: 'Overdue' },
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'completed', label: 'Completed' },
+] as const;
+
+type ViewId = (typeof VIEWS)[number]['id'];
+
+const DAY = 86_400_000;
+
+/** Empty states say what is true, not that a filter returned nothing. */
+const EMPTY_TITLES: Record<ViewId, string> = {
+  today: 'Nothing due today',
+  overdue: 'Nothing overdue',
+  upcoming: 'Nothing coming up',
+  completed: 'Nothing finished yet',
+};
+
+const EMPTY_HINTS: Record<ViewId, string> = {
+  today: 'Check Upcoming to get ahead.',
+  overdue: 'Everything with a due date is still in time.',
+  upcoming: 'Connect Canvas and your week fills itself in.',
+  completed: 'Finished work collects here.',
+};
+
+/** Which view an assignment belongs to. One assignment, one view. */
+function viewOf(assignment: Assignment, now: number): ViewId {
+  if (isComplete(assignment)) return 'completed';
+  const due = dueTimestamp(assignment);
+
+  // Undated work sits in Today, not Upcoming.
+  //
+  // `dueTimestamp` returns MAX_SAFE_INTEGER when there is no due date, which
+  // would file it at the far end of Upcoming — the one place nobody looks.
+  // Phase 9's rule was that undated work is real work; hiding it behind a tab
+  // is the same mistake as refusing to accept it without a date.
+  if (!Number.isFinite(due) || due === Number.MAX_SAFE_INTEGER) return 'today';
+
+  if (due < now) return 'overdue';
+  // "Today" is the rest of today plus tonight's work — anything due before
+  // tomorrow ends, which is what a student means when they ask what is due.
+  const endOfTomorrow = new Date(now);
+  endOfTomorrow.setHours(23, 59, 59, 999);
+  return due <= endOfTomorrow.getTime() + DAY ? 'today' : 'upcoming';
+}
+
 export function AssignmentsPage() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, now } = useApp();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
@@ -33,8 +90,9 @@ export function AssignmentsPage() {
   const [linking, setLinking] = useState<Assignment | null>(null);
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<string>(ALL);
-  const [status, setStatus] = useState<string>(ALL);
   const [priority, setPriority] = useState<string>(ALL);
+  const [view, setView] = useState<ViewId>('today');
+  const [showFilters, setShowFilters] = useState(false);
 
   // Deep link from the dashboard: /assignments?new=1
   useEffect(() => {
@@ -45,30 +103,40 @@ export function AssignmentsPage() {
     }
   }, [params, setParams]);
 
-  const filtered = useMemo(() => {
+  /** Everything matching the search and the optional filters, before views. */
+  const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sortByDue(
       state.assignments.filter((a) => {
         if (platform !== ALL && a.platform !== platform) return false;
-        if (status !== ALL && a.status !== status) return false;
         if (priority !== ALL && a.priority !== priority) return false;
         if (q && !`${a.title} ${a.subject}`.toLowerCase().includes(q)) return false;
         return true;
       }),
     );
-  }, [state.assignments, query, platform, status, priority]);
+  }, [state.assignments, query, platform, priority]);
 
-  const active = filtered.filter((a) => a.status !== 'Completed');
-  const done = filtered.filter((a) => a.status === 'Completed');
-  const filtersOn = platform !== ALL || status !== ALL || priority !== ALL || query.trim() !== '';
+  /** Counts for the tabs, computed once rather than per tab. */
+  const buckets = useMemo(() => {
+    const out: Record<ViewId, Assignment[]> = { today: [], overdue: [], upcoming: [], completed: [] };
+    for (const assignment of matching) out[viewOf(assignment, now)].push(assignment);
+    // Completed reads newest-first: the useful question there is "what did I
+    // just finish", not "what was due first".
+    out.completed.reverse();
+    return out;
+  }, [matching, now]);
+
+  const shown = buckets[view];
+  const filtersOn = platform !== ALL || priority !== ALL || query.trim() !== '';
 
   return (
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight lk-strong">Assignments</h1>
-          <p className="mt-1 text-sm lk-muted">
-            {state.assignments.length} total · {active.length} unfinished
+          <h1 className="text-title font-extrabold lk-strong">Assignments</h1>
+          <p className="mt-1 text-body lk-muted">
+            {state.assignments.length} total ·{' '}
+            {buckets.today.length + buckets.overdue.length + buckets.upcoming.length} unfinished
           </p>
         </div>
 
@@ -80,59 +148,102 @@ export function AssignmentsPage() {
         <QuickAdd onOpenFull={() => setCreating(true)} autoFocus={state.assignments.length === 0} />
       </Card>
 
-      <Card>
-        <div className="relative">
-          <Icon
-            name="search"
-            size={17}
-            className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 lk-muted"
-          />
-          <TextInput
-            value={query}
-            placeholder="Search title or subject…"
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-9"
-          />
+      {/*
+        Views first, filters second and folded away. The three-dropdown row
+        this replaced made an assignment list look like a report builder; the
+        common questions are "what's due" and "what's late", and those are now
+        one tap rather than two selections.
+      */}
+      <div>
+        <div
+          role="tablist"
+          aria-label="Assignment views"
+          className="flex gap-1 overflow-x-auto rounded-2xl lk-sunken border lk-border p-1"
+        >
+          {VIEWS.map((entry) => {
+            const selected = view === entry.id;
+            const count = buckets[entry.id].length;
+            return (
+              <button
+                key={entry.id}
+                role="tab"
+                type="button"
+                aria-selected={selected}
+                onClick={() => setView(entry.id)}
+                className={cx(
+                  'flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2',
+                  'text-caption font-bold whitespace-nowrap transition-colors duration-150',
+                  selected ? 'lk-raised lk-strong shadow-sm' : 'lk-muted hover:lk-strong',
+                )}
+              >
+                {entry.label}
+                <span
+                  className={cx(
+                    'rounded-full px-1.5 py-0.5 text-[0.65rem] tabular-nums',
+                    selected ? 'lk-sunken' : 'opacity-70',
+                    entry.id === 'overdue' && count > 0 && 'lk-status-behind lk-status-chip',
+                  )}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
-          <Select
-            value={platform}
-            options={[ALL, ...PLATFORMS]}
-            onChange={(e) => setPlatform(e.target.value)}
-            aria-label="Filter by platform"
-          />
-          <Select
-            value={status}
-            options={[ALL, ...STATUSES]}
-            onChange={(e) => setStatus(e.target.value)}
-            aria-label="Filter by status"
-          />
-          <Select
-            value={priority}
-            options={[ALL, ...PRIORITIES]}
-            onChange={(e) => setPriority(e.target.value)}
-            aria-label="Filter by priority"
-          />
-        </div>
-
-        {filtersOn && (
-          <div className="mt-3">
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Icon
+              name="search"
+              size={16}
+              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 lk-muted"
+            />
+            <TextInput
+              value={query}
+              placeholder="Search title or subject…"
+              onChange={(e) => setQuery(e.target.value)}
+              className="pl-9"
+              aria-label="Search assignments"
+            />
+          </div>
+          <Chip
+            onClick={() => setShowFilters((open) => !open)}
+            aria-expanded={showFilters}
+          >
+            Filters{filtersOn ? ' ·' : ''}
+          </Chip>
+          {filtersOn && (
             <Chip
               onClick={() => {
                 setQuery('');
                 setPlatform(ALL);
-                setStatus(ALL);
                 setPriority(ALL);
               }}
             >
-              Clear filters
+              Clear
             </Chip>
+          )}
+        </div>
+
+        {showFilters && (
+          <div className="animate-fade mt-2.5 grid gap-2.5 sm:grid-cols-2">
+            <Select
+              value={platform}
+              options={[ALL, ...PLATFORMS]}
+              onChange={(e) => setPlatform(e.target.value)}
+              aria-label="Filter by platform"
+            />
+            <Select
+              value={priority}
+              options={[ALL, ...PRIORITIES]}
+              onChange={(e) => setPriority(e.target.value)}
+              aria-label="Filter by priority"
+            />
           </div>
         )}
-      </Card>
+      </div>
 
-      {filtered.length === 0 ? (
+      {shown.length === 0 ? (
         state.assignments.length === 0 ? (
           /* An empty list is the best place in the app to offer Canvas — it is
              the moment the offer is relevant, and the space is doing nothing
@@ -149,57 +260,39 @@ export function AssignmentsPage() {
           </div>
         ) : (
           <EmptyState
-            icon={<Icon name="list" size={28} />}
-            title="Nothing matches"
-            hint="Try clearing the filters."
+            icon={<Icon name="check" size={28} />}
+            title={EMPTY_TITLES[view]}
+            hint={filtersOn ? 'Try clearing the filters.' : EMPTY_HINTS[view]}
           />
         )
       ) : (
-        <div className="space-y-5">
-          {active.length > 0 && (
-            <section className="space-y-2.5">
-              <h2 className="text-xs font-bold tracking-wide lk-muted uppercase">
-                Unfinished ({active.length})
-              </h2>
-              {active.map((a) => (
-                <AssignmentCard
-                  key={a.id}
-                  assignment={a}
-                  required={state.focusMode.active && state.focusMode.requiredTaskIds.includes(a.id)}
-                  onToggleComplete={() => {
-                    dispatch({ type: 'COMPLETE_ASSIGNMENT', id: a.id, method: 'manual' });
-                    toast(`“${a.title}” marked complete.`, 'success');
-                  }}
-                  onEdit={() => setEditing(a)}
-                  onDelete={() => setDeleting(a)}
-                  onFocus={() => navigate(`/focus?assignment=${a.id}`)}
-                  onOpenCanvas={(x) => x.canvas && openInCanvas(x.canvas.url)}
-                  onCheckCanvas={checkStatus}
-                  canvasBusy={canvasBusy === 'check' || canvasBusy === 'sync'}
-                  onLinkCanvas={canvasConnected && !a.canvas ? () => setLinking(a) : undefined}
-                />
-              ))}
-            </section>
-          )}
-
-          {done.length > 0 && (
-            <section className="space-y-2.5">
-              <h2 className="text-xs font-bold tracking-wide lk-muted uppercase">
-                Completed ({done.length})
-              </h2>
-              {done.map((a) => (
-                <AssignmentCard
-                  key={a.id}
-                  assignment={a}
-                  onToggleComplete={() => dispatch({ type: 'UNCOMPLETE_ASSIGNMENT', id: a.id })}
-                  onEdit={() => setEditing(a)}
-                  onDelete={() => setDeleting(a)}
-                  onOpenCanvas={(x) => x.canvas && openInCanvas(x.canvas.url)}
-                />
-              ))}
-            </section>
-          )}
-        </div>
+        <section className="space-y-2.5" aria-live="polite">
+          <SectionHeader
+            title={`${VIEWS.find((v) => v.id === view)?.label} (${shown.length})`}
+          />
+          {shown.map((a) => (
+            <AssignmentCard
+              key={a.id}
+              assignment={a}
+              required={state.focusMode.active && state.focusMode.requiredTaskIds.includes(a.id)}
+              onToggleComplete={() => {
+                if (isComplete(a)) {
+                  dispatch({ type: 'UNCOMPLETE_ASSIGNMENT', id: a.id });
+                  return;
+                }
+                dispatch({ type: 'COMPLETE_ASSIGNMENT', id: a.id, method: 'manual' });
+                toast(`“${a.title}” marked complete.`, 'success');
+              }}
+              onEdit={() => setEditing(a)}
+              onDelete={() => setDeleting(a)}
+              onFocus={isComplete(a) ? undefined : () => navigate(`/focus?assignment=${a.id}`)}
+              onOpenCanvas={(x) => x.canvas && openInCanvas(x.canvas.url)}
+              onCheckCanvas={isComplete(a) ? undefined : checkStatus}
+              canvasBusy={canvasBusy === 'check' || canvasBusy === 'sync'}
+              onLinkCanvas={canvasConnected && !a.canvas && !isComplete(a) ? () => setLinking(a) : undefined}
+            />
+          ))}
+        </section>
       )}
 
       <Modal open={creating} title="New assignment" onClose={() => setCreating(false)} wide>

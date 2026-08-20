@@ -3,11 +3,11 @@
  *
  * ## The split, and why it is this way round
  *
- * The **extension** fetches the feed on its own alarm — every 30 minutes, and
- * once when Chrome starts — so the newest ICS is always cached whether or not
- * LockIn is open. But the extension cannot turn that text into assignments: it
- * has no idea what LockIn already has, and duplicating the reconciler there
- * would be a second copy of the rules that decide whether something is new.
+ * Whatever is fetching — LockIn's local service, or the companion extension —
+ * does it on its own timer, so the newest ICS is cached whether or not LockIn
+ * is open. But neither can turn that text into assignments: neither knows what
+ * LockIn already has, and duplicating the reconciler would be a second copy of
+ * the rules that decide whether something is new.
  *
  * So this hook does the other half. Whenever the app is open it folds the
  * cached feed in — on load, and every 30 minutes after — and it does it
@@ -27,7 +27,7 @@
  */
 import { useCallback, useEffect, useRef } from 'react';
 import { useApp } from '../store/context';
-import { syncCalendar } from '../lib/canvas/calendarClient';
+import { syncFeed } from '../lib/canvas/feedTransport';
 import { describeDiff, diffIsInteresting, reconcileFeed } from '../lib/canvas/calendarReconcile';
 import { toast } from '../components/ui/Toast';
 
@@ -55,12 +55,12 @@ export function useCanvasAutoSync(): void {
     const now = Date.now();
     // `force: false` — the extension's cache is what this reads, so a page open
     // in two tabs does not become two requests to the school's server.
-    const result = await syncCalendar(now, current.integrations.canvasCalendar.horizonDays, false);
+    const result = await syncFeed(now, current.integrations.canvasCalendar.horizonDays, false);
     if (!result.ok || !result.feed) {
       // A failed background sync is not worth a toast. The Integrations page
       // and the pace engine both surface staleness on their own, and a popup
       // about a network blip the student did not ask for is noise.
-      if (!result.noCompanion) {
+      if (result.reason !== 'no-transport') {
         send({
           type: 'INTEGRATION_STATUS',
           id: 'canvas_calendar',
@@ -103,14 +103,16 @@ export function useCanvasAutoSync(): void {
   }, []);
 
   useEffect(() => {
-    // No companion, no feed to read. The Integrations page explains why.
-    if (extension.status !== 'connected') return;
-
+    // Runs regardless of the extension: the local service is the usual
+    // transport, and `syncFeed` returns `no-transport` harmlessly when neither
+    // is present.
     const first = window.setTimeout(() => void runSync(), FIRST_RUN_DELAY_MS);
     const interval = window.setInterval(() => void runSync(), AUTO_SYNC_MS);
     return () => {
       window.clearTimeout(first);
       window.clearInterval(interval);
     };
+    // `extension.status` is a dependency so a companion appearing mid-session
+    // triggers an immediate catch-up sync.
   }, [extension.status, runSync]);
 }

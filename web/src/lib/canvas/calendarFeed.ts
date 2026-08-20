@@ -62,18 +62,73 @@ const PAST_WINDOW_DAYS = 30;
 /**
  * `Cell Respiration Worksheet [Biology 1 - P3]` → title + course.
  *
- * Canvas puts the course in trailing brackets. Parsed from the *end* only: an
- * assignment legitimately titled `Worksheet [draft]` keeps its brackets if
- * there is nothing after them, and a title containing brackets mid-string is
- * left alone entirely.
+ * Canvas puts the course in trailing brackets, and **the course name itself may
+ * contain brackets** — a real feed from this project's own school produces
+ * `Accelerated Math ORIENTATION [[Chopra] Period 1 & 4: ACC Math]`. A regex
+ * over `[^[\]]` cannot see that, so it found no course at all and every one of
+ * those assignments landed under "General".
+ *
+ * So the group is found by walking backwards from the closing bracket, counting
+ * depth. A title with brackets mid-string is still left alone, because the scan
+ * only starts if the string *ends* with `]`.
  */
 export function splitSummary(summary: string): { title: string; courseName?: string } {
-  const match = /^(.*)\s\[([^[\]]{1,120})\]\s*$/.exec(summary.trim());
-  if (!match) return { title: summary.trim().slice(0, 200) };
-  const title = match[1].trim().slice(0, 200);
-  const courseName = match[2].trim().slice(0, 120);
-  if (!title) return { title: summary.trim().slice(0, 200) };
-  return { title, courseName };
+  const text = summary.trim();
+  if (!text.endsWith(']')) return { title: text.slice(0, 200) };
+
+  let depth = 0;
+  let open = -1;
+  for (let i = text.length - 1; i >= 0; i -= 1) {
+    if (text[i] === ']') depth += 1;
+    else if (text[i] === '[') {
+      depth -= 1;
+      if (depth === 0) {
+        open = i;
+        break;
+      }
+    }
+  }
+  if (open <= 0) return { title: text.slice(0, 200) };
+
+  const title = text.slice(0, open).trim().slice(0, 200);
+  const inner = text.slice(open + 1, -1).trim();
+  if (!title || !inner) return { title: text.slice(0, 200) };
+  return { title, courseName: prettyCourseName(inner).slice(0, 120) };
+}
+
+/**
+ * A Canvas section name a person would recognise.
+ *
+ * Canvas section names are administrative, and this is what a real feed
+ * actually carries:
+ *
+ *     [Chopra] Period 1 & 4: ACC Math       → Period 1 & 4: ACC Math
+ *     E4007-PPer 2 (11:40 AM - 12:30 PM)-Emmett  → Per 2 — Emmett
+ *     E7027-PEl/B/O (8:10 AM - 8:55 AM)-Chopra   → El/B/O — Chopra
+ *
+ * Those become column headings, so the raw form is genuinely unusable. Every
+ * rule below is conservative and **anything that does not match is returned
+ * unchanged** — the transform can only ever remove noise it recognised, never
+ * invent a name.
+ */
+export function prettyCourseName(raw: string): string {
+  let name = raw.trim();
+
+  // A leading teacher tag: `[Chopra] Period 1 & 4` → `Period 1 & 4`.
+  const leadingTag = /^\[([^\]]{1,40})\]\s*(.+)$/.exec(name);
+  if (leadingTag && leadingTag[2].trim()) name = leadingTag[2].trim();
+
+  // A class-time range in parentheses, which is never useful in a heading.
+  name = name.replace(/\s*\(\s*\d{1,2}:\d{2}\s*[AP]M\s*[-–]\s*\d{1,2}:\d{2}\s*[AP]M\s*\)/i, '');
+
+  // A leading section code: `E4007-PPer 2` → `Per 2`.
+  name = name.replace(/^[A-Z]{1,3}\d{3,6}-P/, '');
+
+  // A trailing `-Teacher` becomes a readable separator.
+  name = name.replace(/\s*-\s*([A-Za-z][A-Za-z'’-]{1,30})\s*$/, ' — $1');
+
+  const cleaned = name.replace(/\s+/g, ' ').trim();
+  return cleaned.length > 0 ? cleaned : raw.trim();
 }
 
 /**

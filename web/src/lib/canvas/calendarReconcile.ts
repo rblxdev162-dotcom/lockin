@@ -21,7 +21,7 @@
  */
 import type { Assignment } from '../../types';
 import type { FeedItem } from './calendarFeed';
-import { feedSource } from './calendarFeed';
+import { feedSource, prettyCourseName } from './calendarFeed';
 
 export interface FeedUpdate {
   assignmentId: string;
@@ -135,9 +135,21 @@ export function reconcileFeed(
       changes.push(`Renamed to “${item.title}”`);
     }
 
-    if (item.courseName && !existing.subject) {
+    // The subject is filled in when LockIn does not have a real one. `General`
+    // counts as not having one: it is the placeholder `createAssignment` uses,
+    // and work imported before the feed parser understood a course name is
+    // sitting under it. Anything the student typed themselves is left alone.
+    const placeholder = !existing.subject || existing.subject === 'General';
+    // Also healed: a subject that is the *raw* form of the same course name,
+    // stored before the feed parser learned to tidy section codes. Comparing
+    // through `prettyCourseName` makes that precise — it can only ever match
+    // the un-tidied version of this exact course, never a name the student
+    // chose.
+    const staleRawName =
+      !!existing.subject && prettyCourseName(existing.subject) === item.courseName;
+    if (item.courseName && (placeholder || staleRawName) && existing.subject !== item.courseName) {
       patch.subject = item.courseName;
-      changes.push(`Course set to ${item.courseName}`);
+      changes.push(`Class set to ${item.courseName}`);
     }
 
     // The provenance stamp is refreshed on every sync even when nothing else

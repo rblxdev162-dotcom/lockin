@@ -325,17 +325,16 @@ test('no LockIn source file can make a network request', () => {
    * pattern-matched, so adding a second one has to be a deliberate edit to
    * this test.
    *
-   * `lib/context/client.ts` talks to LockIn's own service on 127.0.0.1 — the
-   * process already serving this page. That is inter-process communication on
-   * one machine, not a network request: nothing leaves the device, and the
-   * privacy page's claim is unchanged. The check below proves it stays that
-   * way.
+   * `lib/canvas/serviceFeed.ts` talks to LockIn's own service on 127.0.0.1 —
+   * the process already serving this page. That is inter-process communication
+   * on one machine, not a network request: nothing leaves the device, and the
+   * privacy page's claim is unchanged. The check below proves it stays that way.
    *
-   * The Canvas calendar feed is deliberately *not* here: it is fetched by the
-   * extension, which has host permissions and keeps the feed URL out of any
-   * page's reach.
+   * The Canvas feed itself is fetched by that service (or by the extension),
+   * never by the page: Canvas serves it with no `Access-Control-Allow-Origin`
+   * header — measured, not assumed — so a page physically cannot read it.
    */
-  const LOOPBACK_ONLY = 'lib/context/client.ts';
+  const LOOPBACK_ONLY = 'lib/canvas/serviceFeed.ts';
 
   const offenders = sources.filter(
     ({ file, text }) =>

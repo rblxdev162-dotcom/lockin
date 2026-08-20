@@ -88,7 +88,7 @@ To watch it work: add a site under **Blocked websites**, then press **Start
 | **Focus Mode** | Blocks the sites you chose until the work you chose is done. |
 | **Focus Guard** | With no extension at all, notices when you leave the LockIn tab during Focus Mode and times it. It cannot block, and cannot see where you went — and says both. |
 | **Chrome extension** | Does the blocking for real, with `declarativeNetRequest`. Survives closing LockIn and restarting Chrome. |
-| **Canvas calendar feed** | Assignments, courses and due dates from Canvas's own calendar feed, checked every 30 minutes and once at startup. |
+| **Canvas calendar feed** | Assignments, courses and due dates from Canvas's own calendar feed, checked every 30 minutes — by LockIn's local service (no extension needed, keeps running with Chrome closed) or by the Companion. |
 | **Canvas status** | Graded, submitted, missing or late — read from Canvas pages in your own logged-in session, including a background tab opened at startup if you want it. |
 | **What to do next** | One ordering everywhere: missing, then overdue, then today, then upcoming — strictly by due time inside each. Priority never beats a deadline. |
 | **By class** | The same list as columns, one per class, most urgent class first. |
@@ -279,6 +279,10 @@ The in-app `/privacy` page says the same thing to students. Keep them in step.
   cannot cross Chrome profiles, and the progress email arrives weekly, which is
   useless for live data. An integration that is right one day in seven is worse
   than none, because the app quotes it as current.
+- **A Canvas feed cannot be fetched by the page.** Canvas serves it with no
+  `Access-Control-Allow-Origin` header — measured against a real feed. Either
+  LockIn's local service or the Companion extension has to do it; with neither,
+  the `.ics` file import still works.
 - **Graded status needs Canvas open in the same Chrome profile as the
   extension.** There is no way around that: a calendar feed does not carry
   submission state, and the Canvas API needs a Developer Key a student cannot

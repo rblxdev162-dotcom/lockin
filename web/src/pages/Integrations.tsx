@@ -25,16 +25,15 @@ import { toast } from '../components/ui/Toast';
 import { SectionHeader } from '../components/ui/Status';
 import { cx } from '../lib/cx';
 import { relativeAge } from '../lib/sources/freshness';
+import { readCalendarFile, setCalendarOptions } from '../lib/canvas/calendarClient';
 import {
-  FETCH_MESSAGES,
-  connectCalendar,
-  disconnectCalendar,
-  getCalendarView,
-  readCalendarFile,
-  setCalendarOptions,
-  syncCalendar,
-} from '../lib/canvas/calendarClient';
-import type { CalendarView } from '../lib/canvas/calendarClient';
+  FEED_MESSAGES,
+  connectFeed,
+  disconnectFeed,
+  getFeedView,
+  syncFeed,
+} from '../lib/canvas/feedTransport';
+import type { FeedView } from '../lib/canvas/feedTransport';
 import { describeDiff, diffIsInteresting, reconcileFeed } from '../lib/canvas/calendarReconcile';
 import type { FeedDiff } from '../lib/canvas/calendarReconcile';
 import type { IntegrationStatus } from '../types/integrations';
@@ -218,22 +217,26 @@ function IntegrationCard({
 function CanvasCard() {
   const { state, dispatch, now, extension } = useApp();
   const record = state.integrations.records.find((r) => r.id === 'canvas_calendar');
-  const [view, setView] = useState<CalendarView | null>(null);
+  const [view, setView] = useState<FeedView | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<{ diff: FeedDiff; live: boolean } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const companion = extension.status === 'connected';
   const horizon = state.integrations.canvasCalendar.horizonDays;
 
   const refresh = useCallback(() => {
-    void getCalendarView().then((next) => next && setView(next));
+    void getFeedView().then(setView);
   }, []);
 
+  // Asked once on mount and again whenever the extension appears: either
+  // transport may become available after the page loaded.
   useEffect(() => {
-    if (companion) refresh();
-  }, [companion, refresh]);
+    refresh();
+  }, [refresh, extension.status]);
+
+  /** Whether anything on this machine can fetch the feed at all. */
+  const canFetch = view !== null && view.transport !== 'none';
 
   const applyDiff = (diff: FeedDiff, live: boolean) => {
     dispatch({
@@ -257,17 +260,17 @@ function CanvasCard() {
   const sync = async (force = false) => {
     setBusy(true);
     try {
-      const result = await syncCalendar(now, horizon, force);
+      const result = await syncFeed(now, horizon, force);
 
-      if (result.noCompanion) {
-        toast('The LockIn Companion isn’t answering, so the feed can’t be fetched.', 'error');
+      if (result.reason === 'no-transport') {
+        toast(FEED_MESSAGES['no-transport'], 'error');
         return;
       }
       if (!result.ok || !result.feed) {
         const message =
           result.reason === 'unreadable'
             ? (result.feed?.fatal ?? 'That feed could not be read.')
-            : (FETCH_MESSAGES[result.reason ?? 'network'] ?? 'The sync failed.');
+            : (FEED_MESSAGES[result.reason ?? 'network'] ?? 'The sync failed.');
         dispatch({
           type: 'INTEGRATION_STATUS',
           id: 'canvas_calendar',
@@ -275,11 +278,11 @@ function CanvasCard() {
           error: message,
         });
         toast(message, 'error');
-        if (result.view) setView(result.view);
+        refresh();
         return;
       }
 
-      if (result.view) setView(result.view);
+      refresh();
       const diff = reconcileFeed(result.feed.items, state.assignments, {
         sourceId: 'canvas-calendar',
         syncedAt: new Date(result.fetchedAt ?? now).toISOString(),
@@ -328,11 +331,13 @@ function CanvasCard() {
 
   const statusText = view?.configured
     ? view.lastFetchedAt
-      ? `${view.host} · checked ${relativeAge(now - view.lastFetchedAt)}`
+      ? `${view.host} · checked ${relativeAge(now - view.lastFetchedAt)} · via ${
+          view.transport === 'service' ? 'LockIn service' : 'Companion'
+        }`
       : (view.host ?? undefined)
-    : companion
+    : canFetch
       ? 'Add your calendar feed to import assignments automatically'
-      : 'Needs the LockIn Companion, or import a .ics file';
+      : 'Needs LockIn’s local service or the Companion — or import a .ics file';
 
   return (
     <>
@@ -367,8 +372,7 @@ function CanvasCard() {
                 size="sm"
                 variant="secondary"
                 onClick={async () => {
-                  const next = await disconnectCalendar();
-                  setView(next);
+                  setView(await disconnectFeed());
                   dispatch({
                     type: 'INTEGRATION_STATUS',
                     id: 'canvas_calendar',
@@ -381,7 +385,7 @@ function CanvasCard() {
               </Button>
             </>
           ) : (
-            <Button size="sm" onClick={() => setSetupOpen(true)} disabled={!companion}>
+            <Button size="sm" onClick={() => setSetupOpen(true)} disabled={!canFetch}>
               Connect Canvas Calendar
             </Button>
           )}
@@ -401,7 +405,7 @@ function CanvasCard() {
           />
         </div>
 
-        {view?.configured && (
+        {view?.configured && view.transport === 'extension' && (
           <div className="mt-3.5 space-y-2.5 border-t lk-border pt-3">
             <p className="text-caption lk-muted">
               LockIn checks your feed every 30 minutes on its own, and once when
@@ -410,9 +414,7 @@ function CanvasCard() {
             <Toggle
               checked={view.openCanvasOnStartup}
               onChange={(on) => {
-                void setCalendarOptions({ openCanvasOnStartup: on }).then((next) => {
-                  if (next) setView(next);
-                });
+                void setCalendarOptions({ openCanvasOnStartup: on }).then(refresh);
               }}
               label="Open Canvas in the background to check what's graded"
             />
@@ -426,11 +428,19 @@ function CanvasCard() {
           </div>
         )}
 
-        {!companion && (
+        {view?.configured && view.transport === 'service' && (
+          <p className="mt-3 border-t lk-border pt-3 text-caption lk-muted">
+            LockIn’s own local service is doing the fetching, every 30 minutes —
+            including while Chrome is closed. Nothing else needs installing.
+          </p>
+        )}
+
+        {!canFetch && (
           <p className="mt-2.5 text-caption lk-muted">
-            A Canvas feed can’t be fetched by a web page — Canvas doesn’t allow
-            it. The Companion does the fetching, or you can download the file
-            and import it here.
+            A Canvas feed can’t be fetched by a web page — Canvas serves it
+            without the header a browser needs. Either LockIn’s local service
+            (<code>npm run service:install</code>) or the Companion extension
+            can do it, or you can download the .ics and import it here.
           </p>
         )}
       </IntegrationCard>
@@ -462,34 +472,24 @@ function CanvasSetupModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onConnected: (view: CalendarView) => void;
+  onConnected: (view: FeedView) => void;
 }) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const REASONS: Record<string, string> = {
-    empty: 'Paste the feed address first.',
-    'not-a-url': 'That doesn’t look like a web address.',
-    'not-https': 'A calendar feed address has to start with https://.',
-    'private-host': 'That address points at this computer, not at Canvas.',
-  };
-
   const submit = async () => {
     setBusy(true);
     setError(null);
-    const view = await connectCalendar(url.trim());
+    const result = await connectFeed(url.trim());
     setBusy(false);
-    if (!view) {
-      setError('The LockIn Companion didn’t answer. Is it installed and enabled?');
-      return;
-    }
-    if (view.ok === false) {
-      setError(REASONS[view.reason ?? ''] ?? 'That address was not accepted.');
+
+    if (!result.ok || !result.view) {
+      setError(FEED_MESSAGES[result.reason ?? ''] ?? 'That address was not accepted.');
       return;
     }
     setUrl('');
-    onConnected(view);
+    onConnected(result.view);
   };
 
   return (

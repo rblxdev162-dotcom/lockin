@@ -3,6 +3,26 @@
 User-visible changes only. Internal architecture and phase history live in
 `HANDOFF.md`.
 
+## 1.4.1
+
+### Connecting Canvas actually works now
+
+The connect button needed the Companion extension, which meant it did nothing
+if you hadn't installed one. It no longer does: **LockIn's own local service
+fetches the feed**, so connecting works with nothing else installed — and it
+keeps checking every 30 minutes even while Chrome is closed.
+
+Connecting now also proves the address works before saying "Connected", instead
+of accepting it and failing quietly later.
+
+### Your class names are readable
+
+Canvas hands out section names like `E4007-PPer 2 (11:40 AM - 12:30 PM)-Emmett`.
+Those are now shown as **Per 2 — Emmett**. Two of your classes were also filed
+under "General" because their names contain brackets that the parser couldn't
+read; both are fixed, and existing assignments correct themselves on the next
+sync.
+
 ## 1.4.0
 
 ### Canvas keeps itself up to date

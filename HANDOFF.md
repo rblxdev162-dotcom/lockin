@@ -316,6 +316,9 @@ one.
 | --- | --- |
 | Rule generation | `background/rules.js` |
 | **Canvas feed fetch, the URL, the 30-min alarm** | `background/calendar.js` |
+| **The same, via the local service** | `scripts/canvas-feed.mjs` |
+| Which transport answers | `lib/canvas/feedTransport.ts` |
+| The page's side of the service | `lib/canvas/serviceFeed.ts` |
 | Background Canvas tab for status | `background/canvas.js` → `openCanvasForSync()` |
 | Activity awareness (metadata only) | `background/activity.js` |
 | **The one notification door** | `background/reminders.js` → `deliver()` |
@@ -361,6 +364,32 @@ architecture, and the 5MB `eng.traineddata` that was sitting in the repo root.
 The **School Companion and the context bridge went with it.** Their whole job
 was cross-profile Edgenuity presence; with Canvas signed in alongside LockIn in
 one profile, they answered a question nobody was asking.
+
+### The transport: LockIn's own service, not only the extension
+
+**Measured, not assumed:** a Canvas feed comes back with no
+`Access-Control-Allow-Origin` header, so a page cannot read it. Something
+outside the page has to fetch it. Phase 17 shipped only the extension for that,
+and on the machine this was built for the extension was never installed — so
+"Connect Canvas Calendar" was a disabled button, and the feature did not work at
+all.
+
+`scripts/canvas-feed.mjs` fixes that. The LaunchAgent that already serves LockIn
+on 127.0.0.1 is a Node process, so same-origin rules do not apply to it. Where
+the service is installed it is the better transport outright:
+
+- no extension needed;
+- it keeps fetching **while Chrome is closed**;
+- it does not care which browser profile is in front.
+
+`lib/canvas/feedTransport.ts` picks: service first, extension second, and the UI
+says which answered. The feed URL is stored at `~/.lockin/canvas-feed.json`
+with mode 0600, outside the web root so the server cannot serve it as a file,
+and no response ever contains it.
+
+`connect` **proves the URL works before reporting success** — it fetches once
+and forgets the URL again if that fetch fails. "Connected" must never be shown
+for an address that will fail quietly half an hour later.
 
 ### What Canvas does now
 
@@ -418,6 +447,19 @@ urgent item so the column you need is the one on the left.
   live rather than the calendar messages. If you add a `case MSG.X` to
   `handlePageMessage`, grep for it in the file afterwards — the switch is long
   enough that a failed insert looks like success.
+- **Canvas section names are unusable raw.** A real feed carries
+  `E4007-PPer 2 (11:40 AM - 12:30 PM)-Emmett` and
+  `Accelerated Math ORIENTATION [[Chopra] Period 1 & 4: ACC Math]`. The second
+  one **nests brackets**, which the original regex-based `splitSummary` could
+  not see — so those assignments got no course at all and filed under
+  "General". It now scans for balanced brackets, and `prettyCourseName()`
+  strips section codes and class-time ranges. That transform may only remove
+  noise it recognised: anything unmatched is returned unchanged, and a test
+  pins that.
+- **The reconciler heals a stale class name**, but only when the stored one is
+  the placeholder `General` or is literally the un-tidied form of the incoming
+  name (`prettyCourseName(existing) === incoming`). A name the student typed is
+  never overwritten.
 - **`PROTECTED_SETTING_KEYS` is now `['blockingEnabled']`.** It guarded the
   Edgenuity proof mode; rather than leave the parent-lock mechanism guarding
   nothing, it now locks the master blocking switch, which is the setting a

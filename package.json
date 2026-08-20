@@ -1,7 +1,7 @@
 {
   "name": "lockin",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "LockIn — finish what matters before distractions take over.",
   "type": "module",
   "scripts": {

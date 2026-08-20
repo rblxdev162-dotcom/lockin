@@ -20,6 +20,7 @@
  * so serving anywhere else silently breaks blocking and Canvas.
  */
 import { createServer } from 'node:http';
+import * as canvasFeed from './canvas-feed.mjs';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,7 +60,16 @@ if (!existsSync(join(DIST, 'index.html'))) {
  * correct shape for any future local endpoint, and because an empty route set
  * is a safe default: a route has to be named to exist.
  */
-const BRIDGE_ROUTES = new Set();
+const BRIDGE_ROUTES = new Set([
+  /** page → here: current state of the feed, minus the URL */
+  '/api/canvas/status',
+  /** page → here: store a feed URL (it crosses once, inbound, and never back) */
+  '/api/canvas/connect',
+  /** page → here: the raw ICS text, for the page's parser */
+  '/api/canvas/feed',
+  /** page → here: forget the URL entirely */
+  '/api/canvas/disconnect',
+]);
 
 export function bridgeCallerAllowed(headers, port = PORT) {
   if (headers['x-lockin-bridge'] !== '1') return false;
@@ -76,6 +86,80 @@ function sendJson(res, status, body) {
     'cache-control': 'no-store',
   });
   res.end(JSON.stringify(body));
+}
+
+/**
+ * The Canvas feed routes.
+ *
+ * `/connect` is the only one that reads a body, and it reads at most 4KB — a
+ * local endpoint that will buffer an unbounded upload is a denial of service
+ * waiting to happen, even on loopback.
+ *
+ * None of these ever returns the feed URL. `/feed` returns the calendar text,
+ * which is the student's own data and the whole point; `/status` returns the
+ * host and some timestamps.
+ */
+async function handleCanvas(pathname, req, res) {
+  if (pathname === '/api/canvas/status' && req.method === 'GET') {
+    sendJson(res, 200, canvasFeed.toView());
+    return;
+  }
+
+  if (pathname === '/api/canvas/feed' && req.method === 'GET') {
+    const force = new URL(req.url, `http://localhost:${PORT}`).searchParams.get('force') === '1';
+    const result = await canvasFeed.fetchFeed({ force });
+    sendJson(res, 200, { ...result, view: canvasFeed.toView() });
+    return;
+  }
+
+  if (pathname === '/api/canvas/disconnect' && req.method === 'POST') {
+    canvasFeed.disconnect();
+    sendJson(res, 200, { ok: true, view: canvasFeed.toView() });
+    return;
+  }
+
+  if (pathname === '/api/canvas/connect' && req.method === 'POST') {
+    let body = '';
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      body += chunk;
+      if (body.length > 4096) {
+        tooLarge = true;
+        body = '';
+      }
+    });
+    req.on('end', async () => {
+      if (tooLarge) {
+        sendJson(res, 413, { ok: false, reason: 'too-large' });
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        sendJson(res, 400, { ok: false, reason: 'not-a-url' });
+        return;
+      }
+      const result = canvasFeed.connect(parsed?.url);
+      if (!result.ok) {
+        sendJson(res, 200, { ...result, view: canvasFeed.toView() });
+        return;
+      }
+      // Fetch straight away, so "Connect" either works or says why — rather
+      // than reporting success and failing quietly half an hour later.
+      const fetched = await canvasFeed.fetchFeed({ force: true });
+      if (!fetched.ok) canvasFeed.disconnect();
+      sendJson(res, 200, {
+        ok: fetched.ok,
+        reason: fetched.ok ? undefined : fetched.reason,
+        view: canvasFeed.toView(),
+      });
+    });
+    return;
+  }
+
+  sendJson(res, 405, { ok: false, reason: 'method' });
 }
 
 const server = createServer((req, res) => {
@@ -101,7 +185,7 @@ const server = createServer((req, res) => {
       res.writeHead(403, { 'cache-control': 'no-store' }).end('forbidden');
       return;
     }
-    res.writeHead(404, { 'cache-control': 'no-store' }).end('not found');
+    void handleCanvas(pathname, req, res);
     return;
   }
 
@@ -142,6 +226,9 @@ server.on('error', (error) => {
  */
 const runDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (runDirectly) {
+  // Keeps the feed warm while the service runs — including with Chrome shut.
+  canvasFeed.startAutoRefresh();
+
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`LockIn is live at http://localhost:${PORT}`);
   });

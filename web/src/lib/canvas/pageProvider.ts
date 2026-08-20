@@ -49,8 +49,9 @@ export interface CanvasExtensionView {
   checkWindow?: CanvasCheckWindow;
   /** Recent gate decisions — allowed and refused — newest first. */
   gateLog?: { at: number; reason: string; verdict: string; allowed: boolean }[];
-  /** Whether the tab in front of the student right now is Canvas. */
-  activeTabIsCanvas: boolean;
+  /** How many Canvas tabs the student has open, and whether one is a gradebook. */
+  canvasTabsOpen: number;
+  gradesTabOpen: boolean;
   /** Present on the reply to CANVAS_SYNC. */
   sync?: {
     ok: boolean;
@@ -178,7 +179,8 @@ export function sanitizeView(payload: unknown): CanvasExtensionView | null {
     gateLog: Array.isArray(v.gateLog)
       ? (v.gateLog.slice(0, 60) as CanvasExtensionView['gateLog'])
       : undefined,
-    activeTabIsCanvas: v.activeTabIsCanvas === true,
+    canvasTabsOpen: Number.isFinite(v.canvasTabsOpen) ? Number(v.canvasTabsOpen) : 0,
+    gradesTabOpen: v.gradesTabOpen === true,
     sync: (v.sync as CanvasExtensionView['sync']) ?? undefined,
     disconnect: (v.disconnect as CanvasExtensionView['disconnect']) ?? undefined,
     open: (v.open as CanvasExtensionView['open']) ?? undefined,

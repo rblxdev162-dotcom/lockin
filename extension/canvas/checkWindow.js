@@ -27,6 +27,7 @@ export function defaultCheckWindow() {
   return {
     mode: 'manual',
     schoolDays: [1, 2, 3, 4, 5],
+    schoolDayFrom: 7 * 60 + 30,
     schoolDayStart: 15 * 60 + 30,
     dayEnd: 21 * 60 + 30,
     freeDayStart: 9 * 60,
@@ -58,6 +59,7 @@ export function normalizeCheckWindow(raw) {
   return {
     mode: raw.mode === 'scheduled' ? 'scheduled' : 'manual',
     schoolDays: days,
+    schoolDayFrom: clampMinutes(raw.schoolDayFrom, base.schoolDayFrom),
     schoolDayStart: clampMinutes(raw.schoolDayStart, base.schoolDayStart),
     dayEnd: clampMinutes(raw.dayEnd, base.dayEnd),
     freeDayStart: clampMinutes(raw.freeDayStart, base.freeDayStart),
@@ -128,15 +130,26 @@ export function evaluateCheckWindow(window, reason, now, options = {}) {
 
   const minutes = minutesOfDay(now);
   const start = windowStartFor(window, now);
-  const inside = minutes >= start && minutes < window.dayEnd;
+  const schoolDay = window.schoolDays.includes(new Date(now).getDay());
+  // School hours are an interval, not "everything before the after-school
+  // time" — 1am is not school, and neither is 10pm.
+  const duringSchool = schoolDay && minutes >= window.schoolDayFrom && minutes < start;
 
-  if (inside) return { allowed: true, verdict: 'allowed', overridable: false, nextAllowedAt: null };
+  // `dayEnd` bounds the timer only — a press at 10pm is a student at their own
+  // desk, and refusing it protects nobody. See the web copy for the reasoning.
+  if (reason === 'automatic') {
+    return minutes >= start && minutes < window.dayEnd
+      ? { allowed: true, verdict: 'allowed', overridable: false, nextAllowedAt: null }
+      : refuse(duringSchool ? 'school_hours' : 'outside_window');
+  }
+
+  if (!duringSchool) {
+    return { allowed: true, verdict: 'allowed', overridable: false, nextAllowedAt: null };
+  }
 
   if (reason === 'override') {
     return { allowed: true, verdict: 'allowed', overridable: false, nextAllowedAt: null };
   }
 
-  const beforeStart = minutes < start;
-  const schoolDay = window.schoolDays.includes(new Date(now).getDay());
-  return refuse(beforeStart && schoolDay ? 'school_hours' : 'outside_window', reason === 'manual');
+  return refuse('school_hours', reason === 'manual');
 }

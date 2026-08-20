@@ -457,11 +457,12 @@ export async function getCanvasView() {
     checkWindow,
     gateLog: await getGateLog(),
     /**
-     * Whether the tab in front of the student right now is Canvas. The button
-     * can then say "open Canvas → Grades" *before* they press it rather than
-     * after — the read only ever happens on the page they are looking at.
+     * How many Canvas tabs the student has open, and whether any of them is a
+     * gradebook. The button can then say "open Canvas → Grades" *before* they
+     * press it rather than after.
      */
-    activeTabIsCanvas: await activeTabIsCanvas(config?.domain),
+    canvasTabsOpen: openTabs,
+    gradesTabOpen: await gradesTabOpen(config?.domain),
     // Lets the UI tell the truth about whether Chrome will actually prompt.
     broadHostAccess: await hasBroadHostAccess(),
     scriptRegistered: await isCanvasScriptRegistered(),
@@ -471,12 +472,20 @@ export async function getCanvasView() {
   };
 }
 
-/** True when the focused tab is on the configured Canvas origin. */
-async function activeTabIsCanvas(domain) {
+/** How useful a Canvas URL is to read: a gradebook outranks anything else. */
+function gradesRank(url) {
+  if (typeof url !== 'string') return 0;
+  if (/\/courses\/\d+\/grades/.test(url)) return 2;
+  if (/\/grades\/?$/.test(url)) return 2;
+  return 1;
+}
+
+/** True when one of the student's open Canvas tabs is a gradebook. */
+async function gradesTabOpen(domain) {
   if (!domain) return false;
   try {
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return !!(active && active.url && isConfiguredCanvasUrl(active.url, domain));
+    const tabs = await chrome.tabs.query({ url: `https://${domain}/*` });
+    return tabs.some((tab) => gradesRank(tab.url) === 2);
   } catch {
     return false;
   }
@@ -529,30 +538,54 @@ export async function syncCanvasNow(options = {}) {
     };
   }
 
-  let tab = null;
+  /**
+   * Every Canvas tab the student has open — **not** the active one.
+   *
+   * The first version of this asked for the active tab, which could never
+   * work: the button lives in the LockIn tab, so at the moment of the press
+   * the active tab is always LockIn and never Canvas. The feature returned
+   * "no Canvas tab" every single time.
+   *
+   * Reading every open Canvas tab keeps the rule that actually matters — LockIn
+   * reads pages the student opened themselves, and opens none of its own. A tab
+   * they left on their gradebook is exactly such a page.
+   */
+  let tabs = [];
   try {
-    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (active && active.url && isConfiguredCanvasUrl(active.url, config.domain)) tab = active;
+    tabs = (await chrome.tabs.query({ url: `https://${config.domain}/*` })).filter(
+      (candidate) => candidate.id !== undefined && isConfiguredCanvasUrl(candidate.url, config.domain),
+    );
   } catch {
-    tab = null;
+    tabs = [];
   }
-  if (!tab || tab.id === undefined) {
+  if (tabs.length === 0) {
     return { ok: false, reason: 'no-canvas-tab', domain: config.domain };
   }
+
+  // Grades pages first: they are the ones carrying scores, so if the student
+  // has several Canvas tabs open the useful one is read before the noise.
+  tabs.sort((a, b) => gradesRank(b.url) - gradesRank(a.url));
 
   const before = await getCanvasCache();
   const beforeCount = Object.keys(before).length;
 
-  let pageKind = 'unknown';
-  try {
-    const reply = await chrome.tabs.sendMessage(tab.id, { type: CANVAS_MSG.REPARSE });
-    if (reply && typeof reply.pageKind === 'string') pageKind = reply.pageKind;
-  } catch {
-    // The content script is not in that tab yet — a page loaded before the
-    // permission was granted, usually. A reload fixes it, and saying so is
-    // more useful than a silent zero.
+  const kinds = [];
+  let reached = 0;
+  for (const candidate of tabs) {
+    try {
+      const reply = await chrome.tabs.sendMessage(candidate.id, { type: CANVAS_MSG.REPARSE });
+      reached += 1;
+      if (reply && typeof reply.pageKind === 'string') kinds.push(reply.pageKind);
+    } catch {
+      // The content script is not in that tab — usually a page that loaded
+      // before the permission was granted. Other tabs may still answer.
+    }
+  }
+  if (reached === 0) {
+    // A reload fixes it, and saying so is more useful than a silent zero.
     return { ok: false, reason: 'tab-not-ready', domain: config.domain };
   }
+  const pageKind = kinds.find((kind) => kind === 'grades' || kind === 'grades_all') ?? kinds[0] ?? 'unknown';
 
   // The detection arrives as its own message; give it a moment to land.
   await new Promise((resolve) => setTimeout(resolve, 900));
@@ -575,7 +608,7 @@ export async function syncCanvasNow(options = {}) {
     // True when they were on a page that actually carries scores, so the UI can
     // nudge them to Grades instead of silently finding little.
     readGrades: pageKind === 'grades' || pageKind === 'grades_all',
-    tabsChecked: 1,
+    tabsChecked: reached,
     found: afterEntries.length,
     added: Math.max(0, afterEntries.length - beforeCount),
     updated,

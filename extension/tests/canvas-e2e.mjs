@@ -190,6 +190,29 @@ function lockinState({ focusActive, requiredIds, linkedCanvas }) {
       allowedDomains: ['instructure.com'],
       notificationsAsked: true,
       theme: 'system',
+      /**
+       * The Phase 18 gate, opened for the reader tests below.
+       *
+       * It lives in the seeded app state rather than being written straight
+       * into extension storage because **the app is the source of truth** and
+       * pushes its window to the extension on every load — a value set behind
+       * its back is overwritten the moment a LockIn tab opens. (That is how
+       * this was found: the tests started failing three blocks later.)
+       *
+       * `schoolDays: []` means no day counts as a school day, so the gate is
+       * open; when it is allowed to run is tested in `canvas-grades` and in
+       * TEST 0b above.
+       */
+      canvasCheckWindow: {
+        mode: 'scheduled',
+        schoolDays: [],
+        schoolDayFrom: 0,
+        schoolDayStart: 0,
+        dayEnd: 1440,
+        freeDayStart: 0,
+        pausedUntil: null,
+        readAsIBrowse: true,
+      },
     },
     focusMode: {
       active: !!focusActive,
@@ -542,7 +565,53 @@ async function main() {
     mode: 'scheduled', schoolDays: [], schoolDayStart: 0, dayEnd: 1440,
     freeDayStart: 0, pausedUntil: null, readAsIBrowse: true,
   } }).then(() => 1)`);
+
+  /* ============ TEST 0c: Check Canvas reads the tab you left open ==== */
+  console.log('\nTEST 0c — Check Canvas reads the Canvas tab the student has open');
+  /**
+   * The bug this pins shipped, and made the whole feature unusable: the sync
+   * asked for the *active* tab. The button lives in the LockIn tab, so at the
+   * moment of the press the active tab is always LockIn and never Canvas —
+   * "no Canvas tab", every single time, forever.
+   *
+   * What must be true instead: with a Canvas gradebook open in another tab and
+   * LockIn in front, one press reads it. LockIn still opens nothing itself.
+   */
+  await swEval(`chrome.storage.local.set({ lockin_canvas_cache: {} }).then(() => 1)`);
+  const gradesTab = await openTab(`https://${CANVAS_HOST}/courses/101/grades`);
+  await sleep(800);
+  // Bring LockIn back to the front, exactly as it would be when they click.
+  await browser.send('Target.activateTarget', { targetId: gateApp.targetId });
+  await sleep(300);
+
+  const pressed = await bridgeRequest(gateApp.sessionId, 'CANVAS_SYNC', null, 15_000);
+  check(
+    'a press with LockIn in front still finds the Canvas tab',
+    pressed?.sync?.ok === true,
+    JSON.stringify(pressed?.sync?.reason ?? pressed?.sync),
+  );
+  check(
+    'and it read the gradebook, not just any Canvas page',
+    pressed?.sync?.readGrades === true,
+    String(pressed?.sync?.pageKind),
+  );
+  check(
+    'the class grade came back with it',
+    (pressed?.grades ?? []).some((g) => g.currentScore === 93.75),
+    JSON.stringify(pressed?.grades),
+  );
+  check(
+    'graded work is recorded as graded',
+    (pressed?.detected ?? []).some(
+      (d) => d.title === 'Chapter 7 Homework' && d.submissionStatus === 'graded',
+    ),
+    JSON.stringify((pressed?.detected ?? []).map((d) => [d.title, d.submissionStatus])),
+  );
+  await closeTab(gradesTab.targetId);
   await closeTab(gateApp.targetId);
+  // The gradebook fixture marks 5001 graded; leaving that in the cache would
+  // pre-complete the assignment the tests below start from.
+  await swEval(`chrome.storage.local.set({ lockin_canvas_cache: {} }).then(() => 1)`);
 
   /* ============ TEST 1: connect a custom Canvas domain ============ */
   console.log('TEST 1 — connect Canvas');

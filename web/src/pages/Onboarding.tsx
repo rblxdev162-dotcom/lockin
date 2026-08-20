@@ -432,9 +432,11 @@ export function Onboarding() {
                 Automatic Canvas checks are disabled during your school hours.
               </p>
               <p className="mt-1.5 text-sm lk-muted">
-                Pick when your school day ends. Before that time, on the days
-                you choose, LockIn will not read Canvas or refresh your
-                calendar — and every refusal is written to your activity log.
+                Pick when your school day ends. Between the morning bell and
+                that time, on the days you choose, LockIn will not read Canvas
+                or refresh your calendar — and every refusal is written to your
+                activity log. Outside school hours, including late at night,
+                pressing Check Canvas always works.
               </p>
 
               <div className="mt-4">

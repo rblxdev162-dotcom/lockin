@@ -69,9 +69,23 @@ export interface CanvasCheckWindow {
   mode: 'manual' | 'scheduled';
   /** Days school is in session. 0 = Sunday. */
   schoolDays: number[];
+  /**
+   * Minutes past midnight when the school day *starts*.
+   *
+   * Without this, "school hours" meant everything before the after-school
+   * time, so a press at 1am was refused as if the student were sitting in a
+   * classroom. School hours are an interval, not a half-line.
+   */
+  schoolDayFrom: number;
   /** Minutes past midnight. Nothing happens before this on a school day. */
   schoolDayStart: number;
-  /** Minutes past midnight. Nothing happens after this, any day. */
+  /**
+   * Minutes past midnight. Bounds the **automatic** refresh only.
+   *
+   * A student pressing the button at 11pm is at their own desk; refusing them
+   * would be pure friction with no safety value. The school day is the whole
+   * concern, and that is the `schoolDayStart` side.
+   */
   dayEnd: number;
   /** Minutes past midnight, non-school days. */
   freeDayStart: number;
@@ -92,6 +106,7 @@ export function defaultCheckWindow(): CanvasCheckWindow {
   return {
     mode: 'manual',
     schoolDays: [1, 2, 3, 4, 5],
+    schoolDayFrom: 7 * 60 + 30,
     schoolDayStart: 15 * 60 + 30,
     dayEnd: 21 * 60 + 30,
     freeDayStart: 9 * 60,
@@ -127,6 +142,7 @@ export function normalizeCheckWindow(raw: unknown): CanvasCheckWindow {
   return {
     mode: value.mode === 'scheduled' ? 'scheduled' : 'manual',
     schoolDays: days,
+    schoolDayFrom: clampMinutes(value.schoolDayFrom, base.schoolDayFrom),
     schoolDayStart: clampMinutes(value.schoolDayStart, base.schoolDayStart),
     dayEnd: clampMinutes(value.dayEnd, base.dayEnd),
     freeDayStart: clampMinutes(value.freeDayStart, base.freeDayStart),
@@ -195,9 +211,27 @@ export function evaluateCheckWindow(
 
   const minutes = minutesOfDay(now);
   const start = windowStartFor(window, now);
-  const inside = minutes >= start && minutes < window.dayEnd;
+  const schoolDay = window.schoolDays.includes(new Date(now).getDay());
+  // School hours are an interval: between the bell and the after-school time,
+  // on a day school actually runs. 1am is not school, and neither is 10pm.
+  const duringSchool = schoolDay && minutes >= window.schoolDayFrom && minutes < start;
 
-  if (inside) {
+  /**
+   * `dayEnd` bounds the **timer only**.
+   *
+   * The first version applied the evening cutoff to a button press too, which
+   * meant a student doing homework at 10pm was told they could not check their
+   * own Canvas. That protects nobody: the whole concern is the school day, and
+   * a deliberate press at 10pm is a student at their own desk. So a press is
+   * refused for one reason and one reason only — it is still school hours.
+   */
+  if (reason === 'automatic') {
+    return minutes >= start && minutes < window.dayEnd
+      ? { allowed: true, verdict: 'allowed', overridable: false, nextAllowedAt: null }
+      : refuse(duringSchool ? 'school_hours' : 'outside_window');
+  }
+
+  if (!duringSchool) {
     return { allowed: true, verdict: 'allowed', overridable: false, nextAllowedAt: null };
   }
 
@@ -207,12 +241,7 @@ export function evaluateCheckWindow(
     return { allowed: true, verdict: 'allowed', overridable: false, nextAllowedAt: null };
   }
 
-  // Before the school day ends is the case the whole feature exists for, and
-  // it reads differently in the UI from "it's 11pm".
-  const beforeStart = minutes < start;
-  const schoolDay = window.schoolDays.includes(new Date(now).getDay());
-  const verdict: CanvasGateVerdict = beforeStart && schoolDay ? 'school_hours' : 'outside_window';
-  return refuse(verdict, reason === 'manual');
+  return refuse('school_hours', reason === 'manual');
 }
 
 /** When the window next opens, as an epoch ms. Used for "next check after…" copy. */

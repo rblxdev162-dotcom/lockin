@@ -19,11 +19,7 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Toggle } from '../ui/Field';
 import { useApp } from '../../store/context';
-import {
-  formatMinutes,
-  nextAllowedAfter,
-  windowStartFor,
-} from '../../lib/canvas/checkWindow';
+import { formatMinutes, nextAllowedAfter } from '../../lib/canvas/checkWindow';
 import type { CanvasCheckWindow } from '../../lib/canvas/checkWindow';
 import { relativeTime } from '../../lib/time';
 
@@ -124,21 +120,27 @@ export function CanvasCheckSettings() {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <TimeChoice
-            label="School days, from"
+            label="School starts"
+            value={window.schoolDayFrom}
+            choices={[7 * 60, 7 * 60 + 30, 8 * 60, 8 * 60 + 30, 9 * 60]}
+            onChange={(v) => patch({ schoolDayFrom: v })}
+          />
+          <TimeChoice
+            label="School ends"
             value={window.schoolDayStart}
             choices={START_CHOICES}
             onChange={(v) => patch({ schoolDayStart: v })}
           />
           <TimeChoice
-            label="Other days, from"
+            label="Weekend timer from"
             value={window.freeDayStart}
             choices={[7 * 60, 8 * 60, 9 * 60, 10 * 60, 11 * 60, 12 * 60]}
             onChange={(v) => patch({ freeDayStart: v })}
           />
           <TimeChoice
-            label="Until"
+            label="Timer stops"
             value={window.dayEnd}
             choices={END_CHOICES}
             onChange={(v) => patch({ dayEnd: v })}
@@ -150,8 +152,10 @@ export function CanvasCheckSettings() {
             Automatic Canvas checks are disabled during your configured school hours.
           </p>
           <p className="mt-1 text-caption lk-muted">
-            Today that means from {formatMinutes(windowStartFor(window, now))} to{' '}
-            {formatMinutes(window.dayEnd)}.
+            Nothing is read between {formatMinutes(window.schoolDayFrom)} and{' '}
+            {formatMinutes(window.schoolDayStart)} on the days above. Outside
+            those hours — including late at night — pressing Check Canvas always
+            works; the times on the right only bound the automatic timer.
             {nextOpen && nextOpen > now && (
               <> Next open {relativeTime(new Date(nextOpen).toISOString(), new Date(now))
                 .replace(' ago', '')

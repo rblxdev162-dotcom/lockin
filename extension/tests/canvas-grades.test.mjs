@@ -67,15 +67,56 @@ test('the override is honoured, because LockIn cannot know the timetable', () =>
 test('after school on a school day, a press is allowed', () => {
   const window = web.defaultCheckWindow();
   assert.equal(web.evaluateCheckWindow(window, 'manual', WEDNESDAY(16)).allowed, true);
-  assert.equal(web.evaluateCheckWindow(window, 'manual', WEDNESDAY(21, 45)).allowed, false);
 });
 
-test('a weekend uses the weekend start, not the school-day one', () => {
-  const window = web.defaultCheckWindow();
+test('the evening cutoff bounds the timer, never a press', () => {
+  // Shipped wrong once: `dayEnd` refused a *button press* at 10pm, telling a
+  // student doing homework at their own desk that they could not look at their
+  // own Canvas. That protects nobody — the concern is the school day.
+  const window = { ...web.defaultCheckWindow(), mode: 'scheduled' };
+  assert.equal(web.evaluateCheckWindow(window, 'manual', WEDNESDAY(22, 30)).allowed, true);
+  assert.equal(web.evaluateCheckWindow(window, 'manual', WEDNESDAY(1)).allowed, true);
+  // The timer still stops at the cutoff.
+  assert.equal(web.evaluateCheckWindow(window, 'automatic', WEDNESDAY(22, 30)).allowed, false);
+  assert.equal(web.evaluateCheckWindow(window, 'automatic', WEDNESDAY(20)).allowed, true);
+});
+
+test('school hours are still refused, which is the whole point', () => {
+  const window = { ...web.defaultCheckWindow(), mode: 'scheduled', readAsIBrowse: true };
+  for (const reason of ['manual', 'passive', 'automatic']) {
+    assert.equal(
+      web.evaluateCheckWindow(window, reason, WEDNESDAY(10)).allowed,
+      false,
+      `${reason} must be refused during school`,
+    );
+  }
+});
+
+test('a weekend never refuses a press, and the timer uses the weekend start', () => {
+  const window = { ...web.defaultCheckWindow(), mode: 'scheduled' };
+  // There is no school on Saturday, so there is nothing for a press to clash
+  // with — at 8am or at any other hour.
+  assert.equal(web.evaluateCheckWindow(window, 'manual', SATURDAY(8)).allowed, true);
   assert.equal(web.evaluateCheckWindow(window, 'manual', SATURDAY(10)).allowed, true);
-  assert.equal(web.evaluateCheckWindow(window, 'manual', SATURDAY(8)).allowed, false);
-  // 8am Saturday is not "school hours" — the wording has to stay honest.
-  assert.equal(web.evaluateCheckWindow(window, 'manual', SATURDAY(8)).verdict, 'outside_window');
+  // The timer still waits for the weekend start rather than fetching at 3am.
+  assert.equal(web.evaluateCheckWindow(window, 'automatic', SATURDAY(8)).allowed, false);
+  assert.equal(web.evaluateCheckWindow(window, 'automatic', SATURDAY(10)).allowed, true);
+});
+
+test('school hours are an interval, so the small hours are not "school"', () => {
+  // The bug this pins: "before 3:30pm" treated 1am as school hours and refused
+  // a student who was up late doing homework.
+  const window = web.defaultCheckWindow();
+  assert.equal(web.evaluateCheckWindow(window, 'manual', WEDNESDAY(1)).allowed, true);
+  assert.equal(web.evaluateCheckWindow(window, 'manual', WEDNESDAY(6, 30)).allowed, true);
+  assert.equal(web.evaluateCheckWindow(window, 'manual', WEDNESDAY(8)).allowed, false);
+  assert.equal(web.evaluateCheckWindow(window, 'manual', WEDNESDAY(14)).allowed, false);
+});
+
+test('a paused window still reports when it comes back', () => {
+  const window = { ...web.defaultCheckWindow(), pausedUntil: WEDNESDAY(20) };
+  const decision = web.evaluateCheckWindow(window, 'manual', WEDNESDAY(17));
+  assert.equal(decision.nextAllowedAt, WEDNESDAY(20));
 });
 
 test('paused beats everything, including an override', () => {

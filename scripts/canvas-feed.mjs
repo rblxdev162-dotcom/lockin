@@ -271,7 +271,8 @@ export function autoFetchAllowed(now = Date.now(), config = read()) {
   const schoolDay = Array.isArray(w.schoolDays) && w.schoolDays.includes(date.getDay());
   const start = schoolDay ? w.schoolDayStart : w.freeDayStart;
   if (minutes < start) {
-    return { allowed: false, verdict: schoolDay ? 'school_hours' : 'outside_window' };
+    const duringSchool = schoolDay && minutes >= (w.schoolDayFrom ?? 450);
+    return { allowed: false, verdict: duringSchool ? 'school_hours' : 'outside_window' };
   }
   if (minutes >= w.dayEnd) return { allowed: false, verdict: 'outside_window' };
   return { allowed: true, verdict: 'allowed' };
@@ -290,6 +291,7 @@ export function setCheckWindow(raw) {
       schoolDays: Array.isArray(raw.schoolDays)
         ? raw.schoolDays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
         : [1, 2, 3, 4, 5],
+      schoolDayFrom: num(raw.schoolDayFrom, 7 * 60 + 30),
       schoolDayStart: num(raw.schoolDayStart, 15 * 60 + 30),
       dayEnd: num(raw.dayEnd, 21 * 60 + 30),
       freeDayStart: num(raw.freeDayStart, 9 * 60),

@@ -28,7 +28,6 @@ import { formatClock } from '../lib/time';
 import { prettyPlural } from '../lib/text';
 import { useCanvas } from '../hooks/useCanvas';
 import { CanvasStatusBadge } from '../components/features/CanvasStatusBadge';
-import { EdgenuityPanel } from '../components/features/EdgenuityPanel';
 import { cx } from '../lib/cx';
 
 const PRESETS = [15, 25, 45, 60];
@@ -364,9 +363,7 @@ export function FocusPage() {
                 // Canvas-verified work must not be completable by ticking a box
                 // here — that would defeat the point of verification.
                 const canvasControlled = !!a.canvas && a.completionMethod === 'canvas';
-                // Edgenuity work is completed by photographed progress, so the
-                // checkbox would be a way around the verification it exists for.
-                const verificationControlled = canvasControlled || !!a.edgenuity;
+                const verificationControlled = canvasControlled;
                 return (
                   <div
                     key={a.id}
@@ -441,23 +438,12 @@ export function FocusPage() {
                           )}
                         </div>
                       )}
-                      {a.edgenuity && (
-                        <div className="mt-1.5">
-                          <EdgenuityPanel assignment={a} compact />
-                        </div>
-                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            {required.some((a) => a.edgenuity) && (
-              <p className="text-xs lk-muted">
-                Edgenuity work unlocks once a live before-and-after photo shows enough new progress.
-                Photos are read on this device and then discarded.
-              </p>
-            )}
 
             {required.some((a) => a.canvas) && (
               <p className="text-xs lk-muted">

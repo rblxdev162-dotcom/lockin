@@ -111,10 +111,7 @@ const SUBJECTS: [string, string[]][] = [
   ['Computer Science', ['cs', 'coding', 'programming', 'compsci']],
 ];
 
-const PLATFORMS: [Platform, string[]][] = [
-  ['Canvas', ['canvas']],
-  ['Edgenuity', ['edgenuity', 'edg']],
-];
+const PLATFORMS: [Platform, string[]][] = [['Canvas', ['canvas']]];
 
 /** Words that only ever introduce a date, and are never part of a title. */
 const DUE_WORDS = ['due', 'by', 'on', 'for'];

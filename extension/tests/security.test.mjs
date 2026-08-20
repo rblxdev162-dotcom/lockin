@@ -33,7 +33,6 @@ if (!globalThis.crypto?.subtle) globalThis.crypto = webcrypto;
 const { reducer } = await import('../../web/src/store/reducer.ts');
 const { defaultState } = await import('../../web/src/lib/storage.ts');
 const { createAssignment } = await import('../../web/src/store/factories.ts');
-const { checkProgress } = await import('../../web/src/lib/edgenuity/verification.ts');
 const { isVerifiedComplete } = await import('../../web/src/lib/canvas/verification.ts');
 const { sanitizeView } = await import('../../web/src/lib/canvas/pageProvider.ts');
 const { validateBridgeState, isEnvelope, checkCompatibility } = await import(
@@ -46,31 +45,6 @@ const { normalizeDomain, PROTECTED_DOMAINS } = await import('../../web/src/lib/d
 /* Fixtures                                                            */
 /* ------------------------------------------------------------------ */
 
-function withEdgenuityAssignment(requiredVerificationTrust) {
-  let state = defaultState();
-  state = reducer(state, { type: 'CREATE_PROFILE', firstName: 'Sam' });
-  const assignment = createAssignment({
-    title: 'Algebra unit',
-    subject: 'Math',
-    platform: 'Edgenuity',
-    dueDate: '2026-09-01',
-    dueTime: '23:59',
-    estimatedMinutes: 60,
-    priority: 'Normal',
-  });
-  state = reducer(state, { type: 'ADD_ASSIGNMENT', assignment });
-  state = reducer(state, {
-    type: 'EDGENUITY_CONFIGURE',
-    assignmentId: assignment.id,
-    config: {
-      targetType: 'progress_percent',
-      requiredProgressDelta: 5,
-      courseName: 'Algebra I',
-      requiredVerificationTrust,
-    },
-  });
-  return { state, assignmentId: assignment.id };
-}
 
 /**
  * Starts a real verification session through the reducer, so the check runs
@@ -146,56 +120,14 @@ test('1b. an unsubmitted or unknown Canvas status is never completion', () => {
 
 /* ------------------------------------------------------------------ */
 
-test('4. a fixture-sourced photo cannot open a session', () => {
-  const { state, assignmentId } = withEdgenuityAssignment();
-  const next = reducer(state, {
-    type: 'EDGENUITY_START_SESSION',
-    assignmentId,
-    before: proof({ progressPercent: 40, source: 'fixture' }),
-  });
-  assert.equal(
-    next.edgenuity.sessions.length,
-    0,
-    'a fixture frame is worth `manual` trust, which does not even meet Standard',
-  );
-});
 
-test('4b. a fixture-sourced final photo is refused on a genuine session', () => {
-  const { session, link } = startedSession();
-  assert.ok(session, 'a live starting photo does open a Standard session');
 
-  const result = checkProgress({
-    session,
-    link,
-    after: proof({ progressPercent: 90, source: 'fixture' }),
-    focusMinutesNow: 60,
-  });
-
-  assert.equal(result.outcome, 'rejected');
-  assert.equal(result.reason, 'not_live', 'the refusal must name the reason, not fail vaguely');
-  assert.equal(result.newProgress, 0, 'and it credits nothing');
-});
-
-test('4c. the fixture capture source cannot be imported outside a DEV branch', () => {
-  const modal = readFileSync(
-    join(ROOT, 'web/src/components/features/EdgenuityVerifyModal.tsx'),
-    'utf8',
-  );
-  assert.ok(
-    !/^import .*capture\.dev/m.test(modal),
-    'a static import would put the fixture source in the production bundle',
-  );
-  assert.ok(
-    /import\.meta\.env\.DEV[\s\S]{0,200}capture\.dev/.test(modal),
-    'the dynamic import must sit behind an import.meta.env.DEV guard',
-  );
-});
 
 /* ------------------------------------------------------------------ */
 /* 5. Changing a parent-protected setting through an ordinary action   */
 /* ------------------------------------------------------------------ */
 
-test('5. a locked verification setting is refused by the reducer, not just hidden', () => {
+test('5. a locked setting is refused by the reducer, not just hidden', () => {
   let state = defaultState();
   state = reducer(state, {
     type: 'PARENT_SET_CONTROLS',
@@ -203,53 +135,33 @@ test('5. a locked verification setting is refused by the reducer, not just hidde
   });
   state = reducer(state, {
     type: 'UPDATE_SETTINGS',
-    patch: { edgenuityProofMode: 'enhanced' },
+    patch: { blockingEnabled: false },
     parentApproved: true,
   });
-  assert.equal(state.settings.edgenuityProofMode, 'enhanced');
+  assert.equal(state.settings.blockingEnabled, false);
 
   // The bypass attempt: dispatch the same action a UI control would, without
   // the approval flag. This is exactly what a student who found the action
   // name would try.
   const attacked = reducer(state, {
     type: 'UPDATE_SETTINGS',
-    patch: { edgenuityProofMode: 'standard' },
+    patch: { blockingEnabled: true },
   });
   assert.equal(
-    attacked.settings.edgenuityProofMode,
-    'enhanced',
+    attacked.settings.blockingEnabled,
+    false,
     'the lock must survive a direct dispatch',
   );
 
   // …and it must not take unrelated settings down with it.
   const mixed = reducer(state, {
     type: 'UPDATE_SETTINGS',
-    patch: { edgenuityProofMode: 'standard', defaultFocusMinutes: 45 },
+    patch: { blockingEnabled: true, defaultFocusMinutes: 45 },
   });
-  assert.equal(mixed.settings.edgenuityProofMode, 'enhanced', 'the locked field is dropped');
+  assert.equal(mixed.settings.blockingEnabled, false, 'the locked field is dropped');
   assert.equal(mixed.settings.defaultFocusMinutes, 45, 'the rest of the patch still applies');
 });
 
-test('5b. raising the proof requirement does not re-open work already finished under the old rule', () => {
-  const { state, assignmentId } = withEdgenuityAssignment();
-  let next = reducer(state, {
-    type: 'COMPLETE_ASSIGNMENT',
-    id: assignmentId,
-    method: 'manual',
-  });
-  assert.equal(next.assignments[0].status, 'Completed');
-
-  next = reducer(next, {
-    type: 'PARENT_SET_REQUIRED_TRUST',
-    assignmentId,
-    trust: 'enhanced',
-  });
-  assert.equal(
-    next.assignments[0].status,
-    'Completed',
-    'parent requirement changes are prospective',
-  );
-});
 
 /* ------------------------------------------------------------------ */
 /* 6. A malformed extension message                                    */
@@ -401,9 +313,8 @@ test('8b. a detected title carrying markup stays inert text', () => {
 /* ------------------------------------------------------------------ */
 
 test('9. the export contains no secret, at any depth', () => {
-  const { state } = withEdgenuityAssignment();
   const populated = {
-    ...state,
+    ...defaultState(),
     parentPin: { hash: 'PIN_HASH_SECRET', salt: 'PIN_SALT_SECRET', createdAt: 'x' },
   };
 

@@ -349,21 +349,6 @@ test('no LockIn source file can make a network request', () => {
 
 });
 
-test('the OCR engine is loaded from our own origin, never a CDN', () => {
-  const ocr = readFileSync(join(ROOT, 'web/src/lib/edgenuity/ocr.ts'), 'utf8');
-  const paths = [...ocr.matchAll(/^const (?:WORKER_PATH|CORE_PATH|LANG_PATH|OCR_BASE)\s*=\s*(.+)$/gm)];
-  assert.ok(paths.length >= 4, 'the OCR asset paths moved; this check needs updating');
-  for (const [, value] of paths) {
-    assert.ok(
-      !/https?:/.test(value),
-      `an OCR asset path points off-origin: ${value.trim()} — tesseract.js would fetch from a CDN`,
-    );
-  }
-  assert.ok(
-    existsSync(join(ROOT, 'web/public/ocr')) || existsSync(join(DIST, 'ocr')),
-    'the OCR engine is not vendored; run `npm run vendor:ocr`',
-  );
-});
 
 test('no analytics or error-reporting service is bundled', { skip: distBuilt ? false : 'run `npm run build` first' }, () => {
   const bundles = walk(DIST)

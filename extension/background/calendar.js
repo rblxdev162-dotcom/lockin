@@ -41,7 +41,25 @@ const DEFAULTS = {
   addedAt: '',
   lastFetchedAt: 0,
   lastError: '',
-  refreshMinutes: 180,
+  /**
+   * Half an hour.
+   *
+   * Canvas publishes this feed for exactly this purpose and a check is one
+   * conditional GET, so twice an hour is nowhere near heavy — and it is the
+   * difference between an assignment your teacher posted this morning showing
+   * up before lunch or after dinner.
+   */
+  refreshMinutes: 30,
+  /**
+   * Open the Canvas dashboard in a background tab at browser startup so the
+   * content script can read submission status.
+   *
+   * A calendar feed says when work is due and never whether it was handed in.
+   * This is the only way to know what is already graded without an OAuth
+   * Developer Key that no student can issue themselves. It is one page load,
+   * in the student's own session, on the site they were about to open anyway.
+   */
+  openCanvasOnStartup: true,
   /** The last successful body, so opening LockIn is instant and offline-safe. */
   cachedText: '',
   cachedAt: 0,
@@ -76,6 +94,7 @@ export function toCalendarView(config) {
     lastFetchedAt: config.lastFetchedAt || null,
     lastError: config.lastError || null,
     refreshMinutes: config.refreshMinutes,
+    openCanvasOnStartup: config.openCanvasOnStartup !== false,
     hasCache: !!config.cachedText,
     cachedAt: config.cachedAt || null,
   };
@@ -116,8 +135,8 @@ export async function configureCalendar(rawUrl, refreshMinutes) {
   if (!check.ok) return { ok: false, reason: check.reason };
 
   const minutes = Number.isFinite(refreshMinutes)
-    ? Math.min(1440, Math.max(30, Math.round(refreshMinutes)))
-    : 180;
+    ? Math.min(1440, Math.max(15, Math.round(refreshMinutes)))
+    : 30;
 
   await setCalendarConfig({
     url: check.url,
@@ -132,6 +151,25 @@ export async function configureCalendar(rawUrl, refreshMinutes) {
   return { ok: true, host: check.host };
 }
 
+/**
+ * Updates the options the page is allowed to change.
+ *
+ * Deliberately narrow: the URL is not settable here. Changing the feed means
+ * going through `configureCalendar`, which validates it and resets the cache.
+ */
+export async function setCalendarOptions(patch) {
+  const next = {};
+  if (typeof patch?.openCanvasOnStartup === 'boolean') {
+    next.openCanvasOnStartup = patch.openCanvasOnStartup;
+  }
+  if (Number.isFinite(patch?.refreshMinutes)) {
+    next.refreshMinutes = Math.min(1440, Math.max(15, Math.round(patch.refreshMinutes)));
+  }
+  const config = await setCalendarConfig(next);
+  if (next.refreshMinutes !== undefined) await scheduleCalendarRefresh(config.refreshMinutes);
+  return config;
+}
+
 export async function disconnectCalendar() {
   // Removed, not blanked: a cleared-but-present key still holds the URL in any
   // storage snapshot taken before the write.
@@ -141,7 +179,7 @@ export async function disconnectCalendar() {
 }
 
 export async function scheduleCalendarRefresh(minutes) {
-  const period = Math.min(1440, Math.max(30, Number(minutes) || 180));
+  const period = Math.min(1440, Math.max(15, Number(minutes) || 30));
   await chrome.alarms.create(CALENDAR_ALARM, { periodInMinutes: period, delayInMinutes: 1 });
 }
 

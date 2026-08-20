@@ -11,30 +11,23 @@
  * Everything here comes from the Pace Engine and the source model. Nothing on
  * this page computes a status of its own.
  */
-import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../store/context';
 import { usePace } from '../hooks/usePace';
-import { Card, EmptyState } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { Icon } from '../components/ui/Icon';
+import { Card } from '../components/ui/Card';
 import { ProgressBar } from '../components/ui/Progress';
-import { FreshnessBadge, Metric, PaceBadge, SectionHeader, STATUS_CLASS } from '../components/ui/Status';
+import { Metric, PaceBadge, SectionHeader, STATUS_CLASS } from '../components/ui/Status';
 import { isComplete } from '../lib/selectors';
-import { describeCoursePace } from '../lib/pace/courses';
-import { fieldProvenance } from '../lib/edgenuity/merge';
 import { classify } from '../lib/sources/freshness';
 import { relativeTime } from '../lib/time';
 import { cx } from '../lib/cx';
-import type { CoursePace } from '../types/pace';
-import type { CourseProgress } from '../types/integrations';
 
 const DAY = 86_400_000;
 
 export function ProgressPage() {
   const { state, now } = useApp();
-  const navigate = useNavigate();
-  const { report, courses } = usePace();
+  const { report } = usePace();
 
   const week = useMemo(() => weekSummary(state, now), [state.assignments, state.completedSessions, now]);
 
@@ -53,7 +46,7 @@ export function ProgressPage() {
         <Card className={cx('lk-status-edge', STATUS_CLASS[report.status])}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
-              <PaceBadge status={report.status} official={report.official} />
+              <PaceBadge status={report.status} />
               <ul className="mt-3 space-y-1.5">
                 {report.reasons.map((reason, index) => (
                   <li key={`${reason.code}-${index}`} className="flex gap-2 text-body lk-strong">
@@ -100,45 +93,6 @@ export function ProgressPage() {
         </Card>
       </section>
 
-      {/* ---- Edgenuity ---- */}
-      <section aria-labelledby="courses-heading">
-        <SectionHeader
-          id="courses-heading"
-          title="Edgenuity"
-          hint="Course pacing, from your progress reports."
-          action={
-            <Link
-              to="/integrations"
-              className="text-caption font-bold lk-muted underline-offset-2 hover:underline"
-            >
-              Manage
-            </Link>
-          }
-        />
-        {courses.length === 0 ? (
-          <Card>
-            <EmptyState
-              icon={<Icon name="edgenuity" size={22} />}
-              title="No course progress yet"
-              hint="Import an Edgenuity progress report or course report and pacing shows up here."
-              action={
-                <Button size="sm" onClick={() => navigate('/integrations')}>
-                  Set up Edgenuity
-                </Button>
-              }
-            />
-          </Card>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {courses.map((pace) => {
-              const course = state.integrations.courses.find((c) => c.id === pace.courseId);
-              return course ? (
-                <CourseCard key={pace.courseId} pace={pace} course={course} now={now} />
-              ) : null;
-            })}
-          </div>
-        )}
-      </section>
 
       {/* ---- Canvas ---- */}
       <section aria-labelledby="canvas-heading">
@@ -199,94 +153,7 @@ export function ProgressPage() {
   );
 }
 
-/**
- * One course, with its two numbers and where each came from.
- *
- * The provenance list is collapsed by default. It is the honest answer to "how
- * do you know?", and it is also four more lines on a card that already says
- * the important thing — so it is one tap away rather than always open.
- */
-function CourseCard({
-  pace,
-  course,
-  now,
-}: {
-  pace: CoursePace;
-  course: CourseProgress;
-  now: number;
-}) {
-  const [showSources, setShowSources] = useState(false);
-  const provenance = fieldProvenance(course);
 
-  return (
-    <Card className={cx('lk-status-edge', STATUS_CLASS[pace.status])}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-heading font-bold lk-strong">{course.name}</h3>
-          <p className="mt-0.5 text-caption lk-muted">
-            {course.product === 'UNKNOWN' ? 'Edgenuity' : course.product === 'EDGEEX' ? 'EdgeEX' : 'Edgenuity'}
-          </p>
-        </div>
-        <PaceBadge status={pace.status} official={pace.official} size="sm" />
-      </div>
-
-      {pace.actualPercent !== undefined ? (
-        <div className="mt-4 flex items-end gap-6">
-          <Metric value={`${round(pace.actualPercent)}%`} label="Complete" />
-          {pace.targetPercent !== undefined && (
-            <Metric value={`${round(pace.targetPercent)}%`} label="Target" />
-          )}
-          {pace.deltaPercent !== undefined && (
-            <Metric
-              value={`${pace.deltaPercent > 0 ? '+' : ''}${round(pace.deltaPercent)}%`}
-              label={pace.deltaPercent >= 0 ? 'Ahead' : 'Behind'}
-              tone={pace.status}
-            />
-          )}
-        </div>
-      ) : (
-        <p className="mt-3 text-body lk-muted">
-          No completion percentage in the last report.
-        </p>
-      )}
-
-      <p className="mt-3 text-body lk-strong">{describeCoursePace(pace)}</p>
-
-      {course.activities.length > 0 && (
-        <p className="mt-2 text-caption lk-muted">
-          {course.activities.filter((a) => a.completed === true).length} of{' '}
-          {course.activities.length} scheduled activities marked complete
-        </p>
-      )}
-
-      <button
-        type="button"
-        onClick={() => setShowSources((open) => !open)}
-        aria-expanded={showSources}
-        className="mt-3 text-caption font-bold lk-muted underline underline-offset-2 hover:lk-strong"
-      >
-        {showSources ? 'Hide sources' : 'Where this came from'}
-      </button>
-
-      {showSources && (
-        <dl className="animate-fade mt-2 space-y-1.5 border-t lk-border pt-2.5">
-          {provenance.map((row) => (
-            <div key={row.label} className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <dt className="text-caption lk-muted">{row.label}</dt>
-              <dd>
-                <FreshnessBadge source={row.source} now={now} />
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
-    </Card>
-  );
-}
-
-function round(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
 
 /**
  * The week's counts.

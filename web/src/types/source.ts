@@ -5,10 +5,9 @@
  *
  * Before Phase 16, provenance was smeared across four fields — `platform`
  * said "Canvas", `canvas` held a link, `verificationRecords` held evidence,
- * and nothing said when any of it was last true. That was survivable while
- * there was one source per platform. It stops being survivable the moment
- * Edgenuity progress can arrive from a progress email *and* a course report,
- * and the two disagree about which is newer.
+ * and nothing said when any of it was last true. The app could not answer
+ * "when was this last checked", which meant it could not tell the difference
+ * between "you have nothing due" and "I have not looked in three days".
  *
  * So every external academic record now carries a `SourceRecord`: which
  * channel produced it, when, whether that channel is live, and what went wrong
@@ -29,26 +28,19 @@
  * Every channel school data can legitimately reach LockIn through.
  *
  * `CANVAS_CALENDAR` — the official Canvas Calendar Feed (ICS). Implemented.
- * `CANVAS_OAUTH`    — Canvas REST API under a proper Developer Key. The
- *                     adapter boundary exists; the authorization does not.
- * `EDGENUITY_PROGRESS_EMAIL`
- *                   — a progress report Edgenuity emailed to the authorized
- *                     guardian, parsed locally.
- * `EDGENUITY_COURSE_REPORT`
- *                   — a course report the student legitimately downloaded
- *                     from their own account, parsed locally.
- * `EDGENUITY_APPROVED_API`
- *                   — interface only. Nothing probes an undocumented endpoint.
+ * `CANVAS_OAUTH`    — Canvas REST API under a proper Developer Key. Reserved:
+ *                     the model supports it, the authorization does not exist.
  * `MANUAL`          — the student typed it. Real work, zero external evidence.
- * `LOCKIN_VERIFIED` — LockIn itself watched it happen (a screen-share reading,
- *                     a Canvas submission it read on the page).
+ * `LOCKIN_VERIFIED` — LockIn itself watched it happen: a submission status read
+ *                     from a Canvas page in the student's own session.
+ *
+ * The Edgenuity kinds were removed in Phase 17 along with the integration. A
+ * stored record naming one degrades to MANUAL on load rather than being
+ * dropped, so no completion history is lost.
  */
 export const SOURCE_KINDS = [
   'CANVAS_CALENDAR',
   'CANVAS_OAUTH',
-  'EDGENUITY_PROGRESS_EMAIL',
-  'EDGENUITY_COURSE_REPORT',
-  'EDGENUITY_APPROVED_API',
   'MANUAL',
   'LOCKIN_VERIFIED',
 ] as const;
@@ -127,28 +119,21 @@ export interface SourceRecord {
 /**
  * How long a source's data stays believable, in hours.
  *
- * These are not arbitrary. A calendar feed is polled a few times a day, so six
- * hours is a missed poll, not a problem; twenty-four is. Edgenuity progress
- * emails arrive on a schedule the family chose — weekly is common — so the
- * window is days, and the number is deliberately generous: telling a student
- * their data is stale when it is behaving exactly as configured trains them to
- * ignore the word.
+ * These are not arbitrary: they are a multiple of how often the source is
+ * actually checked. Telling a student their data is stale while it is behaving
+ * exactly as configured is how you train somebody to ignore the word.
  */
 export const FRESHNESS_HOURS: Record<SourceKind, { fresh: number; stale: number }> = {
-  CANVAS_CALENDAR: { fresh: 6, stale: 24 },
+  // The feed is checked every 30 minutes, so two hours is several missed
+  // checks — enough to notice, not so tight that a laptop lid closing for
+  // lunch makes the app cry stale.
+  CANVAS_CALENDAR: { fresh: 2, stale: 24 },
   CANVAS_OAUTH: { fresh: 1, stale: 12 },
-  EDGENUITY_PROGRESS_EMAIL: { fresh: 24 * 8, stale: 24 * 14 },
-  EDGENUITY_COURSE_REPORT: { fresh: 24 * 7, stale: 24 * 21 },
-  EDGENUITY_APPROVED_API: { fresh: 6, stale: 24 },
   MANUAL: { fresh: Infinity, stale: Infinity },
   LOCKIN_VERIFIED: { fresh: 24 * 3, stale: 24 * 14 },
 };
 
-/** Sources that represent a one-off snapshot rather than a live connection. */
-export const IMPORT_KINDS: readonly SourceKind[] = [
-  'EDGENUITY_COURSE_REPORT',
-  'EDGENUITY_PROGRESS_EMAIL',
-];
+
 
 export interface Freshness {
   state: DataState;

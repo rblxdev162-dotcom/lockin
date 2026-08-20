@@ -44,7 +44,7 @@ function seedState(): AppState {
     { title: 'Chapter 7 problem set', subject: 'Math', platform: 'Canvas' as const, day: 0, minutes: 45 },
     { title: 'Lab report: photosynthesis', subject: 'Science', platform: 'Canvas' as const, day: 1, minutes: 90 },
     { title: 'Read chapters 4–6', subject: 'English', platform: 'Other' as const, day: 2, minutes: 60 },
-    { title: 'Algebra I unit 3', subject: 'Math', platform: 'Edgenuity' as const, day: 3, minutes: 120 },
+    { title: 'Algebra I unit 3', subject: 'Math', platform: 'Other' as const, day: 3, minutes: 120 },
     { title: 'Spanish vocab quiz prep', subject: 'Spanish', platform: 'Other' as const, day: -1, minutes: 30 },
   ].map((a, i) =>
     createAssignment({

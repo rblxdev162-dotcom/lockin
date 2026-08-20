@@ -1,18 +1,23 @@
 /**
- * Integrations — one place to connect school tools, and one place that tells
- * the truth about them.
+ * Integrations — Canvas, and the companion that fetches it.
  *
  * Every card answers the same four questions in the same order: what it can
  * access, what it cannot, when it last worked, and how to disconnect. That
- * uniformity is the point. A student deciding whether to hand something their
+ * uniformity is the point — a student deciding whether to hand something their
  * school data should not have to work out which card buried the caveat.
+ *
+ * Edgenuity was removed in Phase 17. The only channels that were ethical to
+ * use (a weekly progress email, a course report file) could not reach this
+ * student's browser profile, which made them useless for live data — so rather
+ * than ship an integration that would be wrong more often than right, there
+ * isn't one.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useApp } from '../store/context';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Field, TextInput } from '../components/ui/Field';
+import { Field, TextInput, Toggle } from '../components/ui/Field';
 import { Icon } from '../components/ui/Icon';
 import type { IconName } from '../components/ui/Icon';
 import { Modal } from '../components/ui/Modal';
@@ -26,81 +31,64 @@ import {
   disconnectCalendar,
   getCalendarView,
   readCalendarFile,
+  setCalendarOptions,
   syncCalendar,
 } from '../lib/canvas/calendarClient';
 import type { CalendarView } from '../lib/canvas/calendarClient';
 import { describeDiff, diffIsInteresting, reconcileFeed } from '../lib/canvas/calendarReconcile';
 import type { FeedDiff } from '../lib/canvas/calendarReconcile';
-import { parseProgressEmail } from '../lib/edgenuity/progressEmail';
-import { parseCourseReport, readReportFile } from '../lib/edgenuity/courseReport';
-import { mergeCourseReport, mergeProgressEmail } from '../lib/edgenuity/merge';
-import { SETUP_STEPS, WHY_NOT_AUTOMATIC } from '../lib/edgenuity/gmailAdapter';
-import { issuePairingCode, readContext, revokePairing } from '../lib/context/client';
-import type { ContextSnapshot } from '../lib/context/client';
-import type { IntegrationId, IntegrationStatus } from '../types/integrations';
-import type { SourceRecord } from '../types/source';
+import type { IntegrationStatus } from '../types/integrations';
 
 export function IntegrationsPage() {
-  const { state, dispatch, now, extension } = useApp();
-
-  const record = useCallback(
-    (id: IntegrationId) => state.integrations.records.find((r) => r.id === id),
-    [state.integrations.records],
-  );
+  const { state, extension } = useApp();
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-title font-extrabold lk-strong">Integrations</h1>
         <p className="mt-1 text-body lk-muted">
-          Connect your school tools so you stop typing everything in by hand.
+          Connect Canvas so you stop typing your work in by hand.
         </p>
       </header>
 
       <section aria-labelledby="school-heading">
         <SectionHeader id="school-heading" title="School" />
-        <div className="space-y-3">
-          <CanvasCalendarCard />
-          <EdgenuityCard />
-        </div>
+        <CanvasCard />
       </section>
 
       <section aria-labelledby="lockin-heading">
         <SectionHeader id="lockin-heading" title="LockIn" />
-        <div className="space-y-3">
-          <IntegrationCard
-            icon="bolt"
-            title="LockIn Companion"
-            status={extension.status === 'connected' ? 'connected' : 'not_configured'}
-            statusText={
-              extension.status === 'connected'
-                ? `Chrome${extension.version ? ` · v${extension.version}` : ''}`
-                : state.settings.extensionSeen
-                  ? 'Installed, but not answering right now'
-                  : 'Not installed'
-            }
-            can={[
-              'Block distracting sites in every window of this Chrome profile',
-              'Send reminders while LockIn is closed',
-              'Fetch your Canvas calendar feed',
-              'Tell school sites from distracting ones, by site name only',
-            ]}
-            cannot={[
-              'Read any page’s contents, forms or passwords',
-              'See anything in another Chrome profile',
-              'Keep a browsing history — block counts are per-site totals',
-            ]}
-            footer={
-              <a
-                className="text-caption font-bold lk-muted underline underline-offset-2 hover:lk-strong"
-                href="/settings#browser-protection"
-              >
-                Set up or troubleshoot
-              </a>
-            }
-          />
-          <SchoolCompanionCard />
-        </div>
+        <IntegrationCard
+          icon="bolt"
+          title="LockIn Companion"
+          status={extension.status === 'connected' ? 'connected' : 'not_configured'}
+          statusText={
+            extension.status === 'connected'
+              ? `Chrome${extension.version ? ` · v${extension.version}` : ''}`
+              : state.settings.extensionSeen
+                ? 'Installed, but not answering right now'
+                : 'Not installed'
+          }
+          can={[
+            'Block distracting sites in every window of this Chrome profile',
+            'Send reminders while LockIn is closed',
+            'Fetch your Canvas calendar feed every 30 minutes',
+            'Read assignment status from Canvas pages open in this profile',
+          ]}
+          cannot={[
+            'Read any page other than Canvas',
+            'See anything in another Chrome profile',
+            'Keep a browsing history — block counts are per-site totals',
+          ]}
+          footer={
+            <a
+              className="text-caption font-bold lk-muted underline underline-offset-2 hover:lk-strong"
+              href="/settings#browser-protection"
+            >
+              Set up or troubleshoot
+            </a>
+          }
+        />
       </section>
 
       <p className="text-caption lk-muted">
@@ -111,11 +99,6 @@ export function IntegrationsPage() {
         </a>
         .
       </p>
-
-      {/* Kept mounted so a sync started here can report into the store. */}
-      <span hidden data-now={now} data-records={state.integrations.records.length} />
-      {record('canvas_calendar') === undefined && null}
-      {dispatch === undefined && null}
     </div>
   );
 }
@@ -143,9 +126,9 @@ const STATUS_TONE: Record<IntegrationStatus, string> = {
 /**
  * One integration, in the shape every integration uses.
  *
- * `can` and `cannot` are required rather than optional. An integration card
- * that lists its powers and omits its limits is marketing, and the whole
- * reason this page exists is that a student has to be able to trust it.
+ * `can` and `cannot` are required rather than optional. A card that lists its
+ * powers and omits its limits is marketing, and the whole reason this page
+ * exists is that a student has to be able to trust it.
  */
 function IntegrationCard({
   icon,
@@ -232,7 +215,7 @@ function IntegrationCard({
 /* Canvas                                                              */
 /* ------------------------------------------------------------------ */
 
-function CanvasCalendarCard() {
+function CanvasCard() {
   const { state, dispatch, now, extension } = useApp();
   const record = state.integrations.records.find((r) => r.id === 'canvas_calendar');
   const [view, setView] = useState<CalendarView | null>(null);
@@ -242,13 +225,15 @@ function CanvasCalendarCard() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   const companion = extension.status === 'connected';
+  const horizon = state.integrations.canvasCalendar.horizonDays;
+
+  const refresh = useCallback(() => {
+    void getCalendarView().then((next) => next && setView(next));
+  }, []);
 
   useEffect(() => {
-    if (!companion) return;
-    void getCalendarView().then((next) => next && setView(next));
-  }, [companion]);
-
-  const horizon = state.integrations.canvasCalendar.horizonDays;
+    if (companion) refresh();
+  }, [companion, refresh]);
 
   const applyDiff = (diff: FeedDiff, live: boolean) => {
     dispatch({
@@ -301,8 +286,6 @@ function CanvasCalendarCard() {
         live: true,
       });
 
-      // Nothing to review means nothing to interrupt for: the provenance
-      // refresh is applied silently and the student is told it is up to date.
       if (!diffIsInteresting(diff)) {
         applyDiff(diff, true);
         return;
@@ -345,7 +328,7 @@ function CanvasCalendarCard() {
 
   const statusText = view?.configured
     ? view.lastFetchedAt
-      ? `${view.host} · synced ${relativeAge(now - view.lastFetchedAt)}`
+      ? `${view.host} · checked ${relativeAge(now - view.lastFetchedAt)}`
       : (view.host ?? undefined)
     : companion
       ? 'Add your calendar feed to import assignments automatically'
@@ -360,14 +343,19 @@ function CanvasCalendarCard() {
         statusText={statusText}
         can={[
           'Assignment titles, courses and due dates from your calendar feed',
-          'Event links back to Canvas',
+          'Submitted, graded, missing and late status from Canvas pages you open',
+          'Links back to Canvas',
         ]}
         cannot={[
-          'Whether something was submitted — a calendar feed does not say',
-          'Your grades',
-          'Anything you have not published to your own calendar feed',
+          'Your Canvas password — LockIn has never held one',
+          'Anything in a Chrome profile the Companion is not installed in',
+          'Course content, messages or files',
         ]}
-        footer={record?.lastError ? <p className="text-caption lk-status-text">{record.lastError}</p> : null}
+        footer={
+          record?.lastError ? (
+            <p className="text-caption lk-status-behind lk-status-text">{record.lastError}</p>
+          ) : null
+        }
       >
         <div className="flex flex-wrap gap-2">
           {view?.configured ? (
@@ -412,6 +400,31 @@ function CanvasCalendarCard() {
             }}
           />
         </div>
+
+        {view?.configured && (
+          <div className="mt-3.5 space-y-2.5 border-t lk-border pt-3">
+            <p className="text-caption lk-muted">
+              LockIn checks your feed every 30 minutes on its own, and once when
+              Chrome starts.
+            </p>
+            <Toggle
+              checked={view.openCanvasOnStartup}
+              onChange={(on) => {
+                void setCalendarOptions({ openCanvasOnStartup: on }).then((next) => {
+                  if (next) setView(next);
+                });
+              }}
+              label="Open Canvas in the background to check what's graded"
+            />
+            <p className="text-caption lk-muted">
+              A calendar feed says when work is due but never whether it was
+              handed in. With this on, the Companion opens your Canvas dashboard
+              in a background tab at startup and reads submitted / graded /
+              missing status from your own session. It closes the tab
+              afterwards, and it only ever opens Canvas.
+            </p>
+          </div>
+        )}
 
         {!companion && (
           <p className="mt-2.5 text-caption lk-muted">
@@ -624,404 +637,5 @@ function ReviewModal({
         )}
       </div>
     </Modal>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Edgenuity                                                           */
-/* ------------------------------------------------------------------ */
-
-function EdgenuityCard() {
-  const { state, dispatch, now } = useApp();
-  const emailRecord = state.integrations.records.find((r) => r.id === 'edgenuity_email');
-  const [busy, setBusy] = useState(false);
-  const [gmailOpen, setGmailOpen] = useState(false);
-  const [courseNamePrompt, setCourseNamePrompt] = useState<{
-    report: ReturnType<typeof parseCourseReport>;
-    name: string;
-  } | null>(null);
-
-  const progressInput = useRef<HTMLInputElement>(null);
-  const reportInput = useRef<HTMLInputElement>(null);
-
-  const courses = state.integrations.courses;
-  const newest = useMemo(() => {
-    const times = courses
-      .map((course) => course.actualProgressPercent?.source.lastSyncedAt)
-      .filter((value): value is string => !!value)
-      .map((value) => Date.parse(value))
-      .filter((value) => !Number.isNaN(value));
-    return times.length > 0 ? Math.max(...times) : null;
-  }, [courses]);
-
-  const stamp = (kind: SourceRecord['kind'], sourceId: string): SourceRecord => ({
-    kind,
-    sourceId,
-    lastSyncedAt: new Date(now).toISOString(),
-    confidence: 'high',
-    isLive: false,
-    rawDataRetained: false,
-  });
-
-  const importProgress = async (file: File) => {
-    setBusy(true);
-    try {
-      const parsed = parseProgressEmail(await file.text());
-      if (!parsed.ok) {
-        dispatch({
-          type: 'INTEGRATION_STATUS',
-          id: 'edgenuity_email',
-          status: 'error',
-          error: parsed.error,
-        });
-        toast(parsed.error ?? 'That file could not be read.', 'error');
-        return;
-      }
-      const merged = mergeProgressEmail(
-        courses,
-        parsed.courses,
-        stamp('EDGENUITY_PROGRESS_EMAIL', 'edgenuity-email'),
-        now,
-        parsed.reportedAt,
-      );
-      dispatch({
-        type: 'COURSES_MERGE',
-        courses: merged.courses,
-        summary: `Edgenuity progress updated for ${parsed.courses.length} course${parsed.courses.length === 1 ? '' : 's'}`,
-      });
-      dispatch({
-        type: 'INTEGRATION_STATUS',
-        id: 'edgenuity_email',
-        status: 'connected',
-        itemCount: parsed.courses.length,
-      });
-      for (const warning of parsed.warnings) toast(warning, 'info');
-      toast(
-        merged.changes.length > 0
-          ? merged.changes.map((c) => `${c.courseName}: ${c.field} ${c.text}`).join(' · ')
-          : 'Already up to date.',
-        'success',
-      );
-    } finally {
-      setBusy(false);
-      if (progressInput.current) progressInput.current.value = '';
-    }
-  };
-
-  const importReport = async (file: File) => {
-    setBusy(true);
-    try {
-      const parsed = await readReportFile(file);
-      if (!parsed.ok) {
-        toast(parsed.error ?? 'That file could not be read.', 'error');
-        return;
-      }
-      for (const warning of parsed.warnings) toast(warning, 'info');
-
-      // The parser could not name the course, so it asks rather than guessing:
-      // a schedule attached to the wrong course is worse than no schedule.
-      if (!parsed.courseName) {
-        setCourseNamePrompt({ report: parsed, name: '' });
-        return;
-      }
-      commitReport(parsed, parsed.courseName);
-    } finally {
-      setBusy(false);
-      if (reportInput.current) reportInput.current.value = '';
-    }
-  };
-
-  const commitReport = (parsed: ReturnType<typeof parseCourseReport>, name: string) => {
-    const merged = mergeCourseReport(
-      courses,
-      parsed,
-      name,
-      stamp('EDGENUITY_COURSE_REPORT', 'edgenuity-report'),
-      now,
-    );
-    dispatch({
-      type: 'COURSES_MERGE',
-      courses: merged.courses,
-      summary: `Imported ${parsed.activities.length} activities for ${name}`,
-    });
-    dispatch({
-      type: 'INTEGRATION_STATUS',
-      id: 'edgenuity_report',
-      status: 'connected',
-      itemCount: parsed.activities.length,
-    });
-    toast(`${name}: ${parsed.activities.length} activities imported.`, 'success');
-    setCourseNamePrompt(null);
-  };
-
-  return (
-    <>
-      <IntegrationCard
-        icon="edgenuity"
-        title="Edgenuity"
-        status={courses.length > 0 ? 'connected' : 'not_configured'}
-        statusText={
-          newest
-            ? `${courses.length} course${courses.length === 1 ? '' : 's'} · updated ${relativeAge(now - newest)}`
-            : 'Import a progress report to see pacing'
-        }
-        can={[
-          'Course completion and target percentages from a progress report',
-          'The activity schedule from a course report you downloaded',
-          'Grades, when the report states them',
-        ]}
-        cannot={[
-          'Read the Edgenuity website — LockIn never opens or scrapes it',
-          'See lessons, questions, answers or assessments',
-          'Log in, or touch your Edgenuity account in any way',
-        ]}
-        footer={
-          emailRecord?.lastError ? (
-            <p className="text-caption lk-status-behind lk-status-text">{emailRecord.lastError}</p>
-          ) : null
-        }
-      >
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => progressInput.current?.click()} disabled={busy}>
-            Import progress report
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => reportInput.current?.click()}
-            disabled={busy}
-          >
-            Import course report
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setGmailOpen(true)}>
-            Automatic sync
-          </Button>
-        </div>
-
-        <input
-          ref={progressInput}
-          type="file"
-          accept=".html,.htm,.txt,.eml,text/html,text/plain"
-          className="sr-only"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void importProgress(file);
-          }}
-        />
-        <input
-          ref={reportInput}
-          type="file"
-          accept=".csv,.tsv,.txt,.html,.htm,text/csv,text/plain,text/html"
-          className="sr-only"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void importReport(file);
-          }}
-        />
-
-        <p className="mt-2.5 text-caption lk-muted">
-          Save the progress email Edgenuity sends, or download a course report,
-          and drop the file in. It is read on this device and not kept.
-        </p>
-      </IntegrationCard>
-
-      <Modal
-        open={gmailOpen}
-        title="Automatic Edgenuity sync"
-        subtitle="What it would take, and why it isn’t switched on."
-        onClose={() => setGmailOpen(false)}
-        footer={<Button onClick={() => setGmailOpen(false)}>Close</Button>}
-      >
-        <p className="text-body lk-strong">{WHY_NOT_AUTOMATIC}</p>
-        <ol className="mt-3 space-y-1.5">
-          {SETUP_STEPS.map((step, index) => (
-            <li key={step} className="flex gap-2 text-body lk-muted">
-              <span className="font-bold lk-strong">{index + 1}.</span>
-              {step}
-            </li>
-          ))}
-        </ol>
-        <p className="mt-3 text-caption lk-muted">
-          LockIn would ask Gmail only for messages from Edgenuity with
-          &ldquo;progress&rdquo; or &ldquo;report&rdquo; in the subject, from the
-          last 90 days, read-only. Nothing else in the mailbox is ever
-          requested, and message bodies are parsed on this device and dropped.
-        </p>
-      </Modal>
-
-      <Modal
-        open={courseNamePrompt !== null}
-        title="Which course is this?"
-        subtitle="The report doesn’t name it, and guessing would attach it to the wrong one."
-        onClose={() => setCourseNamePrompt(null)}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setCourseNamePrompt(null)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!courseNamePrompt?.name.trim()}
-              onClick={() =>
-                courseNamePrompt &&
-                commitReport(courseNamePrompt.report, courseNamePrompt.name.trim())
-              }
-            >
-              Import
-            </Button>
-          </>
-        }
-      >
-        <Field label="Course name" hint="Use the name Edgenuity shows.">
-          <TextInput
-            value={courseNamePrompt?.name ?? ''}
-            placeholder="Algebra I"
-            onChange={(event) =>
-              setCourseNamePrompt((prev) => (prev ? { ...prev, name: event.target.value } : prev))
-            }
-          />
-        </Field>
-      </Modal>
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* School Companion                                                    */
-/* ------------------------------------------------------------------ */
-
-function SchoolCompanionCard() {
-  const [snapshot, setSnapshot] = useState<ContextSnapshot | null>(null);
-  const [code, setCode] = useState<string | null>(null);
-  const [learnOpen, setLearnOpen] = useState(false);
-
-  useEffect(() => {
-    void readContext().then(setSnapshot);
-  }, []);
-
-  const available = snapshot !== null && !snapshot.unavailable;
-  const status: IntegrationStatus = !available
-    ? 'unavailable'
-    : snapshot.paired
-      ? 'connected'
-      : 'not_configured';
-
-  return (
-    <>
-      <IntegrationCard
-        icon="shield"
-        title="School Companion"
-        status={status}
-        statusText={
-          !available
-            ? 'Needs LockIn’s local service running, and permission from your school'
-            : snapshot.paired
-              ? snapshot.context.length > 0
-                ? `Reporting: ${snapshot.context.map((c) => c.provider).join(', ')}`
-                : 'Paired, nothing reported yet'
-              : 'Not paired'
-        }
-        can={[
-          'Say whether Canvas or Edgenuity is open in your school Chrome profile',
-          'Say how long that has been true',
-        ]}
-        cannot={[
-          'Read any page — it has no content script and no scripting permission',
-          'See assignments, questions, answers, grades or logins',
-          'Send a web address anywhere — the message has no field for one',
-        ]}
-        footer={
-          <button
-            type="button"
-            onClick={() => setLearnOpen(true)}
-            className="text-caption font-bold lk-muted underline underline-offset-2 hover:lk-strong"
-          >
-            Learn more
-          </button>
-        }
-      >
-        {available && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={async () => {
-                const secret = await issuePairingCode();
-                if (!secret) {
-                  toast('LockIn’s local service didn’t answer.', 'error');
-                  return;
-                }
-                setCode(secret);
-                void readContext().then(setSnapshot);
-              }}
-            >
-              Show pairing code
-            </Button>
-            {snapshot?.paired && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={async () => {
-                  await revokePairing();
-                  setCode(null);
-                  void readContext().then(setSnapshot);
-                  toast('Pairing revoked.', 'info');
-                }}
-              >
-                Revoke
-              </Button>
-            )}
-          </div>
-        )}
-
-        {code && (
-          <div className="animate-fade mt-3 rounded-xl lk-sunken border lk-border p-3">
-            <p className="text-caption font-bold tracking-wide lk-muted uppercase">Pairing code</p>
-            <p className="mt-1 font-mono text-body break-all lk-strong">{code}</p>
-            <p className="mt-1.5 text-caption lk-muted">
-              Paste this into the School Companion’s options page in your school
-              Chrome profile. It is shown once; generate a new one any time,
-              which makes the old one useless.
-            </p>
-          </div>
-        )}
-      </IntegrationCard>
-
-      <Modal
-        open={learnOpen}
-        title="School Companion"
-        subtitle="Optional, off by default, and only where your school allows it."
-        onClose={() => setLearnOpen(false)}
-        wide
-        footer={<Button onClick={() => setLearnOpen(false)}>Close</Button>}
-      >
-        <div className="space-y-3 text-body lk-strong">
-          <p>
-            Chrome keeps profiles completely separate. LockIn, running in your
-            personal profile, cannot see a tab in your school profile — and it
-            does not try to. There is no setting, flag or trick here that gets
-            around that.
-          </p>
-          <p>
-            What this optional package does is much smaller: installed in the
-            school profile, it says <em>“Edgenuity is open right now”</em> to
-            LockIn on the same computer. That is enough for LockIn to hold a
-            reminder back when you are already working, and it is not enough to
-            learn anything about the work itself.
-          </p>
-          <p className="rounded-xl lk-sunken border lk-border p-3 text-body">
-            <strong>Before installing it:</strong> many school profiles are
-            managed by the district, and many districts do not permit
-            extensions. This is for the case where installing it is allowed.
-            LockIn will not help you get around an administrator setting, and
-            everything else works without this.
-          </p>
-          <p className="text-caption lk-muted">
-            The connection is on this computer only (127.0.0.1), authenticated
-            with a pairing code you carry across by hand, and the context it
-            holds is kept in memory and forgotten when the service restarts.
-          </p>
-        </div>
-      </Modal>
-    </>
   );
 }

@@ -9,9 +9,6 @@ import type {
   Assignment,
   CanvasDetectedAssignment,
   CompletionMethod,
-  EdgenuityConfig,
-  EdgenuityProof,
-  EdgenuitySession,
   Exam,
   ParentPin,
   Settings,
@@ -20,33 +17,19 @@ import type {
   PlanVersionEntry,
   PlannerSettings,
   StudyPlan,
-  RequirableTrust,
 } from '../types';
 import { MAX_PLAN_HISTORY, MAX_PLAN_SKIPS } from '../types/planner';
 import { buildPlan, statusContext, unfinishedBefore } from '../lib/planner';
 import { orderItems } from '../lib/planner/engine';
 import { canvasKey, defaultCanvasState } from '../types/canvas';
 import type { FeedDiff } from '../lib/canvas/calendarReconcile';
-import type { CourseProgress, IntegrationId, IntegrationStatus } from '../types/integrations';
-import {
-  MAX_EDGENUITY_SESSIONS,
-  meetsTrust,
-} from '../types/edgenuity';
-import { MAX_FOCUS_RUNS } from '../types/parent';
+import type { IntegrationId, IntegrationStatus } from '../types/integrations';
+import { MAX_FOCUS_RUNS, PROTECTED_SETTING_KEYS } from '../types/parent';
 import type { FocusRun } from '../types/parent';
 import { todayISO, uid } from '../lib/time';
 import { defaultState } from '../lib/storage';
 import { isVerifiedComplete, mergeStatus } from '../lib/canvas/verification';
 import { assignmentCanvasKey } from '../lib/canvas/matching';
-import {
-  checkProgress,
-  emptyLedger,
-  isSessionExpired,
-  proofTrust,
-  requiredTrustFor,
-  sessionExpiryFrom,
-} from '../lib/edgenuity/verification';
-import type { EdgenuityCheckResult } from '../lib/edgenuity/verification';
 import { createAssignmentFromCanvas, createAssignmentFromFeed } from './factories';
 import { MAX_ACTIVITY, MAX_COMPLETED_SESSIONS, trimActivity } from '../lib/retention';
 import { AWAY_GRACE_MS } from '../lib/focusGuard';
@@ -135,16 +118,6 @@ export type Action =
    * not know.
    */
   | { type: 'FEED_APPLY'; diff: FeedDiff; sourceId: string; syncedAt: string; live: boolean }
-  /**
-   * Fold parsed Edgenuity course data in, with per-field provenance.
-   *
-   * The merge itself is done by `lib/edgenuity/merge.ts`, which is pure and
-   * decides field by field whether an incoming value should win. This case
-   * stores the result and logs it.
-   */
-  | { type: 'COURSES_MERGE'; courses: CourseProgress[]; summary: string }
-  /** Forget one imported course entirely. */
-  | { type: 'COURSE_REMOVE'; courseId: string }
   /** Record the outcome of a sync attempt against one integration. */
   | {
       type: 'INTEGRATION_STATUS';
@@ -155,45 +128,8 @@ export type Action =
       itemCount?: number;
       syncedAt?: string;
     }
-  /* ---- Edgenuity live-camera verification (Phase 4) ---- */
-  /** Turn an assignment into an Edgenuity-verified one, or change its target. */
-  | { type: 'EDGENUITY_CONFIGURE'; assignmentId: string; config: EdgenuityConfig }
-  | { type: 'EDGENUITY_UNCONFIGURE'; assignmentId: string }
-  /**
-   * Issue a one-time challenge code (Phase 5). Built by `createChallenge()` so
-   * the randomness lives in one place; any earlier pending code for the same
-   * assignment and phase is retired, leaving exactly one live code.
-   */
-  /** Store the starting proof and open a verification session. */
-  | {
-      type: 'EDGENUITY_START_SESSION';
-      assignmentId: string;
-      before: EdgenuityProof;
-      /** The challenge this capture was checked against, when one was required. */
-    }
-  /** Fold a final proof in. The decision itself is made by checkProgress(). */
-  | {
-      type: 'EDGENUITY_SUBMIT_PROOF';
-      sessionId: string;
-      after: EdgenuityProof;
-    }
-  | { type: 'EDGENUITY_CANCEL_SESSION'; sessionId: string }
-  /**
-   * A reading the student corrected by hand, or any capture that was not a
-   * live camera frame. Recorded for their own tracking; never verified.
-   */
-  | { type: 'EDGENUITY_MANUAL_NOTE'; assignmentId: string; progressPercent?: number; note: string }
-  | { type: 'EDGENUITY_SET_DEVELOPER_MODE'; on: boolean }
-  | { type: 'EDGENUITY_SET_CAMERA_PERMISSION'; permission: AppState['edgenuity']['cameraPermission'] }
-  | { type: 'EDGENUITY_OCR_LOADED' }
   /* ---- Parent accountability (Phase 6) ---- */
   | { type: 'PARENT_SET_CONTROLS'; patch: Partial<ParentControls> }
-  /** Raise (or lower, with the PIN) the proof strength one assignment needs. */
-  | {
-      type: 'PARENT_SET_ASSIGNMENT_TRUST';
-      assignmentId: string;
-      trust: RequirableTrust;
-    }
   /** Clear accountability history without touching schoolwork. */
   | { type: 'PARENT_CLEAR_HISTORY'; scope: 'verification' | 'activity' | 'focus' }
   /* ---- Smart Study Planner (Phase 7) ---- */
@@ -312,7 +248,7 @@ function samePlan(a: StudyPlan | null, b: StudyPlan): boolean {
  * Silent by design for ordinary changes — finishing a task should just quietly
  * remove its remaining sessions. Nothing here decides *whether* work is done;
  * it reads the same assignment status everything else does, which is why a
- * Canvas or Edgenuity completion needs no planner-specific path.
+ * Canvas completion needs no planner-specific path.
  */
 function maybeReplan(state: AppState, reason: PlanReason): AppState {
   // No plan exists until the student has set their availability. Building one
@@ -423,7 +359,7 @@ function closeFocusRun(
 }
 
 const CONTROL_LABEL: Record<keyof ParentControls, string> = {
-  lockVerificationSettings: 'verification settings locked',
+  lockVerificationSettings: 'blocking locked on',
   protectBlocklistInStrictMode: 'blocked-site protection',
   protectAllowlistInStrictMode: 'school allowlist protection',
 };
@@ -459,152 +395,8 @@ function updateAssignment(
 }
 
 
-function replaceSession(state: AppState, session: EdgenuitySession): AppState {
-  return {
-    ...state,
-    edgenuity: {
-      ...state.edgenuity,
-      sessions: state.edgenuity.sessions.map((s) => (s.id === session.id ? session : s)),
-    },
-  };
-}
 
-/**
- * Writes an accepted Edgenuity result to the ledger, and completes the
- * assignment when the target has been reached.
- *
- * `lastVerifiedProgress` moving forward is what stops the same percentage
- * points being claimed twice: the next check measures from here, not from the
- * session's original starting photo.
- */
-function applyEdgenuityProgress(
-  state: AppState,
-  session: EdgenuitySession,
-  assignment: Assignment,
-  after: EdgenuityProof,
-  result: EdgenuityCheckResult,
-): AppState {
-  const now = after.capturedAt;
-  const link = assignment.edgenuity!;
-  const ledger = {
-    ...link,
-    verifiedProgressDelta: result.totalVerified,
-    lastVerifiedProgress: result.lastVerifiedProgress,
-    verifiedActivities: result.totalActivities,
-    observedCourseName: after.courseName ?? link.observedCourseName,
-    lastActivityName: after.activityName ?? link.lastActivityName,
-    lastVerifiedAt: now,
-    lastVerifiedTrust: result.trust,
-  };
 
-  const met = result.requirementMet;
-  const patch: Partial<Assignment> = {
-    edgenuity: ledger,
-    verificationStatus: met ? 'verified' : 'pending',
-  };
-
-  if (met) {
-    Object.assign(patch, {
-      status: 'Completed' as const,
-      completionMethod: 'edgenuity' as const,
-      verificationMethod: 'edgenuity' as const,
-      completedAt: now,
-      verificationRecords: [
-        ...assignment.verificationRecords,
-        {
-          id: uid('ver'),
-          type: 'edgenuity_photo',
-          timestamp: now,
-          status: 'verified' as const,
-          progressBefore: result.progressBefore,
-          progressAfter: result.progressAfter,
-          // Small structured evidence only — never the photo, never OCR text.
-          evidence: {
-            progressDelta: result.newProgress,
-            totalVerified: result.totalVerified,
-            requiredDelta: result.requiredDelta,
-            activities: result.totalActivities,
-            courseName: (after.courseName ?? link.config.courseName ?? '').slice(0, 120),
-            beforeActivity: (session.before.activityName ?? '').slice(0, 120),
-            afterActivity: (after.activityName ?? '').slice(0, 120),
-            verificationType:
-              after.source === 'live_screen'
-                ? 'shared_window_ocr'
-                : result.trust === 'enhanced'
-                  ? 'live_camera_ocr_enhanced'
-                  : 'live_camera_ocr',
-            strength: result.strength,
-            trust: result.trust,
-            requiredTrust: result.requiredTrust,
-            // Which halves carried a verified challenge, and how convincing the
-            // screen was. Never the code itself, never the photo.
-            challengeBeforeVerified: session.before.challenge?.matched === true,
-            challengeAfterVerified: after.challenge?.matched === true,
-            screenConfidence: after.screenEvidence?.confidence ?? 'low',
-            screenSignals: after.screenEvidence?.signals.length ?? 0,
-          },
-        },
-      ],
-    });
-  }
-
-  let next = updateAssignment(state, assignment.id, patch);
-  next = replaceSession(next, {
-    ...session,
-    status: met ? 'verified' : 'in_progress',
-    after,
-    pendingConfirmation: undefined,
-  });
-  next = log(
-    next,
-    'edgenuity_progress_verified',
-    met
-      ? `“${assignment.title}” verified through Edgenuity — ${result.message}`
-      : `Edgenuity progress recorded for “${assignment.title}” — ${result.message}`,
-    {
-      progressBefore: result.progressBefore ?? -1,
-      progressAfter: result.progressAfter ?? -1,
-      totalVerified: result.totalVerified,
-      requiredDelta: result.requiredDelta,
-      strength: result.strength,
-      completed: met,
-    },
-  );
-
-  // Existing Phase 2 engine: recounts required work and, when the goal is met,
-  // ends Focus Mode — which removes the blocking rules. The planner then drops
-  // any chunks still planned for work Edgenuity has just proved is finished.
-  return settle(next, 'assignment_completed');
-}
-
-/** Marks live sessions whose starting proof has aged out. */
-function expireEdgenuitySessions(state: AppState, now: number): AppState {
-  const stale = state.edgenuity.sessions.filter(
-    (s) => s.status === 'in_progress' && isSessionExpired(s, now),
-  );
-  if (stale.length === 0) return state;
-
-  let next: AppState = {
-    ...state,
-    edgenuity: {
-      ...state.edgenuity,
-      sessions: state.edgenuity.sessions.map((s) =>
-        stale.some((x) => x.id === s.id) ? { ...s, status: 'expired' as const } : s,
-      ),
-    },
-  };
-  for (const session of stale) {
-    const title = state.assignments.find((a) => a.id === session.assignmentId)?.title;
-    next = log(
-      next,
-      'edgenuity_verification_expired',
-      title
-        ? `Edgenuity starting photo expired for “${title}”`
-        : 'An Edgenuity starting photo expired',
-    );
-  }
-  return next;
-}
 
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -640,10 +432,6 @@ export function reducer(state: AppState, action: Action): AppState {
         next = closeFocusRun(next, 'test_expired');
         next = log(next, 'focus_mode_ended', 'Blocking test finished automatically');
       }
-      // A stale Edgenuity starting reading must stop being comparable on its
-      // own, not only when the student next opens the verify dialog.
-      next = expireEdgenuitySessions(next, action.now);
-
       /**
        * Day rollover.
        *
@@ -740,17 +528,6 @@ export function reducer(state: AppState, action: Action): AppState {
             : state.focusMode.requiredCompletionCount,
         },
       };
-      // Never leave an orphaned verification session behind: a proof belongs to
-      // one assignment and must not survive it.
-      if (next.edgenuity.sessions.some((s) => s.assignmentId === action.id)) {
-        next = {
-          ...next,
-          edgenuity: {
-            ...next.edgenuity,
-            sessions: next.edgenuity.sessions.filter((s) => s.assignmentId !== action.id),
-          },
-        };
-      }
       if (target) next = log(next, 'assignment_deleted', `Deleted “${target.title}”`);
       // Skips and manual ordering that referred to this assignment are dead
       // weight now; the rebuild drops its items, and these would otherwise
@@ -877,15 +654,18 @@ export function reducer(state: AppState, action: Action): AppState {
        *
        * Everything else in settings stays the student's to change.
        */
-      let patch = action.patch;
-      if (
-        state.parentControls.lockVerificationSettings &&
-        !action.parentApproved &&
-        patch.edgenuityProofMode !== undefined &&
-        patch.edgenuityProofMode !== state.settings.edgenuityProofMode
-      ) {
-        const { edgenuityProofMode: _blocked, ...rest } = patch;
-        patch = rest;
+      const patch = action.patch;
+      /**
+       * A locked setting is refused here, not merely hidden in the UI. A
+       * student who found the action name is exactly who this is for.
+       */
+      const locked = state.parentControls.lockVerificationSettings
+        ? (PROTECTED_SETTING_KEYS as readonly string[]).filter((key) => key in patch)
+        : [];
+      if (locked.length > 0 && !action.parentApproved) {
+        const guarded = { ...patch };
+        for (const key of locked) delete (guarded as Record<string, unknown>)[key];
+        return { ...state, settings: { ...state.settings, ...guarded } };
       }
       return { ...state, settings: { ...state.settings, ...patch } };
     }
@@ -1524,27 +1304,6 @@ export function reducer(state: AppState, action: Action): AppState {
       return settle(next, 'assignment_added');
     }
 
-    /* ---- Edgenuity course progress (Phase 16) ---- */
-
-    case 'COURSES_MERGE': {
-      if (action.courses.length === 0) return state;
-      return log(
-        {
-          ...state,
-          integrations: { ...state.integrations, courses: action.courses },
-        },
-        'course_progress_updated',
-        action.summary,
-        { courses: action.courses.length },
-      );
-    }
-
-    case 'COURSE_REMOVE': {
-      const courses = state.integrations.courses.filter((c) => c.id !== action.courseId);
-      if (courses.length === state.integrations.courses.length) return state;
-      return { ...state, integrations: { ...state.integrations, courses } };
-    }
-
     /**
      * The state of one connection, after an attempt.
      *
@@ -1697,228 +1456,6 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     /* ------------------------------------------------------------------ */
-    /* Edgenuity live-camera verification                                  */
-    /* ------------------------------------------------------------------ */
-
-    case 'EDGENUITY_CONFIGURE': {
-      const target = state.assignments.find((a) => a.id === action.assignmentId);
-      if (!target) return state;
-      // Re-configuring keeps whatever progress was already verified: changing
-      // the goal from +3% to +5% should not erase the +3% already earned.
-      const ledger = target.edgenuity
-        ? { ...target.edgenuity, config: action.config }
-        : emptyLedger(action.config);
-      return recompute(
-        updateAssignment(state, action.assignmentId, {
-          platform: 'Edgenuity',
-          completionMethod: 'edgenuity',
-          verificationMethod: 'edgenuity',
-          verificationStatus: target.status === 'Completed' ? target.verificationStatus : 'pending',
-          edgenuity: ledger,
-        }),
-      );
-    }
-
-    case 'EDGENUITY_UNCONFIGURE': {
-      const target = state.assignments.find((a) => a.id === action.assignmentId);
-      if (!target?.edgenuity) return state;
-      const next = updateAssignment(state, action.assignmentId, {
-        edgenuity: undefined,
-        completionMethod: target.completionMethod === 'edgenuity' ? 'manual' : target.completionMethod,
-        verificationMethod: undefined,
-        verificationStatus: target.status === 'Completed' ? target.verificationStatus : 'not_required',
-      });
-      return recompute({
-        ...next,
-        edgenuity: {
-          ...next.edgenuity,
-          sessions: next.edgenuity.sessions.map((s) =>
-            s.assignmentId === action.assignmentId && s.status === 'in_progress'
-              ? { ...s, status: 'cancelled' }
-              : s,
-          ),
-        },
-      });
-    }
-
-    /**
-     * Opens a verification session around a starting proof.
-     *
-     * Nothing is completed here — this is the "before" half of the evidence.
-     * Any older open session for the same assignment is cancelled so a student
-     * can never hold two starting photos and pick the flattering one.
-     */
-    case 'EDGENUITY_START_SESSION': {
-      const target = state.assignments.find((a) => a.id === action.assignmentId);
-      if (!target?.edgenuity) return state;
-
-      const requiredTrust = requiredTrustFor(target.edgenuity.config);
-
-      /**
-       * Enhanced Proof is gated here, at the *starting* photo.
-       *
-       * Letting a session open on a Standard starting frame and asking for the
-       * code later would leave the before-reading replayable, which is the
-       * whole attack this phase closes. Both halves carry a code or neither
-       * counts as Enhanced.
-       */
-      let next = state;
-      const before = { ...action.before, trust: proofTrust(action.before) };
-
-
-
-      if (!meetsTrust(before.trust ?? 'manual', requiredTrust)) {
-        return log(
-          next,
-          'edgenuity_verification_failed',
-          `Enhanced Proof not started for “${target.title}” — the screen evidence was not strong enough.`,
-          { phase: 'before', requiredTrust, achieved: before.trust ?? 'manual' },
-        );
-      }
-
-      const session: EdgenuitySession = {
-        id: uid('edg'),
-        assignmentId: action.assignmentId,
-        status: 'in_progress',
-        startedAt: before.capturedAt,
-        expiresAt: sessionExpiryFrom(before.capturedAt),
-        before,
-        target: target.edgenuity.config,
-        focusMinutesAtStart: target.loggedMinutes,
-        requiredTrust,
-      };
-      const sessions = [
-        session,
-        ...next.edgenuity.sessions.map((s) =>
-          s.assignmentId === action.assignmentId && s.status === 'in_progress'
-            ? { ...s, status: 'cancelled' as const }
-            : s,
-        ),
-      ].slice(0, MAX_EDGENUITY_SESSIONS);
-
-      return log(
-        {
-          ...next,
-          edgenuity: { ...next.edgenuity, sessions },
-          assignments: next.assignments.map((a) =>
-            a.id === action.assignmentId && a.status === 'Not Started'
-              ? { ...a, status: 'In Progress', updatedAt: session.startedAt }
-              : a,
-          ),
-        },
-        'edgenuity_verification_started',
-        `Started Edgenuity verification for “${target.title}”`,
-        {
-          startingProgress: before.progressPercent ?? -1,
-          targetType: target.edgenuity.config.targetType,
-          requiredTrust,
-          trust: before.trust ?? 'standard',
-        },
-      );
-    }
-
-    /**
-     * The heart of Phase 4.
-     *
-     * The decision is made by the pure policy in `lib/edgenuity/verification.ts`;
-     * this case only records the outcome. A verified result completes the
-     * assignment through the same shape Canvas uses, which means the existing
-     * `recompute()` ends Focus Mode and the extension drops its blocking rules.
-     * There is deliberately no Edgenuity-specific unblocking path.
-     */
-    case 'EDGENUITY_SUBMIT_PROOF': {
-      const session = state.edgenuity.sessions.find((s) => s.id === action.sessionId);
-      if (!session || session.status !== 'in_progress') return state;
-      const assignment = state.assignments.find((a) => a.id === session.assignmentId);
-      if (!assignment?.edgenuity) return state;
-
-      const after = { ...action.after, trust: proofTrust(action.after) };
-
-
-      const result = checkProgress({
-        session,
-        link: assignment.edgenuity,
-        after,
-        focusMinutesNow: assignment.loggedMinutes,
-      });
-
-      if (result.outcome === 'needs_confirmation') {
-        return log(
-          replaceSession(state, {
-            ...session,
-            pendingConfirmation: {
-              reason: result.confirmReason ?? 'large_jump',
-              progressPercent: result.progressAfter,
-              at: action.after.capturedAt,
-            },
-          }),
-          'edgenuity_verification_failed',
-          `Edgenuity reading needs a second photo — ${result.message}`,
-          { reason: result.confirmReason ?? 'large_jump' },
-        );
-      }
-
-      if (result.outcome === 'rejected') {
-        const expired = result.reason === 'expired';
-        return log(
-          replaceSession(state, expired ? { ...session, status: 'expired' } : session),
-          expired ? 'edgenuity_verification_expired' : 'edgenuity_verification_failed',
-          `Edgenuity verification not accepted — ${result.message}`,
-          { reason: result.reason ?? 'unknown' },
-        );
-      }
-
-      return applyEdgenuityProgress(state, session, assignment, after, result);
-    }
-
-
-    case 'EDGENUITY_CANCEL_SESSION': {
-      const session = state.edgenuity.sessions.find((s) => s.id === action.sessionId);
-      if (!session || session.status !== 'in_progress') return state;
-      // Cancelling abandons the starting photo only. Progress already verified
-      // stays on the assignment's ledger.
-      return log(
-        replaceSession(state, { ...session, status: 'cancelled' }),
-        'edgenuity_verification_cancelled',
-        'Edgenuity verification cancelled',
-      );
-    }
-
-    /**
-     * A hand-typed or otherwise unverified figure.
-     *
-     * Recorded as `status: 'failed'` — i.e. explicitly not verified — because a
-     * value the student can type is not evidence. It never completes an
-     * assignment and never unlocks Strict Mode.
-     */
-    case 'EDGENUITY_MANUAL_NOTE': {
-      const target = state.assignments.find((a) => a.id === action.assignmentId);
-      if (!target) return state;
-      const now = new Date().toISOString();
-      return updateAssignment(state, action.assignmentId, {
-        verificationRecords: [
-          ...target.verificationRecords,
-          {
-            id: uid('ver'),
-            type: 'edgenuity_manual',
-            timestamp: now,
-            status: 'failed',
-            progressAfter: action.progressPercent,
-            note: `Manual / unverified — ${action.note}`.slice(0, 200),
-          },
-        ],
-      });
-    }
-
-    case 'EDGENUITY_SET_DEVELOPER_MODE':
-      return { ...state, edgenuity: { ...state.edgenuity, developerMode: action.on } };
-
-    case 'EDGENUITY_SET_CAMERA_PERMISSION':
-      return state.edgenuity.cameraPermission === action.permission
-        ? state
-        : { ...state, edgenuity: { ...state.edgenuity, cameraPermission: action.permission } };
-
-    /* ------------------------------------------------------------------ */
     /* Parent accountability                                               */
     /* ------------------------------------------------------------------ */
 
@@ -1937,35 +1474,6 @@ export function reducer(state: AppState, action: Action): AppState {
       );
     }
 
-    /**
-     * Raising (or lowering) the proof strength one assignment needs.
-     *
-     * Prospective only. An assignment already completed under the rule that
-     * applied at the time stays completed — re-opening finished work because a
-     * setting changed later would be both wrong and infuriating.
-     */
-    case 'PARENT_SET_ASSIGNMENT_TRUST': {
-      const target = state.assignments.find((a) => a.id === action.assignmentId);
-      if (!target?.edgenuity) return state;
-      const current = target.edgenuity.config.requiredVerificationTrust ?? 'standard';
-      if (current === action.trust) return state;
-
-      const next = updateAssignment(state, action.assignmentId, {
-        edgenuity: {
-          ...target.edgenuity,
-          config: { ...target.edgenuity.config, requiredVerificationTrust: action.trust },
-        },
-      });
-
-      return log(
-        next,
-        'parent_requirement_changed',
-        `Parent set “${target.title}” to require ${
-          action.trust === 'enhanced' ? 'Enhanced' : 'Standard'
-        } Proof`,
-        { assignmentId: target.id, trust: action.trust, previous: current },
-      );
-    }
 
     /**
      * Clearing history. Deliberately three separate scopes, and none of them
@@ -1986,13 +1494,12 @@ export function reducer(state: AppState, action: Action): AppState {
           'Parent cleared the focus history',
         );
       }
-      /* Verification history: the records and the Edgenuity session/challenge
-         ledgers go, the assignments and their completion status stay. */
+      /* Verification history: the records go, the assignments and their
+         completion status stay. */
       return log(
         {
           ...state,
           assignments: state.assignments.map((a) => ({ ...a, verificationRecords: [] })),
-          edgenuity: { ...state.edgenuity, sessions: [] },
         },
         'parent_controls_changed',
         'Parent cleared the verification history',
@@ -2168,11 +1675,6 @@ export function reducer(state: AppState, action: Action): AppState {
         },
         'settings_changed',
       );
-
-    case 'EDGENUITY_OCR_LOADED':
-      return state.edgenuity.ocrEverLoaded
-        ? state
-        : { ...state, edgenuity: { ...state.edgenuity, ocrEverLoaded: true } };
 
     default:
       return state;

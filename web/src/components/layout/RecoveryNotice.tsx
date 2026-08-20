@@ -21,7 +21,7 @@ export function RecoveryNotice() {
     lost.push(`${recovery.dropped.exams} exam${recovery.dropped.exams === 1 ? '' : 's'}`);
   }
   if (recovery.dropped.focusRuns > 0) lost.push('some focus history');
-  if (recovery.dropped.edgenuitySessions > 0) lost.push('some verification history');
+  if (0 > 0) lost.push('some verification history');
 
   return (
     <div

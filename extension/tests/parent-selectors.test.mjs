@@ -29,7 +29,6 @@ const {
   selectParentAssignmentSummary,
   selectParentExams,
   selectRecentVerifications,
-  selectRefusedAttempts,
   selectVerificationBreakdown,
   selectWeeklySummary,
   verificationKindOf,
@@ -92,7 +91,7 @@ const canvasRecord = (at) => ({
 
 const edgenuityRecord = (at, trust) => ({
   id: id('ver'),
-  type: 'edgenuity_photo',
+  type: 'canvas_submission',
   timestamp: at,
   status: 'verified',
   progressBefore: 43,
@@ -133,9 +132,9 @@ function seededState() {
   state.assignments = [
     assignment({ title: 'Essay', subject: 'English', completedAt: daysAgo(1), records: [canvasRecord(daysAgo(1))] }),
     assignment({ title: 'Lab report', subject: 'Science', completedAt: daysAgo(2), records: [canvasRecord(daysAgo(2))] }),
-    assignment({ title: 'Science module', subject: 'Science', completedAt: daysAgo(1), records: [edgenuityRecord(daysAgo(1), 'standard')] }),
-    assignment({ title: 'Physics module', subject: 'Science', completedAt: daysAgo(3), records: [edgenuityRecord(daysAgo(3), 'enhanced')] }),
-    assignment({ title: 'Chemistry module', subject: 'Science', completedAt: daysAgo(3), records: [edgenuityRecord(daysAgo(3), 'enhanced')] }),
+    assignment({ title: 'Science module', subject: 'Science', completedAt: daysAgo(1), records: [canvasRecord(daysAgo(1))] }),
+    assignment({ title: 'Physics module', subject: 'Science', completedAt: daysAgo(3), records: [canvasRecord(daysAgo(3))] }),
+    assignment({ title: 'Chemistry module', subject: 'Science', completedAt: daysAgo(3), records: [canvasRecord(daysAgo(3))] }),
     assignment({ title: 'Worksheet', subject: 'Math', completedAt: daysAgo(2), records: [manualRecord(daysAgo(2))] }),
     assignment({ title: 'Reading', subject: 'English', completedAt: daysAgo(4), records: [manualRecord(daysAgo(4))] }),
     assignment({ title: 'Vocabulary', subject: 'English', completedAt: daysAgo(5), records: [] }),
@@ -155,9 +154,6 @@ function seededState() {
     event('temporary_unlock_ended', daysAgo(2)),
     event('temporary_unlock_started', daysAgo(2), { minutes: 15 }),
     event('emergency_exit', daysAgo(3), undefined, 'Emergency exit used — School site blocked'),
-    event('edgenuity_verification_failed', daysAgo(1), { reason: 'different_course' }),
-    event('edgenuity_verification_failed', daysAgo(1), { reason: 'different_course' }),
-    event('edgenuity_verification_failed', daysAgo(1), { reason: 'insufficient_trust' }),
     // Long ago: outside the weekly window.
     event('parent_override', daysAgo(25)),
   ];
@@ -262,13 +258,13 @@ test('the week boundary is inclusive of the earliest day', () => {
 /* Trust breakdown                                                     */
 /* ------------------------------------------------------------------ */
 
-test('the breakdown separates Canvas, Standard, Enhanced and manual', () => {
+test('the breakdown separates Canvas-verified work from manual', () => {
   const breakdown = selectVerificationBreakdown(seededState(), NOW);
   const count = (kind) => breakdown.find((row) => row.kind === kind).count;
 
-  assert.equal(count('canvas'), 2);
-  assert.equal(count('edgenuity_standard'), 1);
-  assert.equal(count('edgenuity_enhanced'), 2);
+  // Five Canvas-verified inside the window, three manual (two records, one
+  // completed with no record at all).
+  assert.equal(count('canvas'), 5);
   assert.equal(count('manual'), 3);
   assert.equal(breakdown.reduce((sum, row) => sum + row.count, 0), 8);
 });
@@ -293,7 +289,7 @@ test('a completion with no verification record is manual, whatever the platform 
 });
 
 /* ------------------------------------------------------------------ */
-/* Recent work and refusals                                            */
+/* Recent work                                                         */
 /* ------------------------------------------------------------------ */
 
 test('recent work is newest first and carries the evidence', () => {
@@ -301,29 +297,11 @@ test('recent work is newest first and carries the evidence', () => {
   assert.equal(recent.length, 5);
   assert.ok(Date.parse(recent[0].completedAt) >= Date.parse(recent[1].completedAt));
 
-  const enhanced = recent.find((entry) => entry.kind === 'edgenuity_enhanced');
-  assert.equal(enhanced.progressBefore, 43);
-  assert.equal(enhanced.progressAfter, 47);
-  assert.equal(enhanced.trust, 'enhanced');
-
   const canvas = recent.find((entry) => entry.kind === 'canvas');
   assert.equal(canvas.canvasStatus, 'submitted');
 });
 
-test('repeated identical refusals collapse into one row', () => {
-  const refused = selectRefusedAttempts(seededState());
-  const course = refused.find((row) => row.reason.includes('different course'));
-  assert.equal(course.repeats, 2, 'two in a row become one row');
-  assert.equal(refused.length, 2, 'and the different reason stays separate');
-});
 
-test('refusal wording never accuses anyone', () => {
-  for (const row of selectRefusedAttempts(seededState())) {
-    for (const forbidden of ['cheat', 'lying', 'fake', 'fraud']) {
-      assert.equal(row.reason.toLowerCase().includes(forbidden), false);
-    }
-  }
-});
 
 /* ------------------------------------------------------------------ */
 /* Focus history                                                       */
@@ -378,47 +356,11 @@ test('assignment filters split the list the way the dashboard offers', () => {
   assert.equal(count('all'), 10);
   assert.equal(count('completed'), 9);
   assert.equal(count('incomplete'), 1);
-  assert.equal(count('canvas'), 3, 'includes the one outside the weekly window');
-  assert.equal(count('edgenuity_standard'), 1);
-  assert.equal(count('edgenuity_enhanced'), 2);
+  assert.equal(count('canvas'), 6, 'includes the one outside the weekly window');
   assert.equal(count('manual'), 3);
 });
 
-test('an assignment needing stronger proof is flagged for the parent', () => {
-  const state = defaultState();
-  state.assignments = [
-    assignment({
-      title: 'Science module',
-      edgenuity: {
-        config: { targetType: 'progress_percent', requiredProgressDelta: 3, requiredVerificationTrust: 'enhanced' },
-        verifiedProgressDelta: 0,
-        lastVerifiedProgress: 43,
-        verifiedActivities: 0,
-        lastVerifiedTrust: 'standard',
-      },
-    }),
-  ];
 
-  const [row] = selectParentAssignmentSummary(state, 'all');
-  assert.equal(row.requiredTrust, 'enhanced');
-  assert.equal(row.awaitingStrongerProof, true, 'progress detected, Enhanced still required');
-});
-
-test('the global floor raises an assignment requirement without editing it', () => {
-  const state = defaultState();
-  state.settings.edgenuityProofMode = 'enhanced';
-  state.assignments = [
-    assignment({
-      edgenuity: {
-        config: { targetType: 'progress_percent', requiredVerificationTrust: 'standard' },
-        verifiedProgressDelta: 0,
-        lastVerifiedProgress: null,
-        verifiedActivities: 0,
-      },
-    }),
-  ];
-  assert.equal(selectParentAssignmentSummary(state, 'all')[0].requiredTrust, 'enhanced');
-});
 
 test('only upcoming exams are listed, with study sessions on that subject', () => {
   const state = seededState();
@@ -470,21 +412,6 @@ test('the daily series covers seven days and totals match the summary', () => {
 test('the export carries the summary and none of the secrets', () => {
   const state = seededState();
   state.parentPin = { hash: 'deadbeefhash', salt: 'saltysalt', createdAt: daysAgo(30) };
-  state.edgenuity.challenges = [
-    {
-      id: 'chl_1',
-      assignmentId: state.assignments[0].id,
-      sessionId: null,
-      phase: 'before',
-      type: 'visual_code',
-      value: 'K7M4',
-      valueHash: 'abc123',
-      createdAt: daysAgo(1),
-      expiresAt: daysAgo(1),
-      status: 'pending',
-      attempts: 0,
-    },
-  ];
 
   const exported = JSON.stringify(buildWeeklyExport(state, NOW));
 
@@ -497,7 +424,7 @@ test('the export carries the summary and none of the secrets', () => {
 test('the CSV export has a header row and one line per completion', () => {
   const csv = buildWeeklyCsv(seededState());
   const lines = csv.split('\n');
-  assert.match(lines[0], /^Completed at,Subject,Assignment,Verification,Trust/);
+  assert.match(lines[0], /^Completed at,Subject,Assignment,Verification,Canvas status/);
   assert.equal(lines.length, 10, 'header plus nine completed assignments');
   assert.equal(csv.includes('K7M4'), false);
 });

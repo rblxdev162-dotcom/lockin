@@ -75,16 +75,6 @@ export function buildExport(state: AppState, appVersion: string, now = new Date(
       canvas: a.canvas
         ? { domain: a.canvas.domain, url: a.canvas.url, submissionStatus: a.canvas.submissionStatus }
         : null,
-      edgenuity: a.edgenuity
-        ? {
-            courseName: a.edgenuity.config.courseName ?? null,
-            targetType: a.edgenuity.config.targetType,
-            verifiedProgressDelta: a.edgenuity.verifiedProgressDelta,
-            verifiedActivities: a.edgenuity.verifiedActivities,
-            lastVerifiedAt: a.edgenuity.lastVerifiedAt ?? null,
-            lastVerifiedTrust: a.edgenuity.lastVerifiedTrust ?? null,
-          }
-        : null,
     })),
 
     exams: state.exams.map((e) => ({
@@ -142,8 +132,6 @@ export function buildExport(state: AppState, appVersion: string, now = new Date(
         status: r.status,
         timestamp: r.timestamp,
         sourceDomain: r.sourceDomain ?? null,
-        progressBefore: r.progressBefore ?? null,
-        progressAfter: r.progressAfter ?? null,
         note: r.note ?? null,
       })),
     ),
@@ -181,7 +169,6 @@ export function buildExport(state: AppState, appVersion: string, now = new Date(
       blockedDomains: state.settings.blockedDomains,
       allowedDomains: state.settings.allowedDomains,
       theme: state.settings.theme,
-      edgenuityProofMode: state.settings.edgenuityProofMode,
     },
 
     blockedSiteCounts: state.blockStats.map((b) => ({ domain: b.domain, count: b.count })),

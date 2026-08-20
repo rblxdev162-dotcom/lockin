@@ -1,0 +1,227 @@
+/**
+ * What state work is in, and what order to do it in.
+ *
+ * These are the rules the whole app sorts and labels by, so they are tested
+ * where they live rather than through a screen. The interesting cases are the
+ * distinctions that used to be flattened: graded versus submitted versus ticked
+ * off, and missing versus merely overdue.
+ *
+ * Run: npm run test:worklist
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+const {
+  WORK_STATE_LABEL,
+  byUrgency,
+  groupByClass,
+  isSettled,
+  urgency,
+  whatToDoNext,
+  workStateOf,
+} = await import('../../web/src/lib/workState.ts');
+
+const NOW = Date.parse('2026-03-10T18:00:00Z');
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+const pad = (n) => String(n).padStart(2, '0');
+
+function assignment(patch = {}) {
+  const { dueIn, canvasStatus, ...rest } = patch;
+  const due = dueIn === null ? null : new Date(NOW + (dueIn ?? DAY));
+  return {
+    id: rest.id ?? 'a1',
+    title: rest.title ?? 'Worksheet',
+    subject: rest.subject ?? 'Biology',
+    platform: 'Canvas',
+    dueDate: due ? `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}` : '',
+    dueTime: due ? `${pad(due.getHours())}:${pad(due.getMinutes())}` : '',
+    estimatedMinutes: 30,
+    loggedMinutes: 0,
+    priority: 'Normal',
+    status: 'Not Started',
+    completionMethod: 'manual',
+    createdAt: new Date(NOW - DAY).toISOString(),
+    updatedAt: new Date(NOW - DAY).toISOString(),
+    reminders: { firstReminderMinutes: 120, escalationMinutes: 60, focusWarningMinutes: 30, enabled: true },
+    remindersFired: [],
+    verificationStatus: 'not_required',
+    verificationRecords: [],
+    ...(canvasStatus
+      ? {
+          canvas: {
+            domain: 'example.instructure.com',
+            url: 'https://example.instructure.com/x',
+            submissionStatus: canvasStatus,
+            lastCheckedAt: null,
+            lastStatusChangeAt: null,
+          },
+        }
+      : {}),
+    ...rest,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* The distinctions the old list could not make                        */
+/* ------------------------------------------------------------------ */
+
+test('graded, submitted and ticked-off are three different states', () => {
+  assert.equal(workStateOf(assignment({ canvasStatus: 'graded' }), NOW), 'graded');
+  assert.equal(workStateOf(assignment({ canvasStatus: 'submitted' }), NOW), 'submitted');
+  assert.equal(workStateOf(assignment({ canvasStatus: 'late_submitted' }), NOW), 'submitted');
+  assert.equal(
+    workStateOf(assignment({ status: 'Completed', completedAt: new Date(NOW).toISOString() }), NOW),
+    'done',
+  );
+});
+
+test('all three mean there is nothing left to do', () => {
+  for (const state of ['graded', 'submitted', 'done']) assert.equal(isSettled(state), true);
+  for (const state of ['missing', 'overdue', 'due_today', 'upcoming', 'undated']) {
+    assert.equal(isSettled(state), false);
+  }
+});
+
+test('Canvas saying "missing" outranks LockIn noticing a passed deadline', () => {
+  // Both are late. Only one of them is the school's own assertion.
+  assert.equal(workStateOf(assignment({ dueIn: -2 * DAY, canvasStatus: 'missing' }), NOW), 'missing');
+  assert.equal(workStateOf(assignment({ dueIn: -2 * DAY }), NOW), 'overdue');
+});
+
+test('graded work stays graded even if its due date has passed', () => {
+  const state = workStateOf(assignment({ dueIn: -5 * DAY, canvasStatus: 'graded' }), NOW);
+  assert.equal(state, 'graded', 'LockIn must not contradict the source of truth');
+});
+
+test('undated work has its own state rather than being called overdue', () => {
+  assert.equal(workStateOf(assignment({ dueIn: null }), NOW), 'undated');
+});
+
+test('due today and upcoming are separated at the end of today', () => {
+  assert.equal(workStateOf(assignment({ dueIn: 2 * HOUR }), NOW), 'due_today');
+  assert.equal(workStateOf(assignment({ dueIn: 2 * DAY }), NOW), 'upcoming');
+});
+
+test('every state has a word, because none of them may be colour alone', () => {
+  for (const state of ['graded', 'submitted', 'done', 'missing', 'overdue', 'due_today', 'upcoming', 'undated']) {
+    assert.ok(WORK_STATE_LABEL[state]?.length > 0, `${state} has no label`);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Ordering                                                            */
+/* ------------------------------------------------------------------ */
+
+test('the order is missing, overdue, today, upcoming, undated, then settled', () => {
+  const list = [
+    assignment({ id: 'settled', canvasStatus: 'graded' }),
+    assignment({ id: 'undated', dueIn: null }),
+    assignment({ id: 'upcoming', dueIn: 3 * DAY }),
+    assignment({ id: 'today', dueIn: 2 * HOUR }),
+    assignment({ id: 'overdue', dueIn: -DAY }),
+    assignment({ id: 'missing', dueIn: -2 * DAY, canvasStatus: 'missing' }),
+  ];
+  assert.deepEqual(
+    byUrgency(list, NOW).map((a) => a.id),
+    ['missing', 'overdue', 'today', 'upcoming', 'undated', 'settled'],
+  );
+});
+
+test('inside a band it is strictly chronological', () => {
+  const list = [
+    assignment({ id: 'later', dueIn: 5 * DAY }),
+    assignment({ id: 'sooner', dueIn: 2 * DAY }),
+    assignment({ id: 'middle', dueIn: 3 * DAY }),
+  ];
+  assert.deepEqual(
+    byUrgency(list, NOW).map((a) => a.id),
+    ['sooner', 'middle', 'later'],
+  );
+});
+
+test('priority never beats a due date', () => {
+  // The failure this prevents: an "Urgent" essay due next week sitting above
+  // a "Normal" worksheet due in an hour.
+  const list = [
+    assignment({ id: 'urgent-next-week', priority: 'Urgent', dueIn: 7 * DAY }),
+    assignment({ id: 'normal-in-an-hour', priority: 'Normal', dueIn: HOUR }),
+  ];
+  assert.deepEqual(
+    byUrgency(list, NOW).map((a) => a.id),
+    ['normal-in-an-hour', 'urgent-next-week'],
+  );
+});
+
+test('the band always dominates the due time', () => {
+  // An overdue item from a year ago still outranks something due in a minute.
+  const ancient = assignment({ id: 'ancient', dueIn: -365 * DAY });
+  const imminent = assignment({ id: 'imminent', dueIn: 60_000 });
+  assert.ok(urgency(ancient, NOW) < urgency(imminent, NOW));
+});
+
+test('what to do next drops finished work rather than sorting it to the bottom', () => {
+  const list = [
+    assignment({ id: 'graded', canvasStatus: 'graded' }),
+    assignment({ id: 'submitted', canvasStatus: 'submitted' }),
+    assignment({ id: 'todo', dueIn: HOUR }),
+  ];
+  assert.deepEqual(
+    whatToDoNext(list, NOW).map((a) => a.id),
+    ['todo'],
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* Grouping by class                                                   */
+/* ------------------------------------------------------------------ */
+
+test('work groups by class, and the most urgent class comes first', () => {
+  const list = [
+    assignment({ id: 'art', subject: 'Art', dueIn: 5 * DAY }),
+    assignment({ id: 'bio1', subject: 'Biology', dueIn: 2 * DAY }),
+    assignment({ id: 'bio2', subject: 'Biology', dueIn: -DAY }),
+    assignment({ id: 'math', subject: 'Math', dueIn: 3 * HOUR }),
+  ];
+  const groups = groupByClass(list, NOW);
+
+  assert.deepEqual(
+    groups.map((g) => g.subject),
+    ['Biology', 'Math', 'Art'],
+    'the column you need first should be the one on the left',
+  );
+  // And within a class, the same urgency order.
+  assert.deepEqual(
+    groups[0].assignments.map((a) => a.id),
+    ['bio2', 'bio1'],
+  );
+});
+
+test('a class with nothing outstanding sorts last', () => {
+  const list = [
+    assignment({ id: 'done-early', subject: 'History', dueIn: -10 * DAY, canvasStatus: 'graded' }),
+    assignment({ id: 'todo', subject: 'Math', dueIn: 5 * DAY }),
+  ];
+  assert.deepEqual(
+    groupByClass(list, NOW).map((g) => g.subject),
+    ['Math', 'History'],
+  );
+});
+
+test('work with no class is grouped rather than dropped', () => {
+  const groups = groupByClass([assignment({ subject: '' })], NOW);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].subject, 'No class');
+});
+
+test('grouping is stable when two classes are equally urgent', () => {
+  const list = [
+    assignment({ id: 'z', subject: 'Zoology', dueIn: DAY }),
+    assignment({ id: 'a', subject: 'Algebra', dueIn: DAY }),
+  ];
+  assert.deepEqual(
+    groupByClass(list, NOW).map((g) => g.subject),
+    ['Algebra', 'Zoology'],
+    'a tie falls back to the name so columns do not shuffle between renders',
+  );
+});

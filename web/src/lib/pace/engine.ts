@@ -21,7 +21,6 @@
  */
 import type { AppState, Assignment } from '../../types';
 import type {
-  CoursePace,
   PaceAction,
   PaceReason,
   PaceReport,
@@ -30,7 +29,6 @@ import type {
 } from '../../types/pace';
 import type { Confidence } from '../../types/source';
 import { SOURCE_LABEL, classify, relativeAge, trustworthyForJudgment } from '../sources/freshness';
-import { coursePace } from './courses';
 import { dueTimestamp, isComplete, sortByDue } from '../selectors';
 
 const HOUR = 3_600_000;
@@ -114,10 +112,6 @@ export function staleSources(state: AppState, now: number): StaleSource[] {
   for (const assignment of state.assignments) {
     if (!isComplete(assignment)) consider(assignment.source);
   }
-  for (const course of state.integrations.courses) {
-    consider(course.actualProgressPercent?.source);
-    consider(course.activitySource);
-  }
 
   return [...seen.values()];
 }
@@ -130,14 +124,12 @@ export function staleSources(state: AppState, now: number): StaleSource[] {
  * The order of these checks *is* the policy, so it is written out rather than
  * buried in nested conditionals:
  *
- *   1. Nothing to judge at all      → UNKNOWN (no data)
- *   2. Something genuinely late     → BEHIND
- *   3. A course meaningfully behind → BEHIND
- *   4. More due in 24h than fits    → AT_RISK
- *   5. A course slightly behind     → AT_RISK
- *   6. Everything due soon is done,
- *      and a course is ahead        → AHEAD
- *   7. Otherwise                    → ON_TRACK
+ *   1. Nothing to judge at all   → UNKNOWN (no data)
+ *   2. Something genuinely late  → BEHIND
+ *   3. More due in 24h than fits → AT_RISK
+ *   4. Nothing due soon, and
+ *      recent work finished      → AHEAD
+ *   5. Otherwise                 → ON_TRACK
  *
  * Every branch that reaches a verdict on stale inputs is intercepted first by
  * the stale check, which downgrades to UNKNOWN instead.
@@ -149,19 +141,14 @@ export function computePace({ state, now }: PaceInput): PaceReport {
   const overdue = trustedOverdue(state, now);
   const soon = dueSoonUnfinished(state, now);
   const done = dueSoonComplete(state, now);
-  const courses = state.integrations.courses.map((c) => coursePace(c, now));
-  const usableCourses = courses.filter((c) => c.status !== 'UNKNOWN');
-
-  const nothingKnown =
-    state.assignments.filter((a) => !isComplete(a)).length === 0 && usableCourses.length === 0;
+  const nothingKnown = state.assignments.filter((a) => !isComplete(a)).length === 0;
 
   /* --- 1. nothing to judge --- */
   if (nothingKnown) {
-    if (state.assignments.length === 0 && state.integrations.courses.length === 0) {
+    if (state.assignments.length === 0) {
       return {
         status: 'UNKNOWN',
         confidence: 'low',
-        official: false,
         reasons: [
           {
             code: 'no_data',
@@ -174,10 +161,19 @@ export function computePace({ state, now }: PaceInput): PaceReport {
       };
     }
     reasons.push({ code: 'nothing_due', tone: 'good', text: 'Nothing is outstanding right now.' });
+    if (done.length > 0) {
+      // Work due in the next two days is already finished. That is what being
+      // ahead is, and calling it merely "on track" undersells a real thing the
+      // student did.
+      reasons.push({
+        code: 'due_soon_complete',
+        tone: 'good',
+        text: 'Everything due in the next two days is finished.',
+      });
+    }
     return {
-      status: 'ON_TRACK',
-      confidence: confidenceFrom(state, now, stale.length),
-      official: false,
+      status: done.length > 0 ? 'AHEAD' : 'ON_TRACK',
+      confidence: confidenceFrom(state, stale.length),
       reasons,
       staleSources: stale,
       suggestedAction: { kind: 'none', text: 'Nothing needs doing right now.' },
@@ -188,11 +184,10 @@ export function computePace({ state, now }: PaceInput): PaceReport {
   // Everything the student has is from a source that stopped answering. Any
   // verdict here would be a verdict about old data presented as a verdict
   // about them.
-  if (allEvidenceStale(state, courses, now)) {
+  if (allEvidenceStale(state, now)) {
     return {
       status: 'UNKNOWN',
       confidence: 'low',
-      official: false,
       reasons: [
         {
           code: 'stale_data',
@@ -208,9 +203,6 @@ export function computePace({ state, now }: PaceInput): PaceReport {
     };
   }
 
-  const behindCourses = courses.filter((c) => c.status === 'BEHIND');
-  const atRiskCourses = courses.filter((c) => c.status === 'AT_RISK');
-  const aheadCourses = courses.filter((c) => c.status === 'AHEAD');
 
   /* --- 2. genuinely late --- */
   if (overdue.length > 0) {
@@ -222,32 +214,15 @@ export function computePace({ state, now }: PaceInput): PaceReport {
           ? `“${overdue[0].title}” is past its due date.`
           : `${overdue.length} assignments are past their due date.`,
     });
-    pushCourseReasons(reasons, behindCourses, aheadCourses);
     return {
       status: 'BEHIND',
-      confidence: confidenceFrom(state, now, stale.length),
-      official: courses.some((c) => c.official && c.status === 'BEHIND'),
+      confidence: confidenceFrom(state, stale.length),
       reasons,
       staleSources: stale,
       suggestedAction: startAction(overdue[0], 'Start with the oldest one'),
     };
   }
 
-  /* --- 3. a course meaningfully behind --- */
-  if (behindCourses.length > 0) {
-    pushCourseReasons(reasons, behindCourses, aheadCourses);
-    const next = soon[0];
-    return {
-      status: 'BEHIND',
-      confidence: confidenceFrom(state, now, stale.length),
-      official: behindCourses.some((c) => c.official),
-      reasons,
-      staleSources: stale,
-      suggestedAction: next
-        ? startAction(next, 'Finishing this puts you back on pace')
-        : { kind: 'none', text: 'A session on the course behind pace fixes this.' },
-    };
-  }
 
   /* --- 4. the next day does not fit --- */
   const next24 = soon.filter((a) => dueTimestamp(a) - now <= DAY);
@@ -263,31 +238,15 @@ export function computePace({ state, now }: PaceInput): PaceReport {
       tone: 'warn',
       text: `About ${Math.round(minutesNeeded)} minutes of work is due in the next day.`,
     });
-    pushCourseReasons(reasons, behindCourses, aheadCourses);
     return {
       status: 'AT_RISK',
-      confidence: confidenceFrom(state, now, stale.length),
-      official: false,
+      confidence: confidenceFrom(state, stale.length),
       reasons,
       staleSources: stale,
       suggestedAction: startAction(next24[0], 'Start the one due soonest'),
     };
   }
 
-  /* --- 5. a course slightly behind --- */
-  if (atRiskCourses.length > 0) {
-    pushCourseReasons(reasons, atRiskCourses, aheadCourses);
-    return {
-      status: 'AT_RISK',
-      confidence: confidenceFrom(state, now, stale.length),
-      official: atRiskCourses.some((c) => c.official),
-      reasons,
-      staleSources: stale,
-      suggestedAction: soon[0]
-        ? startAction(soon[0], 'A short session closes the gap')
-        : { kind: 'none', text: 'A short session on that course closes the gap.' },
-    };
-  }
 
   /* --- 6 and 7 --- */
   if (soon.length === 0) {
@@ -309,16 +268,14 @@ export function computePace({ state, now }: PaceInput): PaceReport {
           : `${soon.length} assignments are due in the next two days.`,
     });
   }
-  pushCourseReasons(reasons, [], aheadCourses);
   if (overdue.length === 0 && state.assignments.length > 0) {
     reasons.push({ code: 'nothing_due', tone: 'good', text: 'Nothing is overdue.' });
   }
 
-  const ahead = soon.length === 0 && (aheadCourses.length > 0 || done.length > 0);
+  const ahead = soon.length === 0 && done.length > 0;
   return {
     status: ahead ? 'AHEAD' : 'ON_TRACK',
-    confidence: confidenceFrom(state, now, stale.length),
-    official: ahead && aheadCourses.some((c) => c.official),
+    confidence: confidenceFrom(state, stale.length),
     reasons,
     staleSources: stale,
     suggestedAction: soon[0]
@@ -335,30 +292,6 @@ function startAction(assignment: Assignment, text: string): PaceAction {
   return { kind: 'start_focus', text, assignmentId: assignment.id };
 }
 
-function pushCourseReasons(
-  reasons: PaceReason[],
-  bad: CoursePace[],
-  good: CoursePace[],
-): void {
-  for (const course of bad.slice(0, 2)) {
-    const size = Math.abs(course.deltaPercent ?? 0)
-      .toFixed(1)
-      .replace(/\.0$/, '');
-    reasons.push({
-      code: 'course_behind',
-      tone: 'warn',
-      text: `${course.name} is ${size}% behind its target pace.`,
-    });
-  }
-  for (const course of good.slice(0, 2)) {
-    const size = (course.deltaPercent ?? 0).toFixed(1).replace(/\.0$/, '');
-    reasons.push({
-      code: 'course_ahead',
-      tone: 'good',
-      text: `${course.name} is ${size}% ahead of target.`,
-    });
-  }
-}
 
 /**
  * True when every piece of evidence in play is stale.
@@ -368,15 +301,10 @@ function pushCourseReasons(
  * the question. Refusing to answer whenever anything at all is stale would
  * make UNKNOWN the permanent state of a real student's account.
  */
-function allEvidenceStale(state: AppState, courses: CoursePace[], now: number): boolean {
+function allEvidenceStale(state: AppState, now: number): boolean {
   const openWork = state.assignments.filter((a) => !isComplete(a));
-  const anyFreshAssignment = openWork.some((a) => dueDateTrustworthy(a, now));
-  const anyFreshCourse = courses.some((c) => c.status !== 'UNKNOWN');
-  const haveCourses = state.integrations.courses.length > 0;
-
-  if (openWork.length === 0 && haveCourses) return !anyFreshCourse;
-  if (!haveCourses) return openWork.length > 0 && !anyFreshAssignment;
-  return !anyFreshAssignment && !anyFreshCourse;
+  if (openWork.length === 0) return false;
+  return !openWork.some((a) => dueDateTrustworthy(a, now));
 }
 
 /**
@@ -387,7 +315,7 @@ function allEvidenceStale(state: AppState, courses: CoursePace[], now: number): 
  * and a confident-sounding verdict built on unverifiable input is exactly the
  * thing this engine is supposed to avoid.
  */
-function confidenceFrom(state: AppState, now: number, staleCount: number): Confidence {
+function confidenceFrom(state: AppState, staleCount: number): Confidence {
   if (staleCount > 0) return 'low';
 
   const open = state.assignments.filter((a) => !isComplete(a));
@@ -396,13 +324,12 @@ function confidenceFrom(state: AppState, now: number, staleCount: number): Confi
   // everything synced is already finished is the best case, not the least
   // certain one.
   const external = state.assignments.filter((a) => a.source && a.source.kind !== 'MANUAL');
-  const anyLiveCourse = state.integrations.courses.some(
-    (c) => coursePace(c, now).status !== 'UNKNOWN',
-  );
 
-  if (external.length === 0 && !anyLiveCourse) return open.length === 0 ? 'medium' : 'low';
-  if (external.length > 0 && anyLiveCourse) return 'high';
-  return 'medium';
+  // Hand-typed work is not wrong, but LockIn has no way to check it, and a
+  // confident verdict built on unverifiable input is what this engine exists
+  // to avoid.
+  if (external.length === 0) return open.length === 0 ? 'medium' : 'low';
+  return external.length >= open.length ? 'high' : 'medium';
 }
 
 /** Short label for a status, used by badges and notification titles. */

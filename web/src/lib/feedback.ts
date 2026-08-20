@@ -24,7 +24,6 @@ import { dueTimestamp, isComplete } from './selectors';
 export const FEEDBACK_KINDS = [
   'week_ahead',
   'tomorrow_clear',
-  'moved_to_on_track',
   'no_overdue_streak',
   'finished_early',
   'already_working',
@@ -47,7 +46,6 @@ export interface Feedback {
 export const FEEDBACK_COOLDOWN_MS: Record<FeedbackKind, number> = {
   week_ahead: 5 * 24 * 3600_000,
   tomorrow_clear: 20 * 3600_000,
-  moved_to_on_track: 24 * 3600_000,
   no_overdue_streak: 3 * 24 * 3600_000,
   finished_early: 12 * 3600_000,
   already_working: 2 * 3600_000,
@@ -118,10 +116,6 @@ function candidates(input: FeedbackInput): Feedback[] {
     out.push({ kind: 'week_ahead', text: 'You’re ahead for the week.' });
   }
 
-  const aheadCourse = report.reasons.find((r) => r.code === 'course_ahead');
-  if (aheadCourse && report.status !== 'BEHIND') {
-    out.push({ kind: 'moved_to_on_track', text: aheadCourse.text });
-  }
 
   if (dueTomorrow.length === 0 && overdue.length === 0 && state.assignments.length > 0) {
     out.push({ kind: 'tomorrow_clear', text: 'Everything due tomorrow is handled.' });

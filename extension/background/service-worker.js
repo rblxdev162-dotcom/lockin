@@ -24,8 +24,10 @@ import { applyRules, isBlockingActive, effectiveBlocklist } from './rules.js';
 import { getState, setState, getStats, recordBlock, clearStats } from './storage.js';
 import { CANVAS_MSG } from '../canvas/messaging.js';
 import {
+  closeCanvasSyncTab,
   configureCanvas,
   disconnectCanvas,
+  openCanvasForSync,
   getCanvasView,
   handleCanvasContentMessage,
   openCanvasUrl,
@@ -40,6 +42,7 @@ import {
   getCalendarConfig,
   runCalendarRefresh,
   scheduleCalendarRefresh,
+  setCalendarOptions,
   toCalendarView,
 } from './calendar.js';
 import {
@@ -131,6 +134,7 @@ chrome.runtime.onStartup.addListener(() => {
   void refreshCanvasPermission();
   chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
   void reassertCalendarAlarm();
+  void startupSync();
 });
 
 /**
@@ -141,6 +145,22 @@ chrome.runtime.onStartup.addListener(() => {
 async function reassertCalendarAlarm() {
   const config = await getCalendarConfig();
   if (config.url) await scheduleCalendarRefresh(config.refreshMinutes);
+}
+
+/**
+ * The once-per-startup catch-up.
+ *
+ * Chrome starting is the one moment LockIn knows the student has sat down, and
+ * it is when their data is furthest out of date — the machine may have been off
+ * for a day. So the feed is fetched immediately rather than waiting up to half
+ * an hour for the first alarm, and, if they asked for it, Canvas is opened in
+ * the background so submission status catches up too.
+ */
+async function startupSync() {
+  const config = await getCalendarConfig();
+  if (!config.url) return;
+  await runCalendarRefresh();
+  if (config.openCanvasOnStartup !== false) await openCanvasForSync();
 }
 
 // If the student revokes Canvas access from chrome://extensions, stop the
@@ -162,6 +182,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void runCalendarRefresh();
   }
   if (alarm.name === HEARTBEAT_ALARM) {
+    // The background Canvas tab, if one is open, gets taken away here rather
+    // than on a timer — a worker killed mid-`setTimeout` would leave it behind.
+    void closeCanvasSyncTab();
     // Reminders ride the existing one-minute heartbeat rather than adding an
     // alarm of their own; the check is a storage read and some arithmetic.
     // `studyPresence` is passed in so a student already working is not
@@ -254,6 +277,90 @@ async function handlePageMessage(envelope, sender) {
     case MSG.CANVAS_OPEN: {
       const result = await openCanvasUrl(envelope.payload?.url);
       return { type: MSG.CANVAS_VIEW, payload: { ...(await getCanvasView()), open: result } };
+    }
+
+    /* ---- Canvas Calendar Feed ---- */
+
+    case MSG.CALENDAR_GET_VIEW:
+      return { type: MSG.CALENDAR_VIEW, payload: toCalendarView(await getCalendarConfig()) };
+
+    case MSG.CALENDAR_CONFIGURE: {
+      const result = await configureCalendar(
+        envelope.payload?.url,
+        envelope.payload?.refreshMinutes,
+      );
+      // The reply carries the outcome and a view. It never echoes the URL back,
+      // so a bug in the page cannot end up rendering it.
+      return {
+        type: MSG.CALENDAR_VIEW,
+        payload: {
+          ...toCalendarView(await getCalendarConfig()),
+          ok: result.ok,
+          reason: result.reason,
+        },
+      };
+    }
+
+    case MSG.CALENDAR_FETCH: {
+      const result = await fetchCalendar({ force: envelope.payload?.force === true });
+      return {
+        type: MSG.CALENDAR_TEXT,
+        payload: {
+          ok: result.ok,
+          reason: result.reason ?? null,
+          text: result.ok ? result.text : null,
+          fetchedAt: result.fetchedAt ?? null,
+          cached: result.cached === true,
+          view: toCalendarView(await getCalendarConfig()),
+        },
+      };
+    }
+
+    /** Options the page may change. The feed URL is deliberately not one. */
+    case MSG.CALENDAR_SET_OPTIONS: {
+      await setCalendarOptions(envelope.payload ?? {});
+      return { type: MSG.CALENDAR_VIEW, payload: toCalendarView(await getCalendarConfig()) };
+    }
+
+    case MSG.CALENDAR_DISCONNECT: {
+      await disconnectCalendar();
+      return { type: MSG.CALENDAR_VIEW, payload: toCalendarView(await getCalendarConfig()) };
+    }
+
+    /**
+     * Activity awareness, for the dashboard's "you're working right now".
+     *
+     * Counters and one category. There is no message that can ask the extension
+     * what site the student is on, because there is no field for it in the
+     * reply — see `activity.js`.
+     */
+    case MSG.ACTIVITY_GET: {
+      const presence = await studyPresence();
+      const activity = await getActivity();
+      return {
+        type: MSG.ACTIVITY_VIEW,
+        payload: {
+          category: presence.category,
+          working: presence.working,
+          forMs: presence.forMs,
+          productiveMs: activity.productiveMs,
+          distractingMs: activity.distractingMs,
+          neutralMs: activity.neutralMs,
+          distractionAttempts: activity.distractionAttempts,
+          day: activity.day,
+        },
+      };
+    }
+
+    /** Focus Mode began: the per-run distraction counter starts from zero. */
+    case MSG.FOCUS_RUN_STARTED: {
+      await resetRunCounters();
+      return { type: MSG.STATE_ACK, payload: { ok: true } };
+    }
+
+    case MSG.REMINDER_SNOOZE: {
+      const until = await snooze(envelope.payload?.id);
+      return { type: MSG.STATE_ACK, payload: { ok: until !== null, until } };
     }
 
     case MSG.REMINDER_SCHEDULE: {

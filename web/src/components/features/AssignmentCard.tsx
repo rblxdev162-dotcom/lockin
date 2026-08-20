@@ -4,8 +4,8 @@ import { Icon } from '../ui/Icon';
 import { formatDue, parseDueDate } from '../../lib/time';
 import { cx } from '../../lib/cx';
 import { SourceBadge } from '../ui/Status';
+import { WORK_STATE_LABEL, WORK_STATE_TONE, isSettled, workStateOf } from '../../lib/workState';
 import { CanvasStatusBadge } from './CanvasStatusBadge';
-import { EdgenuityPanel } from './EdgenuityPanel';
 
 export function AssignmentCard({
   assignment,
@@ -37,15 +37,18 @@ export function AssignmentCard({
    * that Canvas provides the evidence. The checkbox is therefore hidden for
    * Canvas-linked assignments and replaced by Check Canvas Status.
    */
-  const canvasControlled = !!canvas && assignment.completionMethod === 'canvas';
-  /**
-   * Same reasoning for Edgenuity: an assignment whose completion is supposed to
-   * come from photographed progress must not be completable by ticking a box.
-   */
-  const edgenuityControlled = !!assignment.edgenuity;
-  const verificationControlled = canvasControlled || edgenuityControlled;
+  const canvasControlled = !!canvas && (assignment.completionMethod === 'canvas' || isSettled(workStateOf(assignment, Date.now())));
+  const verificationControlled = canvasControlled;
   const due = parseDueDate(assignment.dueDate, assignment.dueTime);
   const isOverdue = !done && !!due && due.getTime() < Date.now();
+  /**
+   * The state, in one word.
+   *
+   * This is the difference the old card could not express: graded work,
+   * submitted-but-unmarked work, and work the student ticked off themselves
+   * all looked identical. Canvas's own word wins where it has one.
+   */
+  const state = workStateOf(assignment, Date.now());
 
   return (
     <div
@@ -59,11 +62,7 @@ export function AssignmentCard({
     >
       {verificationControlled ? (
         <span
-          title={
-            canvasControlled
-              ? 'Completed through Canvas verification'
-              : 'Completed through Edgenuity screen verification'
-          }
+          title="Completed through Canvas verification"
           className={cx(
             'mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg border-2',
             done ? 'border-mint-500 bg-mint-500 text-white' : 'lk-border lk-muted',
@@ -72,7 +71,7 @@ export function AssignmentCard({
           {done ? (
             <Icon name="check" size={13} strokeWidth={3} />
           ) : (
-            <Icon name={canvasControlled ? 'canvas' : 'edgenuity'} size={12} />
+            <Icon name="canvas" size={12} />
           )}
         </span>
       ) : onToggleComplete ? (
@@ -110,6 +109,14 @@ export function AssignmentCard({
           view where somebody is actually asking.
         */}
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption lk-muted">
+          <span
+            className={cx(
+              WORK_STATE_TONE[state],
+              'lk-status-chip rounded-full px-2 py-0.5 font-bold',
+            )}
+          >
+            {WORK_STATE_LABEL[state]}
+          </span>
           <span className={cx(isOverdue && 'lk-status-behind lk-status-text font-bold')}>
             {formatDue(assignment.dueDate, assignment.dueTime)}
           </span>
@@ -148,15 +155,8 @@ export function AssignmentCard({
           </div>
         )}
 
-        {/* Edgenuity verification is offered on Edgenuity work only — every
-            other card would just be carrying an option it can't use. */}
-        {!canvas && (assignment.edgenuity || assignment.platform === 'Edgenuity') && (
-          <div className="mt-2.5">
-            <EdgenuityPanel assignment={assignment} />
-          </div>
-        )}
 
-        {!canvas && !assignment.edgenuity && onLinkCanvas && (
+        {!canvas && onLinkCanvas && (
           <button
             onClick={onLinkCanvas}
             className="mt-2.5 inline-flex items-center gap-1 text-xs font-bold lk-muted transition-colors hover:text-brand-600 dark:hover:text-brand-300"

@@ -691,10 +691,9 @@ test('v5 → v6 adds the planner and keeps every Phase 1–6 record', () => {
   assert.equal(loaded.assignments[0].loggedMinutes, 10);
   assert.equal(loaded.assignments[0].verificationRecords.length, 1);
   assert.equal(loaded.assignments[0].canvas.domain, 'school.instructure.com');
-  assert.equal(loaded.assignments[0].edgenuity.lastVerifiedProgress, 42);
+  assert.equal(loaded.assignments[0].edgenuity, undefined, 'the link went with Phase 17');
   assert.deepEqual(loaded.settings.blockedDomains, ['youtube.com', 'tiktok.com']);
   assert.deepEqual(loaded.settings.allowedDomains, ['school.instructure.com']);
-  assert.equal(loaded.settings.edgenuityProofMode, 'enhanced');
   assert.equal(loaded.settings.reminderMode, 'Strict');
   assert.equal(loaded.parentPin.hash, 'abc123');
   assert.equal(loaded.parentControls.lockVerificationSettings, true);
@@ -702,8 +701,6 @@ test('v5 → v6 adds the planner and keeps every Phase 1–6 record', () => {
   assert.equal(loaded.focusRuns[0].unlocks[0].byParent, true);
   assert.equal(loaded.canvas.connection.domain, 'school.instructure.com');
   assert.equal(loaded.canvas.ignoredKeys.length, 1);
-  assert.equal(loaded.edgenuity.challenges.length, 1);
-  assert.equal(loaded.edgenuity.cameraPermission, 'granted');
   assert.equal(loaded.completedSessions.length, 1);
   assert.equal(loaded.activity.length, 1);
   assert.equal(loaded.blockStats[0].count, 12);

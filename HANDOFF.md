@@ -27,7 +27,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 1 | React + TS + Vite + Tailwind site, versioned local persistence, assignments, exams, focus timer, Focus Mode, parent PIN, temporary unlock, emergency exit, activity log, responsive UI | **Done** |
 | 2 | Manifest V3 extension, real `declarativeNetRequest` blocking, school allowlist, block page, popup, web↔extension bridge, Chrome-restart persistence, cross-tab sync | **Done** |
 | 3 | **Canvas Browser Detection** — detect/import/link Canvas assignments, verify submissions, feed Focus Mode, auto-unlock | **Done** |
-| 4 | **Edgenuity live-camera verification** — camera capture, local OCR, before/after progress comparison, cumulative progress, Focus Mode unlock | **Done** |
+| 4 | **Edgenuity live-camera verification** | **Removed in Phase 17** |
 | 5 | **Enhanced Proof** — one-time challenge codes photographed with the screen | **Removed in Phase 15** |
 | 6 | **Parent Accountability Dashboard** — PIN-gated `/parent`, verification review, focus history, parent-controlled proof requirements, local export | **Done** |
 | 7 | **Smart Study Planner** — deterministic daily schedule from due dates, estimates, exams and availability; adaptive rescheduling; `/planner` | **Done** |
@@ -35,8 +35,9 @@ Tagline: *Finish what matters before distractions take over.*
 | 15 | **Camera and Enhanced Proof removed** — screen sharing and page reading are the only sources; no strength setting remains | **Done** |
 | 14 | **The bridge** — a local service read Edgenuity progress from any Chrome window | **Removed in Phase 16** |
 | 13 | **OS reminders** — fired by the extension's alarm, so they survive every LockIn tab being closed | **Done** |
-| 12 | **Screen-capture proofs** — share the Edgenuity window instead of photographing it; for Edgenuity and LockIn on one machine, and across two Chrome profiles | **Done** |
+| 12 | **Screen-capture proofs** — sharing the Edgenuity window for OCR | **Removed in Phase 17** |
 | 11 | **Edgenuity browser reading** — read course progress off the Edgenuity page the student opens | **Removed in Phase 16** |
+| 17 | **Canvas only** — Edgenuity scrapped, 30-minute auto-sync, graded-vs-undone, urgency ordering, class columns, and a large deletion pass | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -52,11 +53,10 @@ Tagline: *Finish what matters before distractions take over.*
 | Date/time boundaries and clock changes | 19 | `npm run test:time` |
 | Release safety: packaging, versions, export secrets, no-network | 17 | `npm run test:release` |
 | Performance budgets on a 100-assignment dataset | 7 | `npm run test:perf` |
-| **Provenance + Pace Engine** | 27 | `npm run test:pace` |
+| **Provenance + Pace Engine** | 20 | `npm run test:pace` |
+| **Work states, urgency, class grouping** | 16 | `npm run test:worklist` |
 | **Canvas ICS: parser, mapper, reconciler** | 36 | `npm run test:canvas-ics` |
-| **Edgenuity report/email import and merge** | 29 | `npm run test:edgenuity-import` |
-| **Companion: activity, cooldowns, snooze** | 21 | `npm run test:companion` |
-| **Context bridge: the refusals** | 19 | `npm run test:context-bridge` |
+| **Companion: activity, cooldowns, calendar** | 28 | `npm run test:companion` |
 | **Phase 16 state, migration and feedback** | 14 | `npm run test:phase16` |
 
 **Real browser** — needs Chrome for Testing, and (except the release suite) the
@@ -67,8 +67,6 @@ dev server on `:5173`:
 | Canvas parser (real DOM, in Node) | 28 | `npm run test:parser` |
 | Phase 2 blocking e2e | 26 | `npm run test:e2e` |
 | Canvas e2e | 57 | `npm run test:canvas-e2e` |
-| Edgenuity OCR (real engine, real images) | 42 | `npm run test:edgenuity-ocr` |
-| Edgenuity e2e (real camera API) | 31 | `npm run test:edgenuity-e2e` |
 | Parent Dashboard e2e (PIN, controls, enforcement) | 51 | `npm run test:parent-e2e` |
 | Planner e2e (plan → start → partial → recalculate) | 54 | `npm run test:planner-e2e` |
 | **Release e2e** (production build + packaged zip) | 22 | `npm run test:release-e2e` |
@@ -142,16 +140,18 @@ one.
    `verification_unavailable`, never to a pass.
 4. **Allowlist always wins** over the blocklist, and protected domains (Google,
    localhost, the configured Canvas domain) can never be blocked.
-5. **Never** `chrome.tabs.remove()`, never close tabs, never fight the browser,
-   never hide `chrome://extensions`, never trap the user (emergency exit always
-   works).
+5. **Never fight the browser.** Never hide `chrome://extensions`, never trap
+   the user (emergency exit always works), and never close a tab the *student*
+   opened. Scoped in Phase 17: LockIn may close a background tab **it opened
+   itself**, checking the id and the URL first — see `closeCanvasSyncTab()`.
+   Leaving an unasked-for tab lying around is the ruder option.
 6. **Page data is untrusted.** Everything crossing a trust boundary is rebuilt
    field-by-field with caps; unknown keys are dropped. No `eval`, no `innerHTML`
    with detected content.
 7. **Local only.** No network calls in either half of the project. No analytics,
    no tracking, no browsing history — block stats are per-domain counts only.
 8. **Schema migrations, never wipes.** Bump `SCHEMA_VERSION` in
-   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v6**.
+   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v10**.
 9. **Only a machine-read measurement can verify Edgenuity progress** — a frame
    from a window the student shared with `getDisplayMedia` (Phase 12), or a DOM
    read from their own authenticated Edgenuity session (Phase 11, or Phase 14's
@@ -243,6 +243,16 @@ one.
     LockIn may work around an administrator setting.
 31. **Colour is never the only signal.** Every status has a word beside it, and
     the a11y suite checks it.
+32. **One comparator.** `urgency()` in `lib/workState.ts` is the only ordering
+    in the app. Bands first, then strictly by due time; priority never beats a
+    due date. Anything that sorts work differently is a bug.
+33. **Finished is four different words.** `graded`, `submitted`, `done` and
+    `missing` are distinct states and must stay distinct — collapsing them into
+    a tick box is what made the old list unable to answer "what have I got
+    left?". Canvas's own word always outranks LockIn's inference.
+34. **A removed integration never takes history with it.** Migrations may drop
+    a slice, a link or a setting; they may not drop a `verificationRecords`
+    entry, a completion, or logged minutes.
 
 ---
 
@@ -251,7 +261,7 @@ one.
 ### Web (`web/src/`)
 | Concern | File |
 | --- | --- |
-| All data models | `types/index.ts`, `types/canvas.ts`, `types/edgenuity.ts` |
+| All data models | `types/index.ts`, `types/canvas.ts`, `types/source.ts` |
 | Every state transition | `store/reducer.ts` |
 | Persistence + migrations | `lib/storage.ts` |
 | Derived views, bridge payload | `lib/selectors.ts` |
@@ -263,19 +273,10 @@ one.
 | Canvas API stub (do not implement) | `lib/canvas/api.ts` |
 | **What counts as verified** | `lib/canvas/verification.ts` |
 | Canvas identity + suggestions | `lib/canvas/matching.ts` |
-| Camera + MediaStream lifecycle | `lib/edgenuity/capture.ts` |
-| Image work + quality checks | `lib/edgenuity/preprocess.ts` |
-| OCR engine lifecycle | `lib/edgenuity/ocr.ts` |
-| Capture → OCR → parse orchestration | `lib/edgenuity/pipeline.ts` |
-| **Which number is course progress** | `lib/edgenuity/parser.ts` |
-| **Whether progress counts as verified** | `lib/edgenuity/verification.ts` |
-| **Challenge codes: generation, life, detection** | `lib/edgenuity/challenge.ts` |
-| Challenge validation and spending | `store/reducer.ts` → `consumeChallenge()` |
 | **Everything the Parent Dashboard shows** | `lib/parent/selectors.ts` |
 | Parent controls + focus-run models | `types/parent.ts` |
 | Parent session (in-memory only) | `hooks/useParentSession.ts` |
 | Parent UI | `pages/Parent.tsx`, `components/features/parent/*` |
-| Local OCR engine assets (generated) | `web/public/ocr/`, built by `web/scripts/vendor-ocr.mjs` |
 | **The scheduler** | `lib/planner/engine.ts` |
 | Priority constants (all of them) | `lib/planner/priorities.ts` |
 | Availability → capacity | `lib/planner/capacity.ts` |
@@ -290,17 +291,13 @@ one.
 | Planner actions from the UI | `hooks/usePlanner.ts` |
 | Planner UI | `pages/Planner.tsx`, `components/features/planner/*` |
 | **Where a record came from** | `types/source.ts`, `lib/sources/freshness.ts` |
-| Adapter boundary for every channel | `lib/sources/adapter.ts` |
 | Connections and course progress | `types/integrations.ts` |
-| **Ahead / on track / behind** | `lib/pace/engine.ts`, `lib/pace/courses.ts` |
+| **Ahead / on track / behind** | `lib/pace/engine.ts` |
+| **What state work is in, and its order** | `lib/workState.ts` |
+| Canvas auto-sync every 30 minutes | `hooks/useCanvasAutoSync.ts` |
 | iCalendar parser | `lib/ics/parse.ts` |
 | Canvas feed → items, and the diff | `lib/canvas/calendarFeed.ts`, `lib/canvas/calendarReconcile.ts` |
 | Canvas feed client (no URL ever) | `lib/canvas/calendarClient.ts` |
-| Edgenuity progress email | `lib/edgenuity/progressEmail.ts` |
-| Edgenuity course report | `lib/edgenuity/courseReport.ts` |
-| **Per-field provenance merge** | `lib/edgenuity/merge.ts` |
-| Gmail architecture (not connected) | `lib/edgenuity/gmailAdapter.ts` |
-| Study context from the school profile | `lib/context/client.ts` |
 | **What LockIn is allowed to praise** | `lib/feedback.ts` |
 | Progress and Integrations pages | `pages/Progress.tsx`, `pages/Integrations.tsx` |
 | Status, source and freshness badges | `components/ui/Status.tsx` |
@@ -308,7 +305,6 @@ one.
 | **Retention caps and log trimming** | `lib/retention.ts` |
 | **What an export may contain** | `lib/export.ts` |
 | Dev-only seed profile (DEV branch only) | `lib/devSeed.ts` |
-| Dev-only fixture capture (DEV branch only) | `lib/edgenuity/capture.dev.ts` |
 | Extension status, versions, setup | `components/features/BrowserProtectionSetup.tsx` |
 | "We repaired your data" notice | `components/layout/RecoveryNotice.tsx` |
 | Per-page crash recovery | `components/layout/ErrorBoundary.tsx` → `RouteErrorBoundary` |
@@ -319,7 +315,8 @@ one.
 | Concern | File |
 | --- | --- |
 | Rule generation | `background/rules.js` |
-| **Canvas feed fetch, and the URL** | `background/calendar.js` |
+| **Canvas feed fetch, the URL, the 30-min alarm** | `background/calendar.js` |
+| Background Canvas tab for status | `background/canvas.js` → `openCanvasForSync()` |
 | Activity awareness (metadata only) | `background/activity.js` |
 | **The one notification door** | `background/reminders.js` → `deliver()` |
 | Companion settings page | `options/options.{html,js,css}` |
@@ -336,15 +333,8 @@ one.
 | Concern | File |
 | --- | --- |
 | Origin config generation, and its validation rules | `gen-extension-config.mjs` |
-| **The context bridge, and its threat model** | `context-bridge.mjs` |
 | Local server + bridge fence | `serve.mjs` |
 | Shipping-file allowlist, packaging, zip, verification | `build-extension.mjs` |
-
-### School Companion (`school-companion/`)
-| Concern | File |
-| --- | --- |
-| Everything it does | `background.js` |
-| The authorization gate | `options.{html,js,css}` |
 
 ⚠️ `web/src/lib/domains.ts` ↔ `extension/shared/domains.js` and
 `web/src/lib/canvas/verification.ts` ↔ `extension/canvas/status.js` are
@@ -352,7 +342,115 @@ hand-synced mirrors (the extension has no build step). Change both together.
 
 ---
 
+## Phase 17 — Canvas only (done)
+
+The user's call, and the right one. Phase 16 built two legitimate Edgenuity
+channels; Phase 17 deleted them, because neither could actually reach this
+student's setup:
+
+- the **course report** is downloadable only in the school Chrome profile, and
+  cannot be opened in the personal one;
+- the **progress email** arrives **weekly**, which is useless for live data.
+
+An integration that is right once a week and wrong the other six days is worse
+than no integration, because the app quotes it as if it were current. So
+Edgenuity is gone in full — verification, screen capture, local OCR,
+tesseract.js, the report and email parsers, the course model, the Gmail adapter
+architecture, and the 5MB `eng.traineddata` that was sitting in the repo root.
+
+The **School Companion and the context bridge went with it.** Their whole job
+was cross-profile Edgenuity presence; with Canvas signed in alongside LockIn in
+one profile, they answered a question nobody was asking.
+
+### What Canvas does now
+
+1. **Every 30 minutes, automatically.** The extension's alarm fetches and
+   caches the feed (`refreshMinutes` default 30, floor 15); `useCanvasAutoSync`
+   folds the cached text into assignments on load and every 30 minutes while
+   the app is open. Reconciling stays on the page because only the page knows
+   what LockIn already has.
+2. **On startup.** `chrome.runtime.onStartup` → `startupSync()` fetches
+   immediately rather than waiting up to half an hour, then — if
+   `openCanvasOnStartup` is on — opens the Canvas dashboard in a **background
+   tab** so the content script can read submission status.
+3. **Graded versus undone.** A calendar feed carries due dates and nothing
+   else. Submission status comes from the Canvas page reader (Phase 3), which
+   is why the background tab exists at all.
+
+### Invariant 5 is now scoped, deliberately
+
+It said LockIn never closes a tab. It now says **LockIn may close a tab it
+opened itself, and only that tab.** The rule was about never fighting the
+student for their own browser, and that still stands — but a background tab
+LockIn opened unasked is the one case where *leaving* it is the ruder option.
+`closeCanvasSyncTab()` records the id, re-checks the URL before closing, and
+runs from the heartbeat rather than a `setTimeout` (a worker killed mid-timer
+would strand the tab).
+
+### `lib/workState.ts` — the file that fixed the list
+
+"Done" meant four different things and the UI flattened them into a tick box:
+
+| State | Means |
+| --- | --- |
+| `graded` | Canvas has marked it |
+| `submitted` | handed in, not marked yet |
+| `done` | the student ticked it off in LockIn |
+| `missing` | Canvas says the deadline passed unhanded-in |
+
+Plus `overdue` (LockIn inferring lateness from a clock — weaker than `missing`,
+which is Canvas asserting it), `due_today`, `upcoming`, `undated`.
+
+`urgency()` is now the **only** comparator in the app: a coarse band times
+1e15, plus the due timestamp as the tiebreak. So "most urgent first" is
+literally chronological inside a band, and **priority never beats a due date** —
+a Normal worksheet due in an hour outranks an Urgent essay due next week, and a
+test pins that.
+
+`groupByClass()` powers the column layout, ordering columns by their most
+urgent item so the column you need is the one on the left.
+
+### Things that will bite you if you don't know them
+
+- **Phase 16 shipped a bug I reported as working: the calendar and activity
+  message handlers were never added to the service worker.** The replace that
+  should have inserted them silently no-opped, and I verified the *bridge*
+  live rather than the calendar messages. If you add a `case MSG.X` to
+  `handlePageMessage`, grep for it in the file afterwards — the switch is long
+  enough that a failed insert looks like success.
+- **`PROTECTED_SETTING_KEYS` is now `['blockingEnabled']`.** It guarded the
+  Edgenuity proof mode; rather than leave the parent-lock mechanism guarding
+  nothing, it now locks the master blocking switch, which is the setting a
+  student in Strict mode reaches for first.
+- **A `.ics` file import is IMPORTED, a fetched feed is LIVE, and the only
+  difference is `isLive`.** `IMPORT_KINDS` is gone: any record whose source is
+  not currently answering reads as an import.
+- **`official` is gone from `PaceReport`.** With Canvas the only source and a
+  calendar feed publishing no verdict, every status is LockIn's own reading,
+  and a permanently-false flag is a lie waiting to be re-enabled.
+- **Verification records from Edgenuity are kept.** The v10 migration drops the
+  slice, the link and the setting, but never a `verificationRecords` entry: a
+  removed integration must not take a student's completion history with it.
+  Assignments on the dead `Edgenuity` platform are remapped to `Other`.
+
+### Deliberately not built
+
+- **Any Edgenuity path at all**, until something exists that is both ethical
+  and current. Neither condition is met today, and half of one is worse than
+  neither.
+- **Auto-opening Canvas in the *school* profile.** Chrome profile isolation is
+  still not bypassed. This works because the user keeps Canvas and LockIn in
+  the same profile; if that changes, the feature stops, and the UI says so
+  rather than pretending.
+
 ## Phase 16 — The product phase (done)
+
+> **Read Phase 17 first.** Everything below about Edgenuity — the progress
+> email, the course report, the merge, the Gmail adapter — and about the School
+> Companion and the context bridge describes code that **no longer exists**. It
+> is kept because the reasoning still explains why the remaining architecture
+> has the shape it does.
+
 
 Phase 16 turned a pile of working phases into one product. Six things changed
 shape; everything else was kept.

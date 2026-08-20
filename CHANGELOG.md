@@ -3,6 +3,56 @@
 User-visible changes only. Internal architecture and phase history live in
 `HANDOFF.md`.
 
+## 1.4.0
+
+### Canvas keeps itself up to date
+
+LockIn now checks your Canvas calendar **every 30 minutes** on its own, and
+again the moment you start your computer — so the list is already right when
+you open it, rather than right after you remember to press sync.
+
+### It knows what's graded
+
+A calendar feed says when work is due. It never says whether you handed it in.
+So if you let it, LockIn opens Canvas in a background tab at startup and reads
+the status from your own session — and now tells four things apart that used to
+look identical:
+
+- **Graded** — marked, done, nothing to think about.
+- **Submitted** — handed in, not marked yet.
+- **Done** — you ticked it off here.
+- **Missing** — Canvas says the deadline passed with nothing handed in.
+
+The background tab is one page load, on the site you were about to open anyway,
+and it closes itself. One toggle in Integrations turns it off.
+
+### One order, and it's the right one
+
+Everything is sorted the same way now: missing first, then overdue, then today,
+then what's coming — and strictly by due time inside each. **Priority never
+beats a deadline**, so a "Normal" worksheet due in an hour sits above an
+"Urgent" essay due next week.
+
+### Your classes as columns
+
+A **By class** switch on the assignments page lays the same work out one column
+per class, with the class that needs you most on the left.
+
+### Edgenuity is gone
+
+Both legitimate ways in turned out not to work for a real setup: the course
+report can't cross Chrome profiles, and the progress email only arrives weekly
+— useless for knowing where you stand today. An integration that's right one
+day in seven is worse than none, because the app quotes it as if it were
+current.
+
+So all of it is out: verification, screen sharing, on-device OCR, the report
+and email import, and the optional School Companion that existed to support it.
+LockIn is a Canvas app now, and about **500KB lighter** for it.
+
+Nothing you finished was lost. Old Edgenuity work keeps its title, its due
+date, its logged minutes and its completion history — only the integration went.
+
 ## 1.3.0
 
 ### Your Canvas assignments, without typing them in

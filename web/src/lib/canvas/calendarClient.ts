@@ -26,6 +26,8 @@ export interface CalendarView {
   lastFetchedAt: number | null;
   lastError: string | null;
   refreshMinutes: number;
+  /** Whether Canvas is opened in the background at browser startup. */
+  openCanvasOnStartup: boolean;
   hasCache: boolean;
   cachedAt: number | null;
   /** Set on the reply to a configure attempt. */
@@ -39,7 +41,8 @@ const EMPTY_VIEW: CalendarView = {
   addedAt: null,
   lastFetchedAt: null,
   lastError: null,
-  refreshMinutes: 180,
+  refreshMinutes: 30,
+  openCanvasOnStartup: true,
   hasCache: false,
   cachedAt: null,
 };
@@ -67,8 +70,9 @@ export function sanitizeCalendarView(raw: unknown): CalendarView {
     lastError: typeof value.lastError === 'string' ? value.lastError.slice(0, 160) : null,
     refreshMinutes:
       typeof value.refreshMinutes === 'number' && Number.isFinite(value.refreshMinutes)
-        ? Math.min(1440, Math.max(30, Math.round(value.refreshMinutes)))
-        : 180,
+        ? Math.min(1440, Math.max(15, Math.round(value.refreshMinutes)))
+        : 30,
+    openCanvasOnStartup: value.openCanvasOnStartup !== false,
     hasCache: value.hasCache === true,
     cachedAt: number(value.cachedAt),
     ok: value.ok === true ? true : value.ok === false ? false : undefined,
@@ -87,6 +91,21 @@ export async function connectCalendar(
   refreshMinutes?: number,
 ): Promise<CalendarView | null> {
   const reply = await bridge.request(MSG.CALENDAR_CONFIGURE, { url, refreshMinutes });
+  if (!reply || reply.type !== MSG.CALENDAR_VIEW) return null;
+  return sanitizeCalendarView(reply.payload);
+}
+
+/**
+ * Changes an option the page is allowed to change.
+ *
+ * The feed URL is not one of them — replacing it means going through
+ * `connectCalendar`, which validates it and drops the cache.
+ */
+export async function setCalendarOptions(patch: {
+  openCanvasOnStartup?: boolean;
+  refreshMinutes?: number;
+}): Promise<CalendarView | null> {
+  const reply = await bridge.request(MSG.CALENDAR_SET_OPTIONS, patch);
   if (!reply || reply.type !== MSG.CALENDAR_VIEW) return null;
   return sanitizeCalendarView(reply.payload);
 }

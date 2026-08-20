@@ -31,27 +31,13 @@ import type {
   ParentControls,
   CanvasLink,
   CanvasState,
-  ChallengeDetection,
-  EdgenuityLink,
-  EdgenuitySession,
-  EdgenuityState,
-  ScreenEvidence,
   Settings,
-  VerificationChallenge,
-  VerificationTrust,
-  RequirableTrust,
   CanvasCalendarConfig,
-  CourseActivity,
-  CourseProgress,
   IntegrationRecord,
   IntegrationsState,
   SourceRecord,
 } from '../types';
-import {
-  COURSE_PRODUCTS,
-  INTEGRATION_IDS,
-  INTEGRATION_STATUSES,
-} from '../types/integrations';
+import { INTEGRATION_IDS, INTEGRATION_STATUSES } from '../types/integrations';
 import { CONFIDENCES, SOURCE_KINDS } from '../types/source';
 import { CANVAS_SUBMISSION_STATUSES, defaultCanvasState } from '../types/canvas';
 import { FOCUS_RUN_OUTCOMES, MAX_FOCUS_RUNS, defaultParentControls } from '../types/parent';
@@ -66,15 +52,6 @@ import {
   defaultPlannerSettings,
   defaultPlannerState,
 } from '../types/planner';
-import {
-  CHALLENGE_STATUSES,
-  EDGENUITY_SESSION_STATUSES,
-  EDGENUITY_TARGET_TYPES,
-  MAX_EDGENUITY_CHALLENGES,
-  MAX_EDGENUITY_SESSIONS,
-  VERIFICATION_TRUSTS,
-  defaultEdgenuityState,
-} from '../types/edgenuity';
 import { ACTIVITY_TYPES } from '../types';
 import { DEFAULT_ALLOWLIST } from './domains';
 import {
@@ -91,7 +68,7 @@ import {
  */
 export const STORAGE_KEY = 'lockin.state.v1';
 export const CORRUPT_KEY = 'lockin.state.corrupt';
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export function defaultSettings(): Settings {
   return {
@@ -103,10 +80,6 @@ export function defaultSettings(): Settings {
     allowedDomains: [...DEFAULT_ALLOWLIST],
     notificationsAsked: false,
     theme: 'system',
-    // Standard by default: Enhanced Proof asks the student to write a code on
-    // paper for every check, which is the right trade only when someone has
-    // decided it is.
-    edgenuityProofMode: 'standard',
     extensionSeen: false,
     // On by default: it is observation, not obstruction, and it is the option
     // students actually keep. Onboarding still announces it.
@@ -140,7 +113,6 @@ export function defaultState(): AppState {
     parentPin: null,
     blockStats: [],
     canvas: defaultCanvasState(),
-    edgenuity: defaultEdgenuityState(),
     parentControls: defaultParentControls(),
     focusRuns: [],
     planner: defaultPlannerState(),
@@ -159,12 +131,11 @@ export function defaultIntegrationsState(): IntegrationsState {
       // `unavailable` is not the same as "off": these need an authorization
       // nobody has, so the UI must explain rather than offer a dead button.
       status:
-        id === 'canvas_oauth' || id === 'edgenuity_api'
+        id === 'canvas_oauth'
           ? ('unavailable' as const)
           : ('not_configured' as const),
     })),
-    canvasCalendar: { configured: false, refreshMinutes: 180, horizonDays: 120 },
-    courses: [],
+    canvasCalendar: { configured: false, refreshMinutes: 30, horizonDays: 120 },
   };
 }
 
@@ -191,32 +162,16 @@ const MIGRATIONS: Record<number, Migration> = {
     canvas: (s.canvas as CanvasState | undefined) ?? defaultCanvasState(),
   }),
 
-  // 2 -> 3 (Phase 4): add the Edgenuity slice. Assignments, Canvas links, focus
-  // history, the parent PIN, blocklists, exams and the activity log are all
-  // carried through untouched — only the new key is introduced. Existing
-  // assignments have no `edgenuity` link, which is exactly the "not an
-  // Edgenuity assignment" state.
-  2: (s) => ({
-    ...s,
-    schemaVersion: 3,
-    edgenuity: (s.edgenuity as EdgenuityState | undefined) ?? defaultEdgenuityState(),
-  }),
+  // 2 -> 3 (Phase 4): added the Edgenuity slice.
+  //
+  // Kept as a no-op rather than deleted. A save file at v2 still has to walk
+  // every step to reach the current version, and a missing step would strand
+  // it. The slice this used to add is removed again by v10.
+  2: (s) => ({ ...s, schemaVersion: 3 }),
 
-  // 3 -> 4 (Phase 5): add the challenge ledger and the proof-mode setting.
-  // Existing Edgenuity sessions, their verified progress and every Canvas and
-  // Phase 1/2 record are carried through untouched. Sessions created before
-  // Phase 5 have no `requiredTrust`, and `coerceEdgenuitySession` defaults them
-  // to `standard` — an in-flight verification must not become unfinishable
-  // because the app updated underneath it.
-  3: (s) => ({
-    ...s,
-    schemaVersion: 4,
-    edgenuity: {
-      ...defaultEdgenuityState(),
-      ...(s.edgenuity as EdgenuityState | undefined),
-      challenges: (s.edgenuity as EdgenuityState | undefined)?.challenges ?? [],
-    },
-  }),
+  // 3 -> 4 (Phase 5): added the challenge ledger. No-op for the same reason
+  // as v2 above.
+  3: (s) => ({ ...s, schemaVersion: 4 }),
 
   // 4 -> 5 (Phase 6): add parent controls and the Focus Mode run history.
   // Everything earlier is carried through untouched. The controls default to
@@ -302,17 +257,11 @@ const MIGRATIONS: Record<number, Migration> = {
   //     because that is what it was.
   //  2. **`integrations` is created empty.** No connection is ever inferred
   //     from the presence of old data.
-  //  3. **Edgenuity configs pointing at the removed browser source are moved
-  //     back to the screen path**, and the ledger fields that only the browser
-  //     path wrote are dropped. Leaving `source: 'browser'` behind would strand
-  //     the assignment on a code path that no longer exists — the same class of
-  //     bug as the `enhanced` requirement Phase 15 had to defuse.
   8: (s) => ({
     ...s,
     schemaVersion: 9,
     assignments: asArray<Record<string, unknown>>(s.assignments).map((a) => {
       const linkedToCanvas = !!a?.canvas;
-      const edgenuity = a?.edgenuity as Record<string, unknown> | undefined;
       return {
         ...a,
         source: a?.source ?? {
@@ -322,13 +271,6 @@ const MIGRATIONS: Record<number, Migration> = {
           isLive: false,
           rawDataRetained: false,
         },
-        edgenuity: edgenuity
-          ? (() => {
-              const { browserBaseline: _b, lastVerifiedActivityCount: _c, ...rest } = edgenuity;
-              const config = (rest.config ?? {}) as Record<string, unknown>;
-              return { ...rest, config: { ...config, source: undefined } };
-            })()
-          : undefined,
       };
     }),
     settings: (() => {
@@ -338,6 +280,39 @@ const MIGRATIONS: Record<number, Migration> = {
     })(),
     integrations: defaultIntegrationsState(),
   }),
+  // 9 -> 10 (Phase 17): Edgenuity removed.
+  //
+  // The whole `edgenuity` slice goes — sessions, challenges, the OCR flags —
+  // along with the per-assignment link and the proof-mode setting. The feature
+  // was scrapped because the only channels that were ethical to use (a weekly
+  // progress email, a course report file) could not reach this student's
+  // browser profile, which made them useless for live data.
+  //
+  // What is deliberately *kept*: every `verificationRecords` entry, including
+  // ones written by Edgenuity. They are history — a record that work was
+  // verified on a date — and deleting a student's own completion history to
+  // tidy up a removed integration would be the wrong trade. `Platform` no
+  // longer has an `Edgenuity` member, so any assignment still carrying it is
+  // moved to `Other`; it keeps its title, its due date and its logged time.
+  9: (s) => {
+    const { edgenuity: _slice, ...rest } = s as Record<string, unknown>;
+    const { edgenuityProofMode: _mode, ...settings } = (s.settings ?? {}) as Record<
+      string,
+      unknown
+    >;
+    return {
+      ...rest,
+      schemaVersion: 10,
+      settings,
+      assignments: asArray<Record<string, unknown>>(s.assignments).map((a) => {
+        const { edgenuity: _link, ...assignment } = a ?? {};
+        return {
+          ...assignment,
+          platform: assignment.platform === 'Edgenuity' ? 'Other' : assignment.platform,
+        };
+      }),
+    };
+  },
 };
 
 function migrate(raw: Record<string, unknown>): Record<string, unknown> {
@@ -398,7 +373,6 @@ function coerceAssignment(raw: unknown): Assignment | null {
     verificationStatus: a.verificationStatus ?? 'not_required',
     verificationRecords: trimVerificationRecords(asArray(a.verificationRecords)),
     canvas: coerceCanvasLink(a.canvas),
-    edgenuity: coerceEdgenuityLink(a.edgenuity),
     // Rebuilt like everything else: a `source` added to the type but not
     // rebuilt here would be silently dropped on every reload, which is the
     // exact bug `lastVerifiedTrust` shipped with in Phase 5.
@@ -406,87 +380,8 @@ function coerceAssignment(raw: unknown): Assignment | null {
   };
 }
 
-/**
- * Percentages must be real numbers in 0..100; anything else is "not read".
- *
- * The `typeof` test matters more than it looks: `Number(null)` is `0`, so a
- * loose check silently turns "never verified" into "verified at 0%", which
- * moves the baseline new progress is measured from and credits a student for
- * everything they had already done.
- */
-function coercePercent(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  if (value < 0 || value > 100) return null;
-  return value;
-}
 
-/**
- * A half-written Edgenuity link is dropped rather than trusted — a bad ledger
- * would either credit progress that was never verified or lose progress that
- * was.
- */
-function coerceEdgenuityLink(raw: unknown): EdgenuityLink | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const e = raw as Partial<EdgenuityLink>;
-  const config = e.config;
-  if (!config || typeof config !== 'object') return undefined;
-  const targetType = (EDGENUITY_TARGET_TYPES as readonly string[]).includes(
-    config.targetType as string,
-  )
-    ? config.targetType!
-    : 'progress_percent';
-  return {
-    config: {
-      courseName: typeof config.courseName === 'string' ? config.courseName.slice(0, 120) : undefined,
-      activityName:
-        typeof config.activityName === 'string' ? config.activityName.slice(0, 120) : undefined,
-      targetType,
-      requiredProgressDelta: Number.isFinite(config.requiredProgressDelta)
-        ? Math.min(100, Math.max(1, Number(config.requiredProgressDelta)))
-        : undefined,
-      requiredActivities: Number.isFinite(config.requiredActivities)
-        ? Math.min(50, Math.max(1, Math.round(Number(config.requiredActivities))))
-        : undefined,
-      requiredFocusMinutes: Number.isFinite(config.requiredFocusMinutes)
-        ? Math.min(240, Math.max(1, Math.round(Number(config.requiredFocusMinutes))))
-        : undefined,
-      requiredVerificationTrust: coerceRequiredTrust(config.requiredVerificationTrust),
-      // Phase 16 removed the browser path; `camera` (a shared-screen frame)
-      // is the only source left, so this is always undefined.
-      source: undefined,
-      externalCourseId:
-        typeof config.externalCourseId === 'string'
-          ? config.externalCourseId.slice(0, 64) || undefined
-          : undefined,
-    },
-    verifiedProgressDelta: Number.isFinite(e.verifiedProgressDelta)
-      ? Math.max(0, Number(e.verifiedProgressDelta))
-      : 0,
-    lastVerifiedProgress: coercePercent(e.lastVerifiedProgress),
-    verifiedActivities: Number.isFinite(e.verifiedActivities)
-      ? Math.max(0, Math.round(Number(e.verifiedActivities)))
-      : 0,
-    observedCourseName:
-      typeof e.observedCourseName === 'string' ? e.observedCourseName.slice(0, 120) : undefined,
-    lastActivityName:
-      typeof e.lastActivityName === 'string' ? e.lastActivityName.slice(0, 120) : undefined,
-    lastVerifiedAt: typeof e.lastVerifiedAt === 'string' ? e.lastVerifiedAt : undefined,
-    // Added late in Phase 5 and originally missed here, which silently reset
-    // the badge to Standard on every reload. Anything unrecognised degrades
-    // downward rather than inventing a stronger claim.
-    lastVerifiedTrust: coerceTrust(e.lastVerifiedTrust),
-    lastVerifiedActivityCount: Number.isFinite(e.lastVerifiedActivityCount)
-      ? Math.max(0, Math.round(Number(e.lastVerifiedActivityCount)))
-      : undefined,
-    targetProgressPercent: coercePercent(e.targetProgressPercent) ?? undefined,
-  };
-}
 
-/** Per-assignment requirement. Unknown values fall back to `standard`. */
-function coerceRequiredTrust(value: unknown): RequirableTrust | undefined {
-  if (value === undefined) return undefined;
-  return value === 'enhanced' ? 'enhanced' : 'standard';
-}
 
 /** A half-written Canvas link is dropped rather than trusted. */
 function coerceCanvasLink(raw: unknown): CanvasLink | undefined {
@@ -529,7 +424,6 @@ export interface StorageRecovery {
     assignments: number;
     exams: number;
     focusRuns: number;
-    edgenuitySessions: number;
     plan: boolean;
   };
   /** Records removed because a retention cap was over-run. */
@@ -545,7 +439,7 @@ export interface StorageRecovery {
 export function emptyRecovery(): StorageRecovery {
   return {
     kind: 'none',
-    dropped: { assignments: 0, exams: 0, focusRuns: 0, edgenuitySessions: 0, plan: false },
+    dropped: { assignments: 0, exams: 0, focusRuns: 0, plan: false },
     trimmed: { activity: 0, completedSessions: 0, blockStats: 0 },
     migratedFrom: null,
   };
@@ -554,11 +448,11 @@ export function emptyRecovery(): StorageRecovery {
 /** True when the student should be told something happened. */
 export function isSignificantRecovery(r: StorageRecovery): boolean {
   if (r.kind === 'reset') return true;
-  const { assignments, exams, focusRuns, edgenuitySessions, plan } = r.dropped;
+  const { assignments, exams, focusRuns, plan } = r.dropped;
   // A dropped plan is not worth a message: the plan is a cache and the next
   // rebuild restores it with nothing lost. Trimming is routine housekeeping.
   void plan;
-  return assignments + exams + focusRuns + edgenuitySessions > 0;
+  return assignments + exams + focusRuns > 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -595,75 +489,10 @@ function coerceSource(value: unknown): SourceRecord | undefined {
   };
 }
 
-function coerceFieldValue<T>(
-  value: unknown,
-  coerceInner: (v: unknown) => T | undefined,
-): { value: T; source: SourceRecord } | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const raw = value as Record<string, unknown>;
-  const inner = coerceInner(raw.value);
-  const source = coerceSource(raw.source);
-  if (inner === undefined || !source) return undefined;
-  return { value: inner, source };
-}
 
-const boundedPercent = (v: unknown): number | undefined =>
-  Number.isFinite(v) ? Math.min(100, Math.max(0, Number(v))) : undefined;
-const isoDate = (v: unknown): string | undefined =>
-  typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
 
-function coerceCourseActivity(value: unknown): CourseActivity | null {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Record<string, unknown>;
-  const name = typeof raw.name === 'string' ? raw.name.slice(0, 160).trim() : '';
-  if (!name) return null;
-  return {
-    id: typeof raw.id === 'string' ? raw.id.slice(0, 96) : name.toLowerCase().slice(0, 96),
-    name,
-    scheduledDate: isoDate(raw.scheduledDate),
-    // Deliberately tri-state: `undefined` means the report did not say, which
-    // is not the same as "not completed".
-    completed: raw.completed === true ? true : raw.completed === false ? false : undefined,
-  };
-}
 
-/** Caps: a pathological import must not be able to fill storage. */
-const MAX_COURSES = 40;
-const MAX_ACTIVITIES_PER_COURSE = 400;
 
-function coerceCourse(value: unknown): CourseProgress | null {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Record<string, unknown>;
-  const name = typeof raw.name === 'string' ? raw.name.slice(0, 160).trim() : '';
-  const id = typeof raw.id === 'string' ? raw.id.slice(0, 64) : '';
-  if (!name || !id) return null;
-
-  return {
-    id,
-    provider: 'edgenuity',
-    product: COURSE_PRODUCTS.includes(raw.product as never)
-      ? (raw.product as CourseProgress['product'])
-      : 'UNKNOWN',
-    name,
-    externalCourseId:
-      typeof raw.externalCourseId === 'string' ? raw.externalCourseId.slice(0, 64) : undefined,
-    actualProgressPercent: coerceFieldValue(raw.actualProgressPercent, boundedPercent),
-    targetProgressPercent: coerceFieldValue(raw.targetProgressPercent, boundedPercent),
-    overallGrade: coerceFieldValue(raw.overallGrade, boundedPercent),
-    actualGrade: coerceFieldValue(raw.actualGrade, boundedPercent),
-    relativeGrade: coerceFieldValue(raw.relativeGrade, boundedPercent),
-    startDate: coerceFieldValue(raw.startDate, isoDate),
-    targetEndDate: coerceFieldValue(raw.targetEndDate, isoDate),
-    activities: asArray<unknown>(raw.activities)
-      .map(coerceCourseActivity)
-      .filter((a): a is CourseActivity => a !== null)
-      .slice(0, MAX_ACTIVITIES_PER_COURSE),
-    activitySource: coerceSource(raw.activitySource),
-    reportedAt: typeof raw.reportedAt === 'string' ? raw.reportedAt : undefined,
-    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
-    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
-  };
-}
 
 function coerceIntegrationRecord(value: unknown, id: IntegrationRecord['id']): IntegrationRecord {
   const raw = (value ?? {}) as Record<string, unknown>;
@@ -695,7 +524,7 @@ function coerceCanvasCalendarConfig(value: unknown): CanvasCalendarConfig {
     connectedAt: typeof raw.connectedAt === 'string' ? raw.connectedAt : undefined,
     refreshMinutes: Number.isFinite(raw.refreshMinutes)
       ? Math.min(24 * 60, Math.max(30, Math.round(Number(raw.refreshMinutes))))
-      : 180,
+      : 30,
     horizonDays: Number.isFinite(raw.horizonDays)
       ? Math.min(365, Math.max(7, Math.round(Number(raw.horizonDays))))
       : 120,
@@ -716,14 +545,10 @@ function coerceIntegrations(value: unknown): IntegrationsState {
       const record = coerceIntegrationRecord(found, id);
       // These two have no authorization on any install; a save file must not
       // be able to claim otherwise.
-      if (id === 'canvas_oauth' || id === 'edgenuity_api') record.status = 'unavailable';
+      if (id === 'canvas_oauth') record.status = 'unavailable';
       return record;
     }),
     canvasCalendar: coerceCanvasCalendarConfig(raw.canvasCalendar),
-    courses: asArray<unknown>(raw.courses)
-      .map(coerceCourse)
-      .filter((c): c is CourseProgress => c !== null)
-      .slice(0, MAX_COURSES),
   };
 }
 
@@ -736,9 +561,6 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
   settings.allowedDomains = asArray<string>(settings.allowedDomains).filter(
     (d) => typeof d === 'string',
   );
-  // An unrecognised proof mode falls back to `standard`, never to something
-  // stricter that would strand the student, nor to a value the UI can't render.
-  settings.edgenuityProofMode = settings.edgenuityProofMode === 'enhanced' ? 'enhanced' : 'standard';
   settings.focusGuard = settings.focusGuard !== false;
   settings.blockingAsked = settings.blockingAsked === true;
 
@@ -780,12 +602,6 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
   const blockStats = coerceBlockStats(rawStats);
   report.trimmed.blockStats += Math.max(0, rawStats.length - blockStats.length);
 
-  const edgenuity = coerceEdgenuity(raw.edgenuity);
-  report.dropped.edgenuitySessions += Math.max(
-    0,
-    asArray<unknown>((raw.edgenuity as EdgenuityState | undefined)?.sessions).length -
-      edgenuity.sessions.length,
-  );
 
   const planner = coercePlanner(raw.planner);
   if (raw.planner && typeof raw.planner === 'object' &&
@@ -805,7 +621,6 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
     activity,
     blockStats,
     canvas: coerceCanvas(raw.canvas),
-    edgenuity,
     parentControls: coerceParentControls(raw.parentControls),
     focusRuns,
     planner,
@@ -1255,168 +1070,6 @@ function coerceFocusRun(raw: unknown): FocusRun | null {
   };
 }
 
-/**
- * Rebuilds a stored proof field by field.
- *
- * The `source` guard matters: a hand-edited `lockin.state.v1` could otherwise
- * claim a fixture image was a live capture. Anything that is not exactly
- * `live_camera` or `live_screen` is read back as `fixture`, which the
- * verification policy refuses to verify.
- */
-function coerceProof(raw: unknown): EdgenuitySession['before'] | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const p = raw as Partial<EdgenuitySession['before']>;
-  if (typeof p.capturedAt !== 'string') return null;
-  const percent = coercePercent(p.progressPercent);
-  return {
-    capturedAt: p.capturedAt,
-    progressPercent: percent ?? undefined,
-    courseName: typeof p.courseName === 'string' ? p.courseName.slice(0, 120) : undefined,
-    activityName: typeof p.activityName === 'string' ? p.activityName.slice(0, 120) : undefined,
-    confidence: Number.isFinite(p.confidence) ? Number(p.confidence) : undefined,
-    parseConfidence:
-      p.parseConfidence === 'high' || p.parseConfidence === 'medium' ? p.parseConfidence : 'low',
-    source:
-      p.source === 'live_camera' || p.source === 'live_screen' ? p.source : 'fixture',
-    screenEvidence: coerceScreenEvidence(p.screenEvidence),
-    challenge: coerceChallengeDetection(p.challenge),
-    challengeId: typeof p.challengeId === 'string' ? p.challengeId.slice(0, 64) : undefined,
-    // Trust is re-derived by the policy from the fields above; a stored value
-    // is only a cached label, so an unrecognised one degrades rather than wins.
-    trust: coerceTrust(p.trust),
-  };
-}
-
-function coerceTrust(value: unknown): VerificationTrust | undefined {
-  if (value === undefined) return undefined;
-  return (VERIFICATION_TRUSTS as readonly string[]).includes(value as string)
-    ? (value as VerificationTrust)
-    : 'manual';
-}
-
-function coerceScreenEvidence(raw: unknown): ScreenEvidence | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const e = raw as Partial<ScreenEvidence>;
-  const score = typeof e.score === 'number' && Number.isFinite(e.score) ? e.score : 0;
-  return {
-    score: Math.max(0, Math.min(1, score)),
-    signals: asArray<string>(e.signals)
-      .filter((s) => typeof s === 'string')
-      .slice(0, 12)
-      .map((s) => s.slice(0, 40)),
-    confidence: e.confidence === 'high' || e.confidence === 'medium' ? e.confidence : 'low',
-  };
-}
-
-/**
- * A stored challenge reading is rebuilt with every flag defaulting to the
- * *unsafe-for-the-student* side: a tampered save file claiming `matched: true`
- * still has to survive `matched === true` here, and nothing else is inferred.
- */
-function coerceChallengeDetection(raw: unknown): ChallengeDetection | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const d = raw as Partial<ChallengeDetection>;
-  return {
-    matched: d.matched === true,
-    matchedText: typeof d.matchedText === 'string' ? d.matchedText.slice(0, 32) : undefined,
-    confidence:
-      typeof d.confidence === 'number' && Number.isFinite(d.confidence)
-        ? Math.max(0, Math.min(1, d.confidence))
-        : 0,
-    ambiguous: d.ambiguous === true,
-    separated: d.separated === true,
-    problem: typeof d.problem === 'string' ? (d.problem as ChallengeDetection['problem']) : undefined,
-  };
-}
-
-/** A challenge missing its identity or timestamps is dropped, not guessed at. */
-function coerceChallenge(raw: unknown): VerificationChallenge | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const c = raw as Partial<VerificationChallenge>;
-  if (typeof c.id !== 'string' || typeof c.assignmentId !== 'string') return null;
-  if (typeof c.createdAt !== 'string' || typeof c.expiresAt !== 'string') return null;
-  return {
-    id: c.id.slice(0, 64),
-    assignmentId: c.assignmentId.slice(0, 64),
-    sessionId: typeof c.sessionId === 'string' ? c.sessionId.slice(0, 64) : null,
-    phase: c.phase === 'after' ? 'after' : 'before',
-    type: c.type === 'qr_code' ? 'qr_code' : 'visual_code',
-    value: typeof c.value === 'string' ? c.value.slice(0, 32) : undefined,
-    valueHash: typeof c.valueHash === 'string' ? c.valueHash.slice(0, 32) : '',
-    createdAt: c.createdAt,
-    expiresAt: c.expiresAt,
-    status: (CHALLENGE_STATUSES as readonly string[]).includes(c.status as string)
-      ? c.status!
-      : 'expired',
-    usedAt: typeof c.usedAt === 'string' ? c.usedAt : undefined,
-    attempts: Number.isFinite(c.attempts) ? Math.max(0, Math.round(Number(c.attempts))) : 0,
-  };
-}
-
-function coerceEdgenuitySession(raw: unknown): EdgenuitySession | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const s = raw as Partial<EdgenuitySession>;
-  if (typeof s.id !== 'string' || typeof s.assignmentId !== 'string') return null;
-  const before = coerceProof(s.before);
-  if (!before) return null;
-  const link = coerceEdgenuityLink({ config: s.target });
-  if (!link) return null;
-  return {
-    id: s.id,
-    assignmentId: s.assignmentId,
-    status: (EDGENUITY_SESSION_STATUSES as readonly string[]).includes(s.status as string)
-      ? s.status!
-      : 'cancelled',
-    startedAt: typeof s.startedAt === 'string' ? s.startedAt : before.capturedAt,
-    expiresAt: typeof s.expiresAt === 'string' ? s.expiresAt : before.capturedAt,
-    before,
-    after: coerceProof(s.after) ?? undefined,
-    target: link.config,
-    focusMinutesAtStart: Number.isFinite(s.focusMinutesAtStart)
-      ? Math.max(0, Number(s.focusMinutesAtStart))
-      : 0,
-    pendingConfirmation:
-      s.pendingConfirmation &&
-      typeof s.pendingConfirmation === 'object' &&
-      typeof s.pendingConfirmation.at === 'string'
-        ? {
-            reason:
-              s.pendingConfirmation.reason === 'too_fast' ? 'too_fast' : 'large_jump',
-            progressPercent: coercePercent(s.pendingConfirmation.progressPercent) ?? undefined,
-            at: s.pendingConfirmation.at,
-          }
-        : undefined,
-    // Sessions started before Phase 5 carry no requirement. Defaulting them to
-    // `standard` keeps an in-flight verification finishable across the upgrade.
-    requiredTrust: s.requiredTrust === 'enhanced' ? 'enhanced' : 'standard',
-    beforeChallengeId:
-      typeof s.beforeChallengeId === 'string' ? s.beforeChallengeId.slice(0, 64) : undefined,
-    afterChallengeId:
-      typeof s.afterChallengeId === 'string' ? s.afterChallengeId.slice(0, 64) : undefined,
-  };
-}
-
-function coerceEdgenuity(raw: unknown): EdgenuityState {
-  const base = defaultEdgenuityState();
-  if (!raw || typeof raw !== 'object') return base;
-  const e = raw as Partial<EdgenuityState>;
-  return {
-    sessions: asArray<unknown>(e.sessions)
-      .map(coerceEdgenuitySession)
-      .filter((s): s is EdgenuitySession => s !== null)
-      .slice(0, MAX_EDGENUITY_SESSIONS),
-    challenges: asArray<unknown>(e.challenges)
-      .map(coerceChallenge)
-      .filter((c): c is VerificationChallenge => c !== null)
-      .slice(0, MAX_EDGENUITY_CHALLENGES),
-    developerMode: e.developerMode === true,
-    cameraPermission:
-      e.cameraPermission === 'granted' || e.cameraPermission === 'denied'
-        ? e.cameraPermission
-        : 'unknown',
-    ocrEverLoaded: e.ocrEverLoaded === true,
-  };
-}
 
 function coerceCanvas(raw: unknown): CanvasState {
   const base = defaultCanvasState();

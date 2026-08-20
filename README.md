@@ -76,13 +76,6 @@ To watch it work: add a site under **Blocked websites**, then press **Start
 > names that origin. If something else is holding the port, free it rather than
 > letting Vite pick 5174 — see [Origins](#origins-development-and-production).
 
-### Screen-share note
-
-Edgenuity screen proof needs a secure context for `getDisplayMedia`.
-`http://localhost:5173` counts as secure; a LAN address like
-`http://192.168.1.5:5173` does not, and Settings says so instead of showing a
-dead button.
-
 ---
 
 ## What LockIn does
@@ -95,12 +88,11 @@ dead button.
 | **Focus Mode** | Blocks the sites you chose until the work you chose is done. |
 | **Focus Guard** | With no extension at all, notices when you leave the LockIn tab during Focus Mode and times it. It cannot block, and cannot see where you went — and says both. |
 | **Chrome extension** | Does the blocking for real, with `declarativeNetRequest`. Survives closing LockIn and restarting Chrome. |
-| **Canvas calendar feed** | Assignments, courses and due dates imported from Canvas's own calendar feed, and kept up to date. It never says whether something was submitted, and LockIn never pretends otherwise. |
-| **Canvas verification** | Reads submission status from Canvas pages you open yourself, and counts a verified submission as done. |
-| **Edgenuity progress import** | A progress report email or a downloaded course report, parsed on this device. LockIn does not read the Edgenuity website. |
-| **Pace** | Ahead / on track / at risk / behind — with reasons, and with "not enough data" as a real answer when a sync failed or a report went stale. |
-| **Screen-capture proof** | When Edgenuity runs on the same computer as LockIn, share that window and one frame is read by local OCR. Chrome asks every time, and nothing is captured in the background. |
-| **School Companion** | Optional, off by default, for a school Chrome profile where installing it is allowed. Says whether Canvas or Edgenuity is open; cannot read a page. |
+| **Canvas calendar feed** | Assignments, courses and due dates from Canvas's own calendar feed, checked every 30 minutes and once at startup. |
+| **Canvas status** | Graded, submitted, missing or late — read from Canvas pages in your own logged-in session, including a background tab opened at startup if you want it. |
+| **What to do next** | One ordering everywhere: missing, then overdue, then today, then upcoming — strictly by due time inside each. Priority never beats a deadline. |
+| **By class** | The same list as columns, one per class, most urgent class first. |
+| **Pace** | Ahead / on track / at risk / behind — with reasons, and "not enough data" as a real answer when a sync failed. |
 | **Parent View** | A PIN-gated local dashboard of work, verification and Focus Mode history. |
 | **Emergency exit** | Always available, no PIN, no progress required. |
 
@@ -118,16 +110,11 @@ web/  (React + TypeScript + Vite + Tailwind)          extension/  (Manifest V3, 
 │                         transition   │◄─postMessage►│    service-worker.js messages       │
 │  lib/planner/           pure engine  │              │    rules.js          DNR rules      │
 │  lib/pace/              the verdict  │              │    calendar.js       feed + the URL │
-│  lib/sources/           provenance   │              │    activity.js       tab metadata   │
-│  lib/canvas/            what counts  │              │    reminders.js      one door       │
-│  lib/edgenuity/         as verified  │              │    canvas.js         trust boundary │
+│  lib/workState.ts       state+order  │              │    activity.js       tab metadata   │
+│  lib/sources/           provenance   │              │    reminders.js      one door       │
+│  lib/canvas/            what counts  │              │    canvas.js         trust boundary │
 │  lib/storage.ts         localStorage │              │  canvas/             page reader    │
 └──────────────────────────────────────┘              └────────────────────────────────────┘
-
-                    school-companion/  (separate, optional, off by default)
-                             │  context only, never content
-                             ▼
-                    scripts/context-bridge.mjs  on 127.0.0.1
 ```
 
 Five rules explain most of the code:
@@ -154,6 +141,9 @@ Five rules explain most of the code:
 7. **A missing sync is never bad news about the student.** Stale data produces
    "not enough data" with the source named — never "behind". Nothing is called
    overdue on a due date LockIn cannot currently believe.
+8. **One comparator.** `lib/workState.ts` decides both what state a piece of
+   work is in and what order it comes in. Missing, overdue, today, upcoming —
+   then strictly by due time. Priority never beats a deadline.
 
 `HANDOFF.md` has the full list of invariants and the file-by-file map. Read it
 before changing anything structural.
@@ -216,7 +206,7 @@ the Chrome Web Store.
 ## Testing
 
 ```bash
-npm test          # ~520 logic, state, security, storage, time and release checks (~6s)
+npm test          # ~410 logic, state, security, storage, time and release checks (~5s)
 npm run test:all  # everything, including 10 real-browser suites (~10 min)
 ```
 
@@ -231,14 +221,12 @@ serves the production site itself on `:4173`.
 
 | Suite | What it proves | Command |
 | --- | --- | --- |
-| Blocking, Canvas, Edgenuity, challenge, parent, planner logic | The rules are right | `npm test` |
+| Blocking, Canvas, parent, planner logic | The rules are right | `npm test` |
 | Provenance and the Pace Engine | Stale data never becomes "behind" | `npm run test:pace` |
 | Canvas calendar feed | Parsing, time zones, and update-not-duplicate | `npm run test:canvas-ics` |
-| Edgenuity import | Report parsing, tri-state completion, the merge | `npm run test:edgenuity-import` |
-| Companion | Categorisation, cooldowns, snooze, presence | `npm run test:companion` |
-| Context bridge | Every refusal: secret, replay, schema, smuggling | `npm run test:context-bridge` |
+| Companion | Categorisation, cooldowns, snooze, calendar cadence | `npm run test:companion` |
+| Work states and ordering | Graded vs submitted vs done, urgency, class columns | `npm run test:worklist` |
 | Phase 16 state | The v9 migration, and screens' empty/stale/error states | `npm run test:phase16` |
-| Screen-capture proofs | Trust ceiling, the live gate, source pairing | `npm run test:edgenuity-screen` |
 | Storage recovery | Corrupt, partial and oversized saves recover | `npm run test:storage` |
 | Security | The ten bypass paths stay closed | `npm run test:security` |
 | Time boundaries | 23:59, midnight, DST, month and year ends | `npm run test:time` |
@@ -248,8 +236,6 @@ serves the production site itself on `:4173`.
 | Canvas parser | Real Canvas DOM | `npm run test:parser` |
 | Blocking E2E | Real Chrome, real rules | `npm run test:e2e` |
 | Canvas E2E | Detection → verification → unlock | `npm run test:canvas-e2e` |
-| Edgenuity OCR | The real engine on real images | `npm run test:edgenuity-ocr` |
-| Edgenuity E2E | Real camera API | `npm run test:edgenuity-e2e` |
 | Parent E2E | PIN, controls, enforcement | `npm run test:parent-e2e` |
 | Planner E2E | Plan → start → partial → recalculate | `npm run test:planner-e2e` |
 | Release E2E | Production build + packaged zip | `npm run test:release-e2e` |
@@ -257,7 +243,7 @@ serves the production site itself on `:4173`.
 
 If a suite says the debug port is in use: `pkill -f "Chrome for Testing"`.
 
-The Edgenuity and parent suites import `web/src/**/*.ts` directly — Node strips
+The parent, pace and planner suites import `web/src/**/*.ts` directly — Node strips
 the types and `extension/tests/ts-resolve.mjs` resolves the extensionless
 imports — so they test the shipping modules, not copies.
 
@@ -287,23 +273,21 @@ The in-app `/privacy` page says the same thing to students. Keep them in step.
 
 ## Known limitations
 
-**Phase 16 additions, stated plainly:**
+**Stated plainly:**
 
-- **Canvas submission state needs OAuth nobody has.** The calendar feed carries
-  due dates and nothing else. A Developer Key needs a school administrator and
-  a confidential client secret, which needs a backend LockIn does not have. The
-  adapter boundary is real; the authorization is not.
-- **Automatic Edgenuity sync needs your own Google OAuth client id.** LockIn
-  ships none, because a shared one would let every install read mail through
-  this project's identity. Until then, file import.
-- **The Edgenuity parsers have never seen a real progress report.** They are
-  written against the documented field names and tested against synthetic
-  fixtures. The first real report may need the matchers adjusted.
-- **PDF course reports are refused**, with an instruction to export CSV. No PDF
-  text extractor is bundled, and OCR-ing a PDF that has perfectly good text
-  would be slow, lossy and confidently wrong about numbers.
-- **The School Companion needs the local service running**, and only makes
-  sense where installing an extension on the school profile is permitted.
+- **There is no Edgenuity integration.** Removed in Phase 17: the course report
+  cannot cross Chrome profiles, and the progress email arrives weekly, which is
+  useless for live data. An integration that is right one day in seven is worse
+  than none, because the app quotes it as current.
+- **Graded status needs Canvas open in the same Chrome profile as the
+  extension.** There is no way around that: a calendar feed does not carry
+  submission state, and the Canvas API needs a Developer Key a student cannot
+  issue. If Canvas lives in a different profile, LockIn shows due dates only
+  and says so.
+- **The background Canvas tab is a real page load** in your own session, once
+  at startup. It is off with one toggle.
+- **Canvas submission state via OAuth** would need a school administrator and a
+  backend for the client secret. Neither exists.
 
 These are honest, and they are a product feature rather than an embarrassment —
 a student told that blocking is unbreakable will find out otherwise in ten
@@ -320,21 +304,6 @@ minutes and stop trusting everything else the app says.
 - **Canvas detection only sees pages the student opens**, and can break if
   Canvas changes its interface — in which case LockIn reports that it could not
   read the page rather than guessing.
-- **Edgenuity OCR can fail** on glare, unusual school themes, or handwriting.
-  Fixtures print the code; real students write it, so field reliability is lower
-  than the test suite suggests.
-- **The parent PIN is accountability, not device security.**
-- **The planner works from your estimates**, and cannot know about homework set
-  an hour ago.
-- **The extension holds broad host access** because Chrome requires it for
-  `declarativeNetRequest` redirect rules against user-chosen sites. Consequence:
-  Chrome shows no new prompt when connecting Canvas, and the UI says so rather
-  than faking consent.
-- **Two LockIn tabs are last-writer-wins.** Canvas verification is idempotent,
-  so it cannot double-count.
-- **Blocking statistics live in extension storage** and disappear with it.
-- **A 100-minute day with 45-minute chunks plans 90, not 100.** Two sessions per
-  task per day is a deliberate cap; raise the chunk size, not the cap.
 
 ---
 
@@ -350,9 +319,7 @@ lockin/
 │   ├── manifest.json
 │   ├── shared/config.js    generated from lockin.config.json
 │   └── tests/              every automated suite lives here
-├── school-companion/       optional, separate package for a school profile
 ├── scripts/                config generation, release packaging, local service
-│   └── context-bridge.mjs  the loopback bridge and its threat model
 ├── lockin.config.json      where the app lives, per environment
 ├── docs/research/          evidence briefs behind design decisions
 ├── HANDOFF.md              architecture, invariants, and why

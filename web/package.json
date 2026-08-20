@@ -7,21 +7,15 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview",
-    "vendor:ocr": "node scripts/vendor-ocr.mjs",
-    "predev": "node scripts/vendor-ocr.mjs",
-    "prebuild": "node scripts/vendor-ocr.mjs",
-    "prepreview": "node scripts/vendor-ocr.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.2",
-    "tesseract.js": "^7.0.0"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
-    "@tesseract.js-data/eng": "^1.0.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

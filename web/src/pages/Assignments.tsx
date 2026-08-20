@@ -10,7 +10,8 @@ import { AssignmentForm } from '../components/features/AssignmentForm';
 import { createAssignment } from '../store/factories';
 import type { Assignment } from '../types';
 import { PLATFORMS, PRIORITIES } from '../types';
-import { dueTimestamp, isComplete, sortByDue } from '../lib/selectors';
+import { isComplete } from '../lib/selectors';
+import { byUrgency, groupByClass, isSettled, workStateOf } from '../lib/workState';
 import { SectionHeader } from '../components/ui/Status';
 import { cx } from '../lib/cx';
 import { toast } from '../components/ui/Toast';
@@ -22,69 +23,64 @@ import { CanvasCallout } from '../components/features/CanvasCallout';
 const ALL = 'All';
 
 /**
- * The four views a student actually thinks in.
+ * The views a student actually thinks in.
  *
  * These replaced a status dropdown and a priority dropdown. A dropdown makes
  * you name the thing you want before you can see it; a tab shows you what is
- * there. `overdue` comes second rather than last because it is the one people
- * open the page to check.
+ * there. `Next up` is first and is the default, because "what do I do now" is
+ * the question the page is opened to answer.
  */
 const VIEWS = [
-  { id: 'today', label: 'Today' },
+  { id: 'next', label: 'Next up' },
   { id: 'overdue', label: 'Overdue' },
   { id: 'upcoming', label: 'Upcoming' },
-  { id: 'completed', label: 'Completed' },
+  { id: 'done', label: 'Done' },
 ] as const;
 
 type ViewId = (typeof VIEWS)[number]['id'];
 
-const DAY = 86_400_000;
+/**
+ * Which view an assignment belongs to.
+ *
+ * Derived from `workStateOf` so the tabs, the badges and the ordering can
+ * never disagree — the alternative is three places deciding separately what
+ * "done" means, which is how the old page ended up unable to tell graded work
+ * from work somebody had ticked off.
+ */
+function viewOf(assignment: Assignment, now: number): ViewId {
+  const state = workStateOf(assignment, now);
+  if (isSettled(state)) return 'done';
+  if (state === 'missing' || state === 'overdue') return 'overdue';
+  if (state === 'upcoming') return 'upcoming';
+  // Due today and undated are both "now" work.
+  return 'next';
+}
 
 /** Empty states say what is true, not that a filter returned nothing. */
 const EMPTY_TITLES: Record<ViewId, string> = {
-  today: 'Nothing due today',
+  next: 'Nothing to do right now',
   overdue: 'Nothing overdue',
   upcoming: 'Nothing coming up',
-  completed: 'Nothing finished yet',
+  done: 'Nothing finished yet',
 };
 
 /** The first view with work in it, in priority order. */
 export function initialView(assignments: Assignment[], now: number): ViewId {
-  const counts: Record<ViewId, number> = { today: 0, overdue: 0, upcoming: 0, completed: 0 };
+  const counts: Record<ViewId, number> = { next: 0, overdue: 0, upcoming: 0, done: 0 };
   for (const assignment of assignments) counts[viewOf(assignment, now)] += 1;
   if (counts.overdue > 0) return 'overdue';
-  if (counts.today > 0) return 'today';
+  if (counts.next > 0) return 'next';
   if (counts.upcoming > 0) return 'upcoming';
-  return 'today';
+  return 'next';
 }
 
 const EMPTY_HINTS: Record<ViewId, string> = {
-  today: 'Check Upcoming to get ahead.',
+  next: 'Check Upcoming to get ahead.',
   overdue: 'Everything with a due date is still in time.',
   upcoming: 'Connect Canvas and your week fills itself in.',
-  completed: 'Finished work collects here.',
+  done: 'Finished work collects here.',
 };
 
-/** Which view an assignment belongs to. One assignment, one view. */
-function viewOf(assignment: Assignment, now: number): ViewId {
-  if (isComplete(assignment)) return 'completed';
-  const due = dueTimestamp(assignment);
-
-  // Undated work sits in Today, not Upcoming.
-  //
-  // `dueTimestamp` returns MAX_SAFE_INTEGER when there is no due date, which
-  // would file it at the far end of Upcoming — the one place nobody looks.
-  // Phase 9's rule was that undated work is real work; hiding it behind a tab
-  // is the same mistake as refusing to accept it without a date.
-  if (!Number.isFinite(due) || due === Number.MAX_SAFE_INTEGER) return 'today';
-
-  if (due < now) return 'overdue';
-  // "Today" is the rest of today plus tonight's work — anything due before
-  // tomorrow ends, which is what a student means when they ask what is due.
-  const endOfTomorrow = new Date(now);
-  endOfTomorrow.setHours(23, 59, 59, 999);
-  return due <= endOfTomorrow.getTime() + DAY ? 'today' : 'upcoming';
-}
 
 export function AssignmentsPage() {
   const { state, dispatch, now } = useApp();
@@ -113,6 +109,21 @@ export function AssignmentsPage() {
    * out from under somebody who deliberately opened an empty tab.
    */
   const [view, setView] = useState<ViewId>(() => initialView(state.assignments, Date.now()));
+  /**
+   * List or columns.
+   *
+   * Remembered across visits, because it is a preference about how somebody
+   * reads rather than a filter they set for one question. It lives in its own
+   * key rather than in `AppState` — see `hooks/useFeedback.ts` for the same
+   * reasoning about presentation state.
+   */
+  const [layout, setLayout] = useState<'list' | 'class'>(() => {
+    try {
+      return localStorage.getItem('lockin.assignments.layout') === 'class' ? 'class' : 'list';
+    } catch {
+      return 'list';
+    }
+  });
   const [showFilters, setShowFilters] = useState(false);
 
   // Deep link from the dashboard: /assignments?new=1
@@ -127,28 +138,60 @@ export function AssignmentsPage() {
   /** Everything matching the search and the optional filters, before views. */
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return sortByDue(
+    // Most urgent first, always. `byUrgency` is the app's one comparator.
+    return byUrgency(
       state.assignments.filter((a) => {
         if (platform !== ALL && a.platform !== platform) return false;
         if (priority !== ALL && a.priority !== priority) return false;
         if (q && !`${a.title} ${a.subject}`.toLowerCase().includes(q)) return false;
         return true;
       }),
+      now,
     );
-  }, [state.assignments, query, platform, priority]);
+  }, [state.assignments, query, platform, priority, now]);
 
   /** Counts for the tabs, computed once rather than per tab. */
   const buckets = useMemo(() => {
-    const out: Record<ViewId, Assignment[]> = { today: [], overdue: [], upcoming: [], completed: [] };
+    const out: Record<ViewId, Assignment[]> = { next: [], overdue: [], upcoming: [], done: [] };
     for (const assignment of matching) out[viewOf(assignment, now)].push(assignment);
-    // Completed reads newest-first: the useful question there is "what did I
-    // just finish", not "what was due first".
-    out.completed.reverse();
+    // Finished work reads newest-first: the useful question there is "what did
+    // I just finish", not "what was due first".
+    out.done.reverse();
     return out;
   }, [matching, now]);
 
   const shown = buckets[view];
   const filtersOn = platform !== ALL || priority !== ALL || query.trim() !== '';
+
+  /**
+   * One row, wired the same way in both layouts.
+   *
+   * Written once rather than duplicated per layout: the list and the columns
+   * differ in arrangement only, and two copies of this wiring is two places to
+   * forget the Canvas handlers.
+   */
+  const renderCard = (a: Assignment) => (
+    <AssignmentCard
+      key={a.id}
+      assignment={a}
+      required={state.focusMode.active && state.focusMode.requiredTaskIds.includes(a.id)}
+      onToggleComplete={() => {
+        if (isComplete(a)) {
+          dispatch({ type: 'UNCOMPLETE_ASSIGNMENT', id: a.id });
+          return;
+        }
+        dispatch({ type: 'COMPLETE_ASSIGNMENT', id: a.id, method: 'manual' });
+        toast(`“${a.title}” marked complete.`, 'success');
+      }}
+      onEdit={() => setEditing(a)}
+      onDelete={() => setDeleting(a)}
+      onFocus={isComplete(a) ? undefined : () => navigate(`/focus?assignment=${a.id}`)}
+      onOpenCanvas={(x) => x.canvas && openInCanvas(x.canvas.url)}
+      onCheckCanvas={isComplete(a) ? undefined : checkStatus}
+      canvasBusy={canvasBusy === 'check' || canvasBusy === 'sync'}
+      onLinkCanvas={canvasConnected && !a.canvas && !isComplete(a) ? () => setLinking(a) : undefined}
+    />
+  );
 
   return (
     <div className="space-y-5">
@@ -157,7 +200,7 @@ export function AssignmentsPage() {
           <h1 className="text-title font-extrabold lk-strong">Assignments</h1>
           <p className="mt-1 text-body lk-muted">
             {state.assignments.length} total ·{' '}
-            {buckets.today.length + buckets.overdue.length + buckets.upcoming.length} unfinished
+            {buckets.next.length + buckets.overdue.length + buckets.upcoming.length} unfinished
           </p>
         </div>
 
@@ -227,6 +270,25 @@ export function AssignmentsPage() {
               aria-label="Search assignments"
             />
           </div>
+          {/*
+            List or columns. A phone gets the list whatever is chosen — three
+            columns on a 375px screen is three unreadable columns.
+          */}
+          <Chip
+            active={layout === 'class'}
+            onClick={() => {
+              const next = layout === 'class' ? 'list' : 'class';
+              setLayout(next);
+              try {
+                localStorage.setItem('lockin.assignments.layout', next);
+              } catch {
+                /* a blocked storage is not worth breaking the page over */
+              }
+            }}
+            aria-pressed={layout === 'class'}
+          >
+            By class
+          </Chip>
           <Chip
             onClick={() => setShowFilters((open) => !open)}
             aria-expanded={showFilters}
@@ -287,32 +349,43 @@ export function AssignmentsPage() {
           />
         )
       ) : (
-        <section className="space-y-2.5" aria-live="polite">
+        <section aria-live="polite">
           <SectionHeader
             title={`${VIEWS.find((v) => v.id === view)?.label} (${shown.length})`}
+            hint={
+              layout === 'class'
+                ? 'Grouped by class, most urgent class first.'
+                : 'Most urgent first.'
+            }
           />
-          {shown.map((a) => (
-            <AssignmentCard
-              key={a.id}
-              assignment={a}
-              required={state.focusMode.active && state.focusMode.requiredTaskIds.includes(a.id)}
-              onToggleComplete={() => {
-                if (isComplete(a)) {
-                  dispatch({ type: 'UNCOMPLETE_ASSIGNMENT', id: a.id });
-                  return;
-                }
-                dispatch({ type: 'COMPLETE_ASSIGNMENT', id: a.id, method: 'manual' });
-                toast(`“${a.title}” marked complete.`, 'success');
-              }}
-              onEdit={() => setEditing(a)}
-              onDelete={() => setDeleting(a)}
-              onFocus={isComplete(a) ? undefined : () => navigate(`/focus?assignment=${a.id}`)}
-              onOpenCanvas={(x) => x.canvas && openInCanvas(x.canvas.url)}
-              onCheckCanvas={isComplete(a) ? undefined : checkStatus}
-              canvasBusy={canvasBusy === 'check' || canvasBusy === 'sync'}
-              onLinkCanvas={canvasConnected && !a.canvas && !isComplete(a) ? () => setLinking(a) : undefined}
-            />
-          ))}
+
+          {layout === 'class' ? (
+            /*
+              One column per class.
+              `items-start` matters: without it every column stretches to the
+              tallest, and a class with one assignment gets a card floating in
+              a column of empty space.
+            */
+            <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {groupByClass(shown, now).map((group) => (
+                <div key={group.subject} className="min-w-0">
+                  <div className="mb-2 flex items-baseline justify-between gap-2">
+                    <h3 className="truncate text-caption font-bold tracking-wide lk-muted uppercase">
+                      {group.subject}
+                    </h3>
+                    <span className="shrink-0 text-caption tabular-nums lk-muted">
+                      {group.assignments.length}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {group.assignments.map((a) => renderCard(a))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2.5">{shown.map((a) => renderCard(a))}</div>
+          )}
         </section>
       )}
 

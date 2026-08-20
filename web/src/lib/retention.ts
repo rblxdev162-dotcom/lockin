@@ -57,8 +57,6 @@ export const KEY_ACTIVITY_TYPES: ReadonlySet<ActivityType> = new Set<ActivityTyp
   'allowlist_changed',
   'pin_changed',
   'canvas_submission_verified',
-  'edgenuity_progress_verified',
-  'edgenuity_verification_failed',
   'parent_controls_changed',
   'parent_requirement_changed',
 ]);

@@ -8,7 +8,7 @@
  * freshness flag cannot do.
  */
 import type { Confidence, DataState, Freshness, SourceKind, SourceRecord } from '../../types/source';
-import { FRESHNESS_HOURS, IMPORT_KINDS } from '../../types/source';
+import { FRESHNESS_HOURS } from '../../types/source';
 
 const HOUR_MS = 3_600_000;
 
@@ -16,9 +16,6 @@ const HOUR_MS = 3_600_000;
 export const SOURCE_LABEL: Record<SourceKind, string> = {
   CANVAS_CALENDAR: 'Canvas',
   CANVAS_OAUTH: 'Canvas',
-  EDGENUITY_PROGRESS_EMAIL: 'Edgenuity',
-  EDGENUITY_COURSE_REPORT: 'Edgenuity',
-  EDGENUITY_APPROVED_API: 'Edgenuity',
   MANUAL: 'Added by you',
   LOCKIN_VERIFIED: 'Verified',
 };
@@ -27,9 +24,6 @@ export const SOURCE_LABEL: Record<SourceKind, string> = {
 export const SOURCE_DETAIL: Record<SourceKind, string> = {
   CANVAS_CALENDAR: 'Canvas calendar feed',
   CANVAS_OAUTH: 'Canvas (authorized access)',
-  EDGENUITY_PROGRESS_EMAIL: 'Edgenuity progress report email',
-  EDGENUITY_COURSE_REPORT: 'Edgenuity course report',
-  EDGENUITY_APPROVED_API: 'Edgenuity (approved API)',
   MANUAL: 'Added by you',
   LOCKIN_VERIFIED: 'Verified by LockIn',
 };
@@ -98,19 +92,19 @@ export function classify(record: SourceRecord | undefined, now: number): Freshne
     return { state: 'STALE', ageMs, stale: true, label: `Updated ${relativeAge(ageMs)}` };
   }
 
-  if (IMPORT_KINDS.includes(record.kind)) {
-    return { state: 'IMPORTED', ageMs, stale: false, label: `Updated ${relativeAge(ageMs)}` };
-  }
-
   if (record.kind === 'LOCKIN_VERIFIED') {
     return { state: 'VERIFIED', ageMs, stale: false, label: `Verified ${relativeAge(ageMs)}` };
   }
 
-  if (record.isLive && fresh) {
-    return { state: 'LIVE', ageMs, stale: false, label: `Synced ${relativeAge(ageMs)}` };
+  if (record.isLive) {
+    return fresh
+      ? { state: 'LIVE', ageMs, stale: false, label: `Synced ${relativeAge(ageMs)}` }
+      : { state: 'SYNCED', ageMs, stale: false, label: `Synced ${relativeAge(ageMs)}` };
   }
 
-  return { state: 'SYNCED', ageMs, stale: false, label: `Synced ${relativeAge(ageMs)}` };
+  // Not live, not stale: a file the student handed over. It was a snapshot when
+  // it arrived and it stays one, however recently it was dropped in.
+  return { state: 'IMPORTED', ageMs, stale: false, label: `Imported ${relativeAge(ageMs)}` };
 }
 
 /**
@@ -160,11 +154,10 @@ export function manualSource(now: string): SourceRecord {
 /**
  * Picks the record that should own a field when two sources both have it.
  *
- * Used by the Edgenuity merge (a course report and a progress email both know
- * the course name). The rule is deliberately simple and explained in one line
- * so the UI can explain it too: **live beats imported, then newer beats older,
- * then higher confidence wins.** Never "whichever arrived last", which would
- * let a stale re-import overwrite this morning's email.
+ * The rule is deliberately simple, and stated so the UI can explain it too:
+ * **live beats imported, then newer beats older, then higher confidence wins.**
+ * Never "whichever arrived last", which would let a stale file import overwrite
+ * a fresh sync.
  */
 export function preferSource(
   a: SourceRecord | undefined,

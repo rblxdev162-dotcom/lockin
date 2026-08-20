@@ -18,9 +18,7 @@ import type {
   Exam,
   FocusRun,
   VerificationRecord,
-  VerificationTrust,
 } from '../../types';
-import { trustOfRecord } from '../edgenuity/verification';
 import { daysUntil } from '../time';
 
 /* ------------------------------------------------------------------ */
@@ -58,16 +56,12 @@ function within(iso: string | undefined, from: Date, to: Date): boolean {
 
 export const VERIFICATION_KINDS = [
   'canvas',
-  'edgenuity_enhanced',
-  'edgenuity_standard',
   'manual',
 ] as const;
 export type VerificationKind = (typeof VERIFICATION_KINDS)[number];
 
 export const VERIFICATION_KIND_LABEL: Record<VerificationKind, string> = {
   canvas: 'Canvas verified',
-  edgenuity_enhanced: 'Edgenuity Enhanced',
-  edgenuity_standard: 'Edgenuity Standard',
   manual: 'Manual',
 };
 
@@ -82,10 +76,6 @@ export const VERIFICATION_KIND_LABEL: Record<VerificationKind, string> = {
 export const VERIFICATION_KIND_EXPLANATION: Record<VerificationKind, string> = {
   canvas:
     'Canvas itself reported the assignment as submitted or graded. LockIn read that status from the school’s own page.',
-  edgenuity_enhanced:
-    'A live photo showed the progress screen alongside a one-time code issued minutes earlier, for both the before and after captures. Prepared photos are much harder to reuse; it does not prove the screen was genuine.',
-  edgenuity_standard:
-    'A live photo showed an Edgenuity progress screen before and after working. No one-time code was required, so a previously prepared image is harder to rule out.',
   manual:
     'The student marked this done themselves, or a focus timer completed it. No external evidence was involved.',
 };
@@ -108,9 +98,6 @@ export function verificationKindOf(assignment: Assignment): VerificationKind {
   const record = latestVerification(assignment);
   if (!record) return 'manual';
   if (record.type === 'canvas_submission') return 'canvas';
-  if (record.type === 'edgenuity_photo') {
-    return trustOfRecord(record) === 'enhanced' ? 'edgenuity_enhanced' : 'edgenuity_standard';
-  }
   return 'manual';
 }
 
@@ -209,11 +196,8 @@ export interface RecentVerification {
   label: string;
   record?: VerificationRecord;
   /** Edgenuity only: the before → after reading. */
-  progressBefore?: number;
-  progressAfter?: number;
   /** Canvas only: the status the page reported. */
   canvasStatus?: string;
-  trust: VerificationTrust;
   /** How many rejected attempts preceded this success. */
   attemptsBefore: number;
 }
@@ -221,10 +205,10 @@ export interface RecentVerification {
 /**
  * Completed work, newest first.
  *
- * `attemptsBefore` counts the refusals recorded on the assignment before the
- * accepted one. It is shown as "3 attempts before success" rather than as a
- * list of failures, because a failed OCR read is not misconduct and a parent
- * scrolling a wall of them would reasonably conclude otherwise.
+ * `attemptsBefore` counts verification records that were refused before the
+ * accepted one. It is shown as a count rather than as a list of failures: a
+ * refused check is not misconduct, and a parent scrolling a wall of them would
+ * reasonably conclude otherwise.
  */
 export function selectRecentVerifications(
   state: AppState,
@@ -252,89 +236,13 @@ export function selectRecentVerifications(
         kind,
         label: VERIFICATION_KIND_LABEL[kind],
         record,
-        progressBefore: record?.progressBefore,
-        progressAfter: record?.progressAfter,
         canvasStatus:
           typeof record?.evidence?.canvasStatus === 'string'
             ? record.evidence.canvasStatus
             : undefined,
-        trust: record ? trustOfRecord(record) : 'manual',
         attemptsBefore: failedBefore,
       };
     });
-}
-
-/* ------------------------------------------------------------------ */
-/* Refused verification attempts                                       */
-/* ------------------------------------------------------------------ */
-
-export interface RefusedAttempt {
-  assignmentId?: string;
-  title?: string;
-  at: string;
-  reason: string;
-  /** Repeated identical refusals in a row are folded into one row. */
-  repeats: number;
-}
-
-/**
- * Human-readable refusal reasons, drawn from the typed `meta.reason` the
- * reducer records — never from the log sentence.
- *
- * The wording is deliberate. "Verification not accepted" is what LockIn knows;
- * "cheating" is not, and a system that cannot tell the difference should not
- * use the word.
- */
-const REFUSAL_LABEL: Record<string, string> = {
-  different_course: 'A different course was shown',
-  not_live: 'Not a live camera capture',
-  expired: 'The starting photo had expired',
-  unreadable: 'The progress could not be read',
-  progress_reversed: 'The reading was lower than the last verified one',
-  no_new_progress: 'No new progress since the last check',
-  not_enough_focus_time: 'Not enough focus time yet',
-  no_activity_change: 'The activity had not changed',
-  insufficient_trust: 'Enhanced Proof was required',
-  large_jump: 'A large jump needed a confirming photo',
-  too_fast: 'Verified very soon after starting — a confirming photo was asked for',
-};
-
-export function describeRefusal(reason: unknown): string {
-  return typeof reason === 'string' && REFUSAL_LABEL[reason]
-    ? REFUSAL_LABEL[reason]
-    : 'Evidence did not meet the requirements';
-}
-
-/**
- * Refused verification attempts, newest first, with consecutive identical
- * reasons collapsed. Retaking a photo four times because the light was bad is
- * one event worth knowing about, not four.
- */
-export function selectRefusedAttempts(state: AppState, limit = 20): RefusedAttempt[] {
-  const byId = new Map(state.assignments.map((a) => [a.id, a]));
-  const rows: RefusedAttempt[] = [];
-
-  for (const event of state.activity) {
-    if (event.type !== 'edgenuity_verification_failed') continue;
-    const reason = describeRefusal(event.meta?.reason);
-    const assignmentId =
-      typeof event.meta?.assignmentId === 'string' ? event.meta.assignmentId : undefined;
-    const previous = rows[rows.length - 1];
-
-    if (previous && previous.reason === reason && previous.assignmentId === assignmentId) {
-      previous.repeats += 1;
-      continue;
-    }
-    rows.push({
-      assignmentId,
-      title: assignmentId ? byId.get(assignmentId)?.title : undefined,
-      at: event.timestamp,
-      reason,
-      repeats: 1,
-    });
-    if (rows.length >= limit) break;
-  }
-  return rows;
 }
 
 /* ------------------------------------------------------------------ */
@@ -451,8 +359,6 @@ export const PARENT_ASSIGNMENT_FILTERS = [
   'completed',
   'incomplete',
   'canvas',
-  'edgenuity_standard',
-  'edgenuity_enhanced',
   'manual',
 ] as const;
 export type ParentAssignmentFilter = (typeof PARENT_ASSIGNMENT_FILTERS)[number];
@@ -460,34 +366,17 @@ export type ParentAssignmentFilter = (typeof PARENT_ASSIGNMENT_FILTERS)[number];
 export interface ParentAssignmentRow {
   assignment: Assignment;
   kind: VerificationKind | null;
-  /** Trust this assignment demands, resolved against the global floor. */
-  requiredTrust: VerificationTrust;
-  /** True when progress exists but has not reached the required strength. */
-  awaitingStrongerProof: boolean;
 }
 
 export function selectParentAssignmentSummary(
   state: AppState,
   filter: ParentAssignmentFilter = 'all',
 ): ParentAssignmentRow[] {
-  const floor = state.settings.edgenuityProofMode;
-
   const rows: ParentAssignmentRow[] = state.assignments.map((assignment) => {
     const done = assignment.status === 'Completed';
-    const perAssignment = assignment.edgenuity?.config.requiredVerificationTrust ?? 'standard';
-    const requiredTrust: VerificationTrust =
-      assignment.edgenuity && (perAssignment === 'enhanced' || floor === 'enhanced')
-        ? 'enhanced'
-        : 'standard';
-
     return {
       assignment,
       kind: done ? verificationKindOf(assignment) : null,
-      requiredTrust,
-      awaitingStrongerProof:
-        !done &&
-        requiredTrust === 'enhanced' &&
-        assignment.edgenuity?.lastVerifiedTrust === 'standard',
     };
   });
 
@@ -498,10 +387,6 @@ export function selectParentAssignmentSummary(
       return rows.filter((r) => r.assignment.status !== 'Completed');
     case 'canvas':
       return rows.filter((r) => r.kind === 'canvas');
-    case 'edgenuity_standard':
-      return rows.filter((r) => r.kind === 'edgenuity_standard');
-    case 'edgenuity_enhanced':
-      return rows.filter((r) => r.kind === 'edgenuity_enhanced');
     case 'manual':
       return rows.filter((r) => r.kind === 'manual');
     default:
@@ -625,11 +510,9 @@ export function buildWeeklyExport(state: AppState, now = new Date()) {
       subject: entry.subject,
       completedAt: entry.completedAt,
       verification: entry.label,
-      trust: entry.trust,
-      progressBefore: entry.progressBefore,
-      progressAfter: entry.progressAfter,
+      canvasStatus: entry.canvasStatus,
     })),
-    note: 'Generated locally by LockIn. Contains no photos, OCR text, verification codes, PIN data or browsing history.',
+    note: 'Generated locally by LockIn. Contains no PIN data and no browsing history.',
   };
 }
 
@@ -642,17 +525,9 @@ export function buildWeeklyCsv(state: AppState): string {
     return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
 
-  const header = ['Completed at', 'Subject', 'Assignment', 'Verification', 'Trust', 'Progress before', 'Progress after'];
+  const header = ['Completed at', 'Subject', 'Assignment', 'Verification', 'Canvas status'];
   const lines = rows.map((row) =>
-    [
-      row.completedAt,
-      row.subject,
-      row.title,
-      row.label,
-      row.trust,
-      row.progressBefore,
-      row.progressAfter,
-    ]
+    [row.completedAt, row.subject, row.title, row.label, row.canvasStatus]
       .map(escape)
       .join(','),
   );

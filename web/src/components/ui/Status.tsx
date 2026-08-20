@@ -26,18 +26,17 @@ export const STATUS_CLASS: Record<PaceStatus, string> = {
 /**
  * The pace pill.
  *
- * `official` is rendered as a real distinction rather than a footnote: "Behind
- * (Edgenuity)" and "Behind (LockIn's estimate)" are different claims, and
- * blurring them would put words in a vendor's mouth.
+ * There is no "official" variant any more: with Canvas the only source, and a
+ * calendar feed publishing no verdict of its own, every status on this badge is
+ * LockIn's own reading. Saying so once here beats implying otherwise on every
+ * screen.
  */
 export function PaceBadge({
   status,
-  official = false,
   size = 'md',
   className,
 }: {
   status: PaceStatus;
-  official?: boolean;
   size?: 'sm' | 'md';
   className?: string;
 }) {
@@ -56,23 +55,12 @@ export function PaceBadge({
         style={{ background: 'currentColor' }}
       />
       {PACE_LABEL[status]}
-      {status !== 'UNKNOWN' && (
-        <span className="font-semibold opacity-70">
-          {official ? '· official' : '· estimate'}
-        </span>
-      )}
     </span>
   );
 }
 
 /** Sources that are worth naming on a dense row. MANUAL is not. */
-const ROW_SOURCES: readonly SourceKind[] = [
-  'CANVAS_CALENDAR',
-  'CANVAS_OAUTH',
-  'EDGENUITY_PROGRESS_EMAIL',
-  'EDGENUITY_COURSE_REPORT',
-  'EDGENUITY_APPROVED_API',
-];
+const ROW_SOURCES: readonly SourceKind[] = ['CANVAS_CALENDAR', 'CANVAS_OAUTH'];
 
 /**
  * A subtle source mark for a list row.

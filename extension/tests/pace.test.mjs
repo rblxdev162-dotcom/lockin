@@ -18,7 +18,6 @@ const { classify, effectiveConfidence, preferSource, trustworthyForJudgment, rel
 const { computePace, trustedOverdue, staleSources, PACE_LABEL } = await import(
   '../../web/src/lib/pace/engine.ts'
 );
-const { coursePace, ON_PACE_BAND } = await import('../../web/src/lib/pace/courses.ts');
 const { defaultState } = await import('../../web/src/lib/storage.ts');
 
 const NOW = Date.parse('2026-03-10T18:00:00Z');
@@ -77,30 +76,10 @@ function assignment(patch = {}) {
   };
 }
 
-function course(patch = {}) {
-  const stamp = patch.stamp ?? source({ kind: 'EDGENUITY_PROGRESS_EMAIL', isLive: false });
-  delete patch.stamp;
-  return {
-    id: 'c1',
-    provider: 'edgenuity',
-    product: 'EDGENUITY',
-    name: 'Algebra I',
-    activities: [],
-    createdAt: iso(NOW - 30 * DAY),
-    updatedAt: iso(NOW),
-    actualProgressPercent: { value: 61.7, source: stamp },
-    targetProgressPercent: { value: 57.2, source: stamp },
-    ...patch,
-  };
-}
 
-function stateWith({ assignments = [], courses = [] } = {}) {
+function stateWith({ assignments = [] } = {}) {
   const base = defaultState();
-  return {
-    ...base,
-    assignments,
-    integrations: { ...base.integrations, courses },
-  };
+  return { ...base, assignments };
 }
 
 /* ------------------------------------------------------------------ */
@@ -116,8 +95,10 @@ test('a live connection inside its window is LIVE; the same record later is not'
   assert.equal(classify(record, NOW + 30 * HOUR).state, 'STALE');
 });
 
-test('an import is never LIVE, however recent', () => {
-  const record = source({ kind: 'EDGENUITY_COURSE_REPORT', isLive: true });
+test('a file import is never LIVE, however recent', () => {
+  // Same source kind as the live feed — what makes it an import is that no
+  // connection is answering for it, which is exactly what `.ics` drop-in is.
+  const record = source({ isLive: false });
   assert.equal(classify(record, NOW).state, 'IMPORTED');
 });
 
@@ -153,11 +134,7 @@ test('only believable states are trusted for a judgment', () => {
 
 test('conflicting sources resolve live over imported, then newer, then confidence', () => {
   const live = source();
-  const imported = source({
-    kind: 'EDGENUITY_COURSE_REPORT',
-    isLive: false,
-    lastSyncedAt: iso(NOW - 60_000),
-  });
+  const imported = source({ isLive: false, lastSyncedAt: iso(NOW - 60_000) });
   assert.equal(preferSource(live, imported, NOW), live);
 
   const older = source({ lastSyncedAt: iso(NOW - 3 * HOUR) });
@@ -175,54 +152,6 @@ test('ages read as sentences, not as numbers', () => {
   assert.equal(relativeAge(3 * HOUR), '3 hours ago');
   assert.equal(relativeAge(28 * HOUR), 'yesterday');
   assert.equal(relativeAge(4 * DAY), '4 days ago');
-});
-
-/* ------------------------------------------------------------------ */
-/* Course pacing                                                       */
-/* ------------------------------------------------------------------ */
-
-test('classic Edgenuity ahead of target reads AHEAD', () => {
-  const pace = coursePace(course(), NOW);
-  assert.equal(pace.status, 'AHEAD');
-  assert.equal(pace.deltaPercent, 4.5);
-  // Never claimed as Edgenuity's own verdict unless a report published one.
-  assert.equal(pace.official, false);
-});
-
-test('a difference inside the band is ON_TRACK, not behind', () => {
-  const stamp = source({ kind: 'EDGENUITY_PROGRESS_EMAIL', isLive: false });
-  const pace = coursePace(
-    course({
-      actualProgressPercent: { value: 56, source: stamp },
-      targetProgressPercent: { value: 57, source: stamp },
-    }),
-    NOW,
-  );
-  assert.equal(pace.status, 'ON_TRACK');
-  assert.ok(ON_PACE_BAND > 0);
-});
-
-test('EdgeEX is never given classic Edgenuity’s verdict as official', () => {
-  const pace = coursePace(course({ product: 'EDGEEX' }), NOW);
-  assert.equal(pace.official, false);
-  assert.equal(pace.product, 'EDGEEX');
-});
-
-test('a missing target produces UNKNOWN rather than a guess', () => {
-  const pace = coursePace(course({ targetProgressPercent: undefined }), NOW);
-  assert.equal(pace.status, 'UNKNOWN');
-  assert.equal(pace.deltaPercent, undefined);
-});
-
-test('stale course data produces UNKNOWN, not a pace', () => {
-  const old = source({
-    kind: 'EDGENUITY_PROGRESS_EMAIL',
-    isLive: false,
-    lastSyncedAt: iso(NOW - 20 * DAY),
-  });
-  const pace = coursePace(course({ stamp: old }), NOW);
-  assert.equal(pace.status, 'UNKNOWN');
-  assert.equal(pace.stale, true);
 });
 
 /* ------------------------------------------------------------------ */
@@ -276,44 +205,12 @@ test('a hand-typed due date is trusted, because the student set it themselves', 
   assert.equal(report.confidence, 'low');
 });
 
-test('one stale feed alongside fresh data still answers the question', () => {
-  const stale = source({ kind: 'EDGENUITY_PROGRESS_EMAIL', lastSyncedAt: iso(NOW - 20 * DAY) });
-  const report = computePace({
-    state: stateWith({
-      assignments: [assignment({ dueIn: -HOUR })],
-      courses: [course({ stamp: stale })],
-    }),
-    now: NOW,
-  });
-  assert.equal(report.status, 'BEHIND');
-  assert.equal(report.staleSources.length, 1, 'and it names the stale one');
-});
 
-test('a course behind pace is BEHIND with a way back, not a scolding', () => {
-  const stamp = source({ kind: 'EDGENUITY_PROGRESS_EMAIL', isLive: false });
-  const report = computePace({
-    state: stateWith({
-      courses: [
-        course({
-          actualProgressPercent: { value: 40, source: stamp },
-          targetProgressPercent: { value: 57, source: stamp },
-        }),
-      ],
-    }),
-    now: NOW,
-  });
-  assert.equal(report.status, 'BEHIND');
-  const prose = report.reasons.map((r) => r.text).join(' ');
-  for (const word of ['failing', 'lazy', 'should have', 'disappointing']) {
-    assert.ok(!prose.toLowerCase().includes(word), `pace copy must not say "${word}"`);
-  }
-});
 
-test('everything due soon finished, and a course ahead, is AHEAD', () => {
+test('everything due soon finished is AHEAD', () => {
   const report = computePace({
     state: stateWith({
       assignments: [assignment({ dueIn: 3 * HOUR, status: 'Completed', completedAt: iso(NOW) })],
-      courses: [course()],
     }),
     now: NOW,
   });
@@ -363,7 +260,7 @@ test('every status has a label the UI can render', () => {
 });
 
 test('the engine is pure — the same inputs give the same report', () => {
-  const state = stateWith({ assignments: [assignment()], courses: [course()] });
+  const state = stateWith({ assignments: [assignment()] });
   const a = computePace({ state, now: NOW });
   const b = computePace({ state, now: NOW });
   assert.deepEqual(a, b);

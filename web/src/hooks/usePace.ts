@@ -10,29 +10,23 @@
 import { useMemo } from 'react';
 import { useApp } from '../store/context';
 import { computePace } from '../lib/pace/engine';
-import { coursePace } from '../lib/pace/courses';
-import type { CoursePace, PaceReport } from '../types/pace';
+import type { PaceReport } from '../types/pace';
 
 /** Rounded down to the minute, so the memo key changes 60× less often. */
 function minuteOf(now: number): number {
   return Math.floor(now / 60_000);
 }
 
-export function usePace(): { report: PaceReport; courses: CoursePace[]; now: number } {
+export function usePace(): { report: PaceReport; now: number } {
   const { state, now } = useApp();
   const minute = minuteOf(now);
 
   const report = useMemo(
     () => computePace({ state, now: minute * 60_000 }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.assignments, state.integrations.courses, minute],
+    [state.assignments, minute],
   );
 
-  const courses = useMemo(
-    () => state.integrations.courses.map((course) => coursePace(course, minute * 60_000)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.integrations.courses, minute],
-  );
 
-  return { report, courses, now };
+  return { report, now };
 }

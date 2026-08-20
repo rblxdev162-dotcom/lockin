@@ -8,9 +8,8 @@
  * photos, keystrokes or location, because those are the things that would turn
  * accountability into surveillance.
  *
- * Note what is *not* here: the minimum Edgenuity proof strength. That already
- * exists as `settings.edgenuityProofMode` (Phase 5) and the Parent Dashboard
- * edits it directly rather than keeping a second copy that could disagree.
+ * Note what is *not* here: a second copy of any student setting. The dashboard
+ * edits the real one or nothing, so the two can never disagree.
  */
 
 /* ------------------------------------------------------------------ */
@@ -27,7 +26,8 @@
 export interface ParentControls {
   /**
    * Verification-strength settings need the PIN to change.
-   * Covers the global Edgenuity proof mode and any per-assignment requirement.
+   * Locks the blocking master switch. Refused by the reducer, not merely
+   * hidden by the UI — see `PROTECTED_SETTING_KEYS`.
    */
   lockVerificationSettings: boolean;
   /**
@@ -52,7 +52,17 @@ export function defaultParentControls(): ParentControls {
 }
 
 /** Settings a locked device refuses to change without the PIN. */
-export const PROTECTED_SETTING_KEYS = ['edgenuityProofMode'] as const;
+/**
+ * Settings a parent can lock.
+ *
+ * The entry was the Edgenuity proof mode until Phase 17. Rather than leave the
+ * mechanism guarding nothing, it now guards the setting a student in Strict
+ * mode is most likely to reach for: the master switch that turns website
+ * blocking off. `protectBlocklistInStrictMode` already stops them editing
+ * *which* sites are blocked; without this, switching blocking off entirely was
+ * still one toggle away.
+ */
+export const PROTECTED_SETTING_KEYS = ['blockingEnabled'] as const;
 export type ProtectedSettingKey = (typeof PROTECTED_SETTING_KEYS)[number];
 
 /* ------------------------------------------------------------------ */

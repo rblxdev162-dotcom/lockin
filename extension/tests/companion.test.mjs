@@ -64,6 +64,11 @@ globalThis.chrome = {
     WINDOW_ID_NONE: -1,
     onFocusChanged: { addListener: (fn) => (listeners.windows.focus = fn) },
   },
+  alarms: {
+    async create() {},
+    async clear() {},
+    onAlarm: { addListener: () => {} },
+  },
 };
 
 const activity = await import('../background/activity.js');
@@ -323,4 +328,75 @@ test('nothing fires for work long past due', async () => {
   await reminders.setSchedule([item({ dueAt: new Date(NOW - 20 * 60 * MINUTE).toISOString() })]);
   const result = await reminders.runReminderCheck(NOW);
   assert.equal(result.fired, 0, 'that has stopped being a reminder');
+});
+
+/* ------------------------------------------------------------------ */
+/* The Canvas calendar: cadence and the startup tab                    */
+/* ------------------------------------------------------------------ */
+
+const calendar = await import('../background/calendar.js');
+
+test('the feed is checked every 30 minutes by default', async () => {
+  const config = await calendar.getCalendarConfig();
+  assert.equal(config.refreshMinutes, 30);
+  // And the view the page sees agrees, so the UI cannot claim a cadence the
+  // alarm is not actually running at.
+  assert.equal(calendar.toCalendarView(config).refreshMinutes, 30);
+});
+
+test('a feed URL is validated before it is ever stored', () => {
+  assert.equal(calendar.validateFeedUrl('').ok, false);
+  assert.equal(calendar.validateFeedUrl('not a url').reason, 'not-a-url');
+  assert.equal(calendar.validateFeedUrl('http://school.instructure.com/f.ics').reason, 'not-https');
+  // A "feed" pointing at this machine is a way to make the extension probe it.
+  assert.equal(calendar.validateFeedUrl('https://127.0.0.1/f.ics').reason, 'private-host');
+  // `localhost` has no dot, so it is refused a step earlier — a refusal either
+  // way, which is what matters.
+  assert.equal(calendar.validateFeedUrl('https://localhost/f.ics').ok, false);
+  assert.equal(calendar.validateFeedUrl('https://school.instructure.com/f.ics').ok, true);
+});
+
+test('the view the page receives has no field for the feed URL', async () => {
+  await calendar.configureCalendar('https://school.instructure.com/feeds/calendars/user_SECRET.ics');
+  const view = calendar.toCalendarView(await calendar.getCalendarConfig());
+
+  assert.equal(view.configured, true);
+  assert.equal(view.host, 'school.instructure.com');
+  assert.ok(!JSON.stringify(view).includes('SECRET'), 'the secret must not cross the boundary');
+  assert.equal(view.url, undefined);
+});
+
+test('opening Canvas at startup is on by default, and can be switched off', async () => {
+  await calendar.configureCalendar('https://school.instructure.com/f.ics');
+  assert.equal(calendar.toCalendarView(await calendar.getCalendarConfig()).openCanvasOnStartup, true);
+
+  await calendar.setCalendarOptions({ openCanvasOnStartup: false });
+  assert.equal(
+    calendar.toCalendarView(await calendar.getCalendarConfig()).openCanvasOnStartup,
+    false,
+  );
+});
+
+test('options cannot be used to swap the feed URL behind the validation', async () => {
+  await calendar.configureCalendar('https://school.instructure.com/f.ics');
+  await calendar.setCalendarOptions({ url: 'https://evil.example/f.ics', host: 'evil.example' });
+  const config = await calendar.getCalendarConfig();
+  assert.equal(config.host, 'school.instructure.com', 'only named options are settable');
+});
+
+test('a refresh cadence from the page is clamped to something sane', async () => {
+  await calendar.configureCalendar('https://school.instructure.com/f.ics');
+  await calendar.setCalendarOptions({ refreshMinutes: 1 });
+  assert.ok((await calendar.getCalendarConfig()).refreshMinutes >= 15);
+
+  await calendar.setCalendarOptions({ refreshMinutes: 99999 });
+  assert.ok((await calendar.getCalendarConfig()).refreshMinutes <= 1440);
+});
+
+test('disconnecting removes the URL rather than blanking it', async () => {
+  await calendar.configureCalendar('https://school.instructure.com/f.ics');
+  await calendar.disconnectCalendar();
+  // The whole key is gone, so no storage snapshot can still contain it.
+  const raw = await chrome.storage.local.get('lockin_calendar');
+  assert.equal(raw.lockin_calendar, undefined);
 });

@@ -488,7 +488,8 @@ async function main() {
     migrated?.schemaVersion === CURRENT_SCHEMA_VERSION,
     String(migrated?.schemaVersion),
   );
-  check('the Edgenuity slice was added by the upgrade', !!migrated?.edgenuity);
+  // Phase 17 removed that slice again; the migration chain must drop it.
+  check('the Edgenuity slice is gone after the upgrade', migrated?.edgenuity === undefined);
   check('profile survived', migrated?.profile?.firstName === 'Jordan');
   check('assignments survived with their fields', migrated?.assignments?.[0]?.title === 'Legacy Essay' &&
     migrated.assignments[0].loggedMinutes === 45 && migrated.assignments[0].priority === 'Important');

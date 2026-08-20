@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useApp } from './store/context';
 import { useTheme } from './hooks/useTheme';
 import { useReminders } from './hooks/useReminders';
+import { useCanvasAutoSync } from './hooks/useCanvasAutoSync';
 import { Shell } from './components/layout/Shell';
 import { RouteErrorBoundary } from './components/layout/ErrorBoundary';
 import { Toaster } from './components/ui/Toast';
@@ -46,6 +47,8 @@ function ParentRoute() {
 export default function App() {
   useTheme();
   useReminders();
+  // Folds the extension's cached Canvas feed in on load and every 30 minutes.
+  useCanvasAutoSync();
 
   return (
     <>

@@ -169,7 +169,7 @@ Do these with the mouse **unplugged**, or your hands off it.
       block page, and the extension popup.
 - [ ] Nothing is unreadable in either theme.
 
-### 17 · Phase 16: the Canvas calendar feed
+### 17 · Canvas: the feed, and what it keeps up to date
 
 Needs a real Canvas account and the Companion installed.
 
@@ -187,19 +187,23 @@ Needs a real Canvas account and the Companion installed.
       not be there. Export your data and search that too.
 - [ ] Disconnect. The assignments stay.
 
-### 18 · Phase 16: Edgenuity import
+### 17b · Canvas: automatic, and graded status
 
-- [ ] Save a real Edgenuity progress email as `.html` and import it.
-      Every course and every percentage matches the email.
-- [ ] If it reads nothing, that is the expected failure for a first real
-      report — note which labels the email actually uses, so the matchers in
-      `lib/edgenuity/progressEmail.ts` can be adjusted.
-- [ ] Import a downloaded course report. Activities and dates match.
-- [ ] Progress page: each course shows current versus target, and
-      "Where this came from" names the right source per field.
-- [ ] Import the same file twice. Nothing duplicates.
+- [ ] Leave LockIn open for half an hour with the feed connected. It syncs on
+      its own — check Activity for the entry, with no button pressed.
+- [ ] Quit Chrome entirely and reopen it. A Canvas tab opens in the background
+      and closes itself within a minute or two; the assignment list is current.
+- [ ] Assignments page: work Canvas has marked reads **Graded**, work you have
+      handed in but is unmarked reads **Submitted**, work you ticked off here
+      reads **Done**, and anything Canvas flags reads **Missing**.
+- [ ] Integrations → Canvas → turn the background-tab toggle off. Restart
+      Chrome: no tab opens, and the feed still syncs.
+- [ ] Sort check: something overdue sits above something due today, which sits
+      above next week — regardless of priority.
+- [ ] **By class**: the columns are one per class, and the class with the most
+      urgent work is leftmost.
 
-### 19 · Phase 16: reminders and the popup
+### 18 · Reminders and the popup
 
 - [ ] Close every LockIn tab. A reminder still arrives.
 - [ ] It has **Start Focus** and **Snooze 20m** buttons.
@@ -210,15 +214,6 @@ Needs a real Canvas account and the Companion installed.
       Idle: the next assignment and a Start Focus button.
 - [ ] Extension options page opens and reports today's counters.
 
-### 20 · Phase 16: the School Companion (only where allowed)
-
-- [ ] Confirm first that installing an extension on the school profile is
-      permitted. If it is not, stop — that is the answer.
-- [ ] Integrations → School Companion → Show pairing code.
-- [ ] In the school profile, load `school-companion/` unpacked, tick the
-      authorization box, paste the code, enable it, press **Test now**.
-- [ ] LockIn shows it reporting while an Edgenuity tab is in front.
-- [ ] Revoke pairing in LockIn. The companion's next test says unauthorized.
 
 ---
 

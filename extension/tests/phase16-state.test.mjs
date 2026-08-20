@@ -70,7 +70,7 @@ test('an existing v8 save file migrates without losing anything', () => {
         },
       },
     ],
-    settings: { reminderMode: 'Focused', edgenuityBridgeEnabled: true, blockedDomains: ['youtube.com'] },
+    settings: { reminderMode: 'Focused', blockedDomains: ['youtube.com'] },
     exams: [],
     activity: [],
     completedSessions: [],
@@ -104,27 +104,18 @@ test('an existing v8 save file migrates without losing anything', () => {
   );
 
   assert.equal(state.settings.reminderMode, 'Focused', 'settings survive');
-  assert.equal(state.settings.edgenuityBridgeEnabled, undefined, 'the dead flag is gone');
   assert.ok(Array.isArray(state.integrations.records), 'integrations exist');
-  assert.deepEqual(state.integrations.courses, []);
+  assert.equal(state.edgenuity, undefined, 'the Edgenuity slice is gone');
 });
 
-test('the two authorization-blocked integrations can never claim to be connected', () => {
+test('the authorization-blocked integration can never claim to be connected', () => {
   localStorageShim({
     schemaVersion: storage.SCHEMA_VERSION,
-    integrations: {
-      records: [
-        { id: 'canvas_oauth', status: 'connected' },
-        { id: 'edgenuity_api', status: 'connected' },
-      ],
-      courses: [],
-    },
+    integrations: { records: [{ id: 'canvas_oauth', status: 'connected' }] },
   });
   const state = storage.load();
-  for (const id of ['canvas_oauth', 'edgenuity_api']) {
-    const record = state.integrations.records.find((r) => r.id === id);
-    assert.equal(record.status, 'unavailable', `${id} must stay unavailable`);
-  }
+  const record = state.integrations.records.find((r) => r.id === 'canvas_oauth');
+  assert.equal(record.status, 'unavailable', 'canvas_oauth must stay unavailable');
 });
 
 test('a hand-edited save file cannot forge a live source', () => {
@@ -197,10 +188,10 @@ test('an offline sync failure leaves the assignments intact and says so', () => 
 
 test('a stale integration is described as stale, not as connected', () => {
   const source = {
-    kind: 'EDGENUITY_PROGRESS_EMAIL',
-    sourceId: 'e',
+    kind: 'CANVAS_CALENDAR',
+    sourceId: 'feed',
     confidence: 'high',
-    isLive: false,
+    isLive: true,
     rawDataRetained: false,
     lastSyncedAt: iso(NOW - 20 * DAY),
   };
@@ -307,30 +298,3 @@ test('the overdue-free count is capped rather than becoming a streak to protect'
   assert.ok(daysWithoutOverdue(clean, NOW) <= 7);
 });
 
-/* ------------------------------------------------------------------ */
-/* Course state                                                        */
-/* ------------------------------------------------------------------ */
-
-test('removing a course leaves everything else alone', () => {
-  const base = storage.defaultState();
-  const withCourses = reducer(base, {
-    type: 'COURSES_MERGE',
-    summary: 'two courses',
-    courses: [
-      { id: 'c1', provider: 'edgenuity', product: 'EDGENUITY', name: 'Algebra I', activities: [], createdAt: iso(NOW), updatedAt: iso(NOW) },
-      { id: 'c2', provider: 'edgenuity', product: 'EDGEEX', name: 'Biology', activities: [], createdAt: iso(NOW), updatedAt: iso(NOW) },
-    ],
-  });
-  assert.equal(withCourses.integrations.courses.length, 2);
-
-  const after = reducer(withCourses, { type: 'COURSE_REMOVE', courseId: 'c1' });
-  assert.equal(after.integrations.courses.length, 1);
-  assert.equal(after.integrations.courses[0].id, 'c2');
-  assert.equal(after.assignments.length, withCourses.assignments.length);
-});
-
-test('merging an empty course list changes nothing', () => {
-  const base = storage.defaultState();
-  const after = reducer(base, { type: 'COURSES_MERGE', courses: [], summary: 'nothing' });
-  assert.equal(after, base, 'no state churn, and no activity entry for a no-op');
-});

@@ -129,35 +129,6 @@ test('setting a control logs exactly one event, and a no-op logs none', () => {
   assert.equal(again, after, 'setting the same value changes nothing and logs nothing');
 });
 
-test('a locked proof setting refuses to change without approval', () => {
-  let state = reducer(defaultState(), {
-    type: 'PARENT_SET_CONTROLS',
-    patch: { lockVerificationSettings: true },
-  });
-
-  // The student's path: no approval flag.
-  const attempted = reducer(state, {
-    type: 'UPDATE_SETTINGS',
-    patch: { edgenuityProofMode: 'enhanced' },
-  });
-  assert.equal(attempted.settings.edgenuityProofMode, 'standard', 'the reducer refuses it');
-
-  // Unrelated settings in the same patch still go through.
-  const mixed = reducer(state, {
-    type: 'UPDATE_SETTINGS',
-    patch: { edgenuityProofMode: 'enhanced', defaultFocusMinutes: 45 },
-  });
-  assert.equal(mixed.settings.edgenuityProofMode, 'standard');
-  assert.equal(mixed.settings.defaultFocusMinutes, 45, 'ordinary settings are not collateral');
-
-  // The parent's path: approved.
-  const approved = reducer(state, {
-    type: 'UPDATE_SETTINGS',
-    patch: { edgenuityProofMode: 'enhanced' },
-    parentApproved: true,
-  });
-  assert.equal(approved.settings.edgenuityProofMode, 'enhanced');
-});
 
 test('an unlocked device leaves the student in charge of everything', () => {
   const state = defaultState();
@@ -200,24 +171,6 @@ test('normal student actions never need approval, even when locked', () => {
 /* Per-assignment requirements                                         */
 /* ------------------------------------------------------------------ */
 
-test('a parent can raise one assignment’s requirement, and it is logged once', () => {
-  const { state, id } = withAssignment(defaultState());
-  const raised = reducer(state, {
-    type: 'PARENT_SET_ASSIGNMENT_TRUST',
-    assignmentId: id,
-    trust: 'enhanced',
-  });
-
-  assert.equal(find(raised, id).edgenuity.config.requiredVerificationTrust, 'enhanced');
-  assert.equal(raised.activity.filter((e) => e.type === 'parent_requirement_changed').length, 1);
-
-  const again = reducer(raised, {
-    type: 'PARENT_SET_ASSIGNMENT_TRUST',
-    assignmentId: id,
-    trust: 'enhanced',
-  });
-  assert.equal(again, raised, 'setting the same requirement is a no-op');
-});
 
 test('raising the requirement does not re-open already completed work', () => {
   const { state, id } = withAssignment(defaultState());
@@ -406,8 +359,6 @@ test('clearing verification history keeps the schoolwork', () => {
   const cleared = reducer(completed, { type: 'PARENT_CLEAR_HISTORY', scope: 'verification' });
   assert.equal(find(cleared, id).status, 'Completed', 'the assignment is untouched');
   assert.equal(find(cleared, id).verificationRecords.length, 0);
-  assert.deepEqual(cleared.edgenuity.sessions, []);
-  assert.deepEqual(cleared.edgenuity.challenges, []);
   assert.equal(cleared.assignments.length, 1);
 });
 
@@ -501,7 +452,7 @@ test('a realistic v4 (Phase 5) save file upgrades to v5 with everything intact',
         verificationRecords: [
           {
             id: 'ver_2',
-            type: 'edgenuity_photo',
+            type: 'canvas_submission',
             timestamp: 'x',
             status: 'verified',
             progressBefore: 43,
@@ -515,13 +466,6 @@ test('a realistic v4 (Phase 5) save file upgrades to v5 with everything intact',
             },
           },
         ],
-        edgenuity: {
-          config: { targetType: 'progress_percent', requiredProgressDelta: 3, requiredVerificationTrust: 'enhanced' },
-          verifiedProgressDelta: 4,
-          lastVerifiedProgress: 47,
-          verifiedActivities: 0,
-          lastVerifiedTrust: 'enhanced',
-        },
       },
     ],
     exams: [{ id: 'exm_1', name: 'Biology Final', subject: 'Science', examDate: '2026-09-01' }],
@@ -549,27 +493,6 @@ test('a realistic v4 (Phase 5) save file upgrades to v5 with everything intact',
       lastSyncAt: null,
       lastError: null,
     },
-    edgenuity: {
-      sessions: [],
-      challenges: [
-        {
-          id: 'chl_old',
-          assignmentId: 'asg_edg',
-          sessionId: 'edg_1',
-          phase: 'after',
-          type: 'visual_code',
-          valueHash: 'abc123',
-          createdAt: 'x',
-          expiresAt: 'x',
-          status: 'verified',
-          usedAt: 'x',
-          attempts: 1,
-        },
-      ],
-      developerMode: false,
-      cameraPermission: 'granted',
-      ocrEverLoaded: true,
-    },
   };
 
   store.set(STORAGE_KEY, JSON.stringify(v4));
@@ -584,18 +507,20 @@ test('a realistic v4 (Phase 5) save file upgrades to v5 with everything intact',
   assert.equal(loaded.profile.firstName, 'Sam');
   assert.equal(loaded.assignments.length, 2);
   assert.equal(loaded.assignments[0].canvas.submissionStatus, 'graded');
-  assert.equal(loaded.assignments[1].edgenuity.verifiedProgressDelta, 4);
-  assert.equal(loaded.assignments[1].edgenuity.lastVerifiedTrust, 'enhanced');
-  assert.equal(loaded.assignments[1].verificationRecords[0].evidence.trust, 'enhanced');
+  // The Edgenuity link is gone (Phase 17) but the assignment and its own
+  // verification history are not — a removed integration must never take a
+  // student's completion record with it.
+  assert.equal(loaded.assignments[1].edgenuity, undefined);
+  assert.equal(loaded.assignments[1].verificationRecords.length, 1);
+  assert.equal(loaded.assignments[1].platform, 'Other', 'the dead platform is remapped');
   assert.equal(loaded.exams.length, 1);
   assert.equal(loaded.parentPin.hash, 'deadbeef');
   assert.deepEqual(loaded.settings.blockedDomains, ['youtube.com']);
-  assert.equal(loaded.settings.edgenuityProofMode, 'enhanced');
   assert.equal(loaded.activity.length, 1);
   assert.equal(loaded.completedSessions.length, 1);
   assert.equal(loaded.blockStats[0].count, 7);
   assert.equal(loaded.canvas.connection.domain, 'myschool.instructure.com');
-  assert.equal(loaded.edgenuity.challenges.length, 1);
+  assert.equal(loaded.edgenuity, undefined, 'the whole slice is dropped by v10');
 
   // And the Phase 6 slices arrive, permissive and empty.
   assert.deepEqual(loaded.focusRuns, []);

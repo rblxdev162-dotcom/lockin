@@ -27,7 +27,8 @@ import { AssignmentCard } from '../components/features/AssignmentCard';
 import { CanvasCallout } from '../components/features/CanvasCallout';
 import { PaceBadge, SectionHeader, SourceBadge, STATUS_CLASS } from '../components/ui/Status';
 import { TodayPlanCard } from '../components/features/planner/TodayPlanCard';
-import { dueSoon, requiredAssignments } from '../lib/selectors';
+import { requiredAssignments } from '../lib/selectors';
+import { whatToDoNext } from '../lib/workState';
 import { paceHeadline } from '../lib/pace/engine';
 import { classify } from '../lib/sources/freshness';
 import { formatClock, greeting } from '../lib/time';
@@ -40,7 +41,14 @@ export function Dashboard() {
   const { report } = usePace();
   const { feedback, dismiss } = useFeedback();
 
-  const soon = useMemo(() => dueSoon(state, 2, new Date(now)), [state.assignments, now]);
+  /**
+   * Everything still to do, most urgent first.
+   *
+   * `whatToDoNext` orders by urgency band and then strictly by due time, so
+   * this list *is* the answer to "what should I do next" read top to bottom —
+   * missing work, then overdue, then today, then the rest.
+   */
+  const soon = useMemo(() => whatToDoNext(state.assignments, now), [state.assignments, now]);
   const fm = state.focusMode;
   const unlocked = fm.temporaryUnlockUntil !== null && fm.temporaryUnlockUntil > now;
 
@@ -66,7 +74,7 @@ export function Dashboard() {
           </h1>
           <p className={cx('mt-1 flex flex-wrap items-center gap-2', STATUS_CLASS[report.status])}>
             <span className="text-body font-semibold lk-status-text">{paceHeadline(report)}</span>
-            <PaceBadge status={report.status} official={report.official} size="sm" />
+            <PaceBadge status={report.status} size="sm" />
           </p>
         </div>
         <Button
@@ -112,11 +120,11 @@ export function Dashboard() {
       <section aria-labelledby="today-heading">
         <SectionHeader
           id="today-heading"
-          title="Today"
+          title="Up next"
           hint={
             soon.length === 0
-              ? 'Nothing due in the next couple of days.'
-              : `${soon.length} thing${soon.length === 1 ? '' : 's'} due soon.`
+              ? 'Nothing outstanding.'
+              : `${soon.length} thing${soon.length === 1 ? '' : 's'} to do, most urgent first.`
           }
           action={
             <Link
@@ -168,11 +176,6 @@ export function Dashboard() {
             label="Canvas"
             ok={state.integrations.records.find((r) => r.id === 'canvas_calendar')?.status === 'connected'}
             detail={canvasDetail(state, now)}
-          />
-          <ConnectionDot
-            label="Edgenuity"
-            ok={state.integrations.courses.length > 0}
-            detail={edgenuityDetail(state, now)}
           />
           <ConnectionDot
             label="Companion"
@@ -337,8 +340,3 @@ function canvasDetail(state: ReturnType<typeof useApp>['state'], now: number): s
   return classify(source, now).label;
 }
 
-function edgenuityDetail(state: ReturnType<typeof useApp>['state'], now: number): string {
-  const source = state.integrations.courses[0]?.actualProgressPercent?.source;
-  if (!source) return 'Not connected';
-  return classify(source, now).label;
-}

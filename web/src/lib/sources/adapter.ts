@@ -23,7 +23,6 @@
  *  - Claim `isLive` for a file import, however recently the file was made.
  */
 import type { SourceKind, SourceRecord } from '../../types/source';
-import type { CourseProgress } from '../../types/integrations';
 import type { FeedItem } from '../canvas/calendarFeed';
 
 /** Why an adapter cannot run right now. Rendered as a sentence, never a code. */
@@ -36,8 +35,6 @@ export type AdapterUnavailableReason =
 export interface AdapterCapabilities {
   /** Produces dated work items. */
   work: boolean;
-  /** Produces course progress and pacing. */
-  progress: boolean;
   /** Knows whether something was submitted. Only an authorized API can. */
   submissionState: boolean;
   /** Can be refreshed on a timer without the student doing anything. */
@@ -48,8 +45,6 @@ export interface AdapterResult {
   ok: boolean;
   /** Work items, already normalised. Empty for progress-only adapters. */
   items: FeedItem[];
-  /** Course progress, already stamped field by field. */
-  courses: CourseProgress[];
   /** Short and human. Shown to the student verbatim. */
   error?: string;
   /** ISO of the moment the data was obtained. */
@@ -77,7 +72,7 @@ export interface SchoolDataAdapter {
 
 /** The empty result, so no adapter has to build one by hand on a failure. */
 export function emptyResult(error?: string): AdapterResult {
-  return { ok: !error, items: [], courses: [], error, warnings: [] };
+  return { ok: !error, items: [], error, warnings: [] };
 }
 
 /**

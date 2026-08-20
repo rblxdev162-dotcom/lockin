@@ -7,13 +7,12 @@
  * read a status.
  */
 import type { Confidence, SourceKind } from './source';
-import type { CourseProduct } from './integrations';
 
 /**
  * `AHEAD`    — genuinely ahead of where the student needs to be.
  * `ON_TRACK` — nothing is wrong. The most common answer, and it should be.
  * `AT_RISK`  — nothing is late yet, but the next day or two does not fit.
- * `BEHIND`   — something is actually late, or a course is behind its own pace.
+ * `BEHIND`   — something is actually late.
  * `UNKNOWN`  — the data is not good enough to say. **Not a failure state.**
  *
  * `UNKNOWN` exists because the alternative is worse: a student told they are
@@ -34,9 +33,6 @@ export const PACE_REASON_CODES = [
   'overdue_work',
   'due_soon_complete',
   'due_soon_remaining',
-  'course_ahead',
-  'course_behind',
-  'course_on_pace',
   'no_data',
   'stale_data',
   'capacity_tight',
@@ -75,30 +71,8 @@ export interface PaceAction {
 export interface PaceReport {
   status: PaceStatus;
   confidence: Confidence;
-  /**
-   * True only when the *source itself* published this status — an Edgenuity
-   * progress report that says "Behind", for example. False means LockIn worked
-   * it out, and the UI must say so rather than putting words in the vendor's
-   * mouth.
-   */
-  official: boolean;
   reasons: PaceReason[];
   staleSources: StaleSource[];
   suggestedAction: PaceAction;
 }
 
-/** One course's pace, which the overall report folds in. */
-export interface CoursePace {
-  courseId: string;
-  name: string;
-  product: CourseProduct;
-  status: PaceStatus;
-  official: boolean;
-  /** actual − target, in percentage points. Absent when either is unknown. */
-  deltaPercent?: number;
-  actualPercent?: number;
-  targetPercent?: number;
-  /** Already humanised, e.g. "Updated this morning". */
-  freshness: string;
-  stale: boolean;
-}

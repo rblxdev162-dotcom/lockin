@@ -84,6 +84,8 @@ export const MSG = {
   CALENDAR_GET_VIEW: 'CALENDAR_GET_VIEW',
   /** web → ext: fetch now and hand back the raw ICS text for parsing */
   CALENDAR_FETCH: 'CALENDAR_FETCH',
+  /** web → ext: change refresh cadence or the startup behaviour */
+  CALENDAR_SET_OPTIONS: 'CALENDAR_SET_OPTIONS',
   /** web → ext: forget the URL and the cached body entirely */
   CALENDAR_DISCONNECT: 'CALENDAR_DISCONNECT',
   /** ext → web: the reply carrying a calendar view */

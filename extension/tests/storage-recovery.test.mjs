@@ -193,14 +193,13 @@ test('nonsense numbers never become schoolwork facts', () => {
 test('an unknown enum degrades to the safe value, never to something stricter', () => {
   put(
     valid({
-      settings: { ...defaultState().settings, edgenuityProofMode: 'nuclear', reminderMode: 'Extreme' },
+      settings: { ...defaultState().settings, reminderMode: 'Extreme' },
       parentControls: { lockVerificationSettings: 'yes please' },
       planner: { settings: { workloadPreference: 'Maximum', horizonDays: 9999 } },
     }),
   );
   const { state } = loadWithRecovery();
 
-  assert.equal(state.settings.edgenuityProofMode, 'standard', 'never silently strand a student');
   // Parent controls are permissions: an unreadable one is off, because an
   // upgrade must not start demanding a PIN the student never set.
   assert.equal(state.parentControls.lockVerificationSettings, false);
@@ -256,34 +255,6 @@ test('a corrupted plan is dropped while the student’s own edits survive', () =
   );
 });
 
-test('a save file cannot promote a fixture photo into a live capture', () => {
-  put(
-    valid({
-      edgenuity: {
-        sessions: [
-          {
-            id: 'ses_1',
-            assignmentId: 'asg_1',
-            status: 'awaiting_final',
-            startedAt: 'x',
-            expiresAt: 'y',
-            target: { targetType: 'progress_percent', requiredProgressDelta: 5 },
-            before: {
-              capturedAt: 'x',
-              progressPercent: 40,
-              source: 'live_camera_totally_real',
-              trust: 'enhanced',
-              challenge: { matched: true, confidence: 1 },
-            },
-          },
-        ],
-      },
-    }),
-  );
-  const { state } = loadWithRecovery();
-  const before = state.edgenuity.sessions[0].before;
-  assert.equal(before.source, 'fixture', 'anything but exactly "live_camera" reads back as fixture');
-});
 
 /* ------------------------------------------------------------------ */
 /* Migration from every earlier schema                                 */
@@ -307,7 +278,9 @@ test('a save file from every earlier schema loads without losing its assignment'
     assert.equal(state.parentPin.hash, 'h', `v${version} lost the parent PIN`);
     assert.deepEqual(state.settings.blockedDomains, ['youtube.com'], `v${version} lost the blocklist`);
     // Every slice added since must exist, whatever the file knew about.
-    assert.ok(state.canvas && state.edgenuity && state.parentControls && state.planner);
+    assert.ok(state.canvas && state.parentControls && state.planner && state.integrations);
+    // And a slice that was removed stays removed, however old the file is.
+    assert.equal(state.edgenuity, undefined, `v${version} carried the dead Edgenuity slice forward`);
     assert.equal(typeof state.settings.extensionSeen, 'boolean');
   }
 });

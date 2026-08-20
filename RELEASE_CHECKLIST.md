@@ -98,19 +98,20 @@ npm run test:all      # everything, ~10 minutes, needs the dev server on :5173
       (checked by `npm run test:release-e2e`).
 - [ ] Performance budgets met (`npm run test:perf`).
 
-## Phase 16 additions
+## Phase 17 additions
 
-- [ ] `npm run test:pace`, `test:canvas-ics`, `test:edgenuity-import`,
-      `test:companion`, `test:context-bridge` and `test:phase16` all pass.
+- [ ] `npm run test:pace`, `test:worklist`, `test:canvas-ics`,
+      `test:companion` and `test:phase16` all pass.
 - [ ] The packaged zip contains `options/`, `background/calendar.js` and
-      `background/activity.js`, and does **not** contain `school-companion/`
-      or any `edgenuity/` content script.
+      `background/activity.js`, and contains nothing named `edgenuity`.
+- [ ] No `tesseract`, no `web/public/ocr`, no `eng.traineddata` anywhere.
+- [ ] The background Canvas tab opens at startup, closes itself, and does not
+      steal focus. Turning the toggle off really stops it.
 - [ ] A real save file from the previous version opens without losing an
       assignment, and its schema reads 9.
 - [ ] The Canvas feed URL appears nowhere in `localStorage`, in an export, or
       in any error message shown to the student.
-- [ ] The School Companion, if shipped at all, ships disabled with the
-      authorization gate intact.
+
 
 ## Publishing
 

@@ -446,3 +446,101 @@ export async function handleCanvasContentMessage(message, sender) {
 }
 
 export const CANVAS_STORAGE_KEYS = { CONFIG_KEY, CACHE_KEY };
+
+/**
+ * Opens the Canvas dashboard in a background tab so the content script can read
+ * submission status.
+ *
+ * ## Why this exists
+ *
+ * A calendar feed carries due dates and nothing else — it cannot say whether
+ * something was handed in, marked, or missed. The only other way to know is the
+ * Canvas API, which needs a Developer Key a student cannot issue themselves. So
+ * the remaining honest option is to read the page the student is already
+ * entitled to see, in their own logged-in session.
+ *
+ * ## The limits it keeps
+ *
+ *  - **Only Canvas.** The URL is built from the configured domain; nothing a
+ *    caller passes in reaches it.
+ *  - **Only when the student asked for it**, and only when they have already
+ *    granted the Canvas host permission.
+ *  - **Never steals focus** (`active: false`), and never opens a second tab
+ *    while one it opened is still going.
+ *  - **Nothing is fetched by LockIn.** It is an ordinary navigation the
+ *    student's own browser makes.
+ *
+ * ## About closing it again
+ *
+ * Invariant 5 says LockIn never closes a tab. That rule is about never fighting
+ * the student for control of their own browser, and it stands — but it was
+ * written when every tab was one *they* opened. A background tab LockIn opened
+ * itself, unasked and unseen, is the one case where leaving it is the ruder
+ * option. So the invariant is now scoped: **LockIn may close a tab it opened
+ * itself, and only that tab.** The id is recorded, checked before the close,
+ * and forgotten immediately after; if the student adopted the tab and navigated
+ * it somewhere else, the URL check fails and it is left alone.
+ *
+ * The close happens on the next alarm tick rather than a `setTimeout`, because
+ * a service worker can be killed mid-timer and would leave the tab behind.
+ */
+const SYNC_TAB_KEY = 'lockin_canvas_sync_tab';
+
+export async function openCanvasForSync() {
+  const config = await getCanvasConfig();
+  if (!config.domain || !config.permissionGranted) {
+    return { ok: false, reason: 'not-connected' };
+  }
+
+  // Already open? The content script is already reporting, and a second tab
+  // would be pure noise.
+  try {
+    const existing = await chrome.tabs.query({ url: `https://${config.domain}/*` });
+    if (existing.length > 0) return { ok: true, reason: 'already-open' };
+  } catch {
+    /* fall through and open one */
+  }
+
+  try {
+    const tab = await chrome.tabs.create({ url: `https://${config.domain}/`, active: false });
+    await chrome.storage.local.set({
+      [SYNC_TAB_KEY]: { id: tab.id, domain: config.domain, openedAt: Date.now() },
+    });
+    return { ok: true, reason: 'opened' };
+  } catch {
+    return { ok: false, reason: 'open-failed' };
+  }
+}
+
+/**
+ * Closes the tab `openCanvasForSync` opened, if it is still ours.
+ *
+ * Called from the heartbeat, so the worker being killed in between changes
+ * nothing: the record is in storage and the next tick picks it up.
+ */
+export async function closeCanvasSyncTab(now = Date.now()) {
+  let record;
+  try {
+    record = (await chrome.storage.local.get(SYNC_TAB_KEY))[SYNC_TAB_KEY];
+  } catch {
+    return { closed: false };
+  }
+  if (!record || typeof record.id !== 'number') return { closed: false };
+
+  // Give the page a moment to load and report before taking it away.
+  if (now - (record.openedAt ?? 0) < 25_000) return { closed: false, waiting: true };
+
+  await chrome.storage.local.remove(SYNC_TAB_KEY);
+  try {
+    const tab = await chrome.tabs.get(record.id);
+    // Only if it is still the tab we opened. If the student adopted it and
+    // navigated somewhere else, it is theirs now.
+    if (tab?.url && new URL(tab.url).hostname === record.domain) {
+      await chrome.tabs.remove(record.id);
+      return { closed: true };
+    }
+  } catch {
+    /* already gone */
+  }
+  return { closed: false };
+}

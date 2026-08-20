@@ -38,27 +38,6 @@ const HORIZON_MS = 14 * 24 * 60 * 60 * 1000;
 /** Matches the extension's own cap; sending more would only be trimmed there. */
 const MAX_ITEMS = 100;
 
-/**
- * A plain-language clause about falling behind, or undefined.
- *
- * Uses Edgenuity's own target-versus-actual rather than a pace LockIn invents:
- * the course already publishes where the student is supposed to be, and a
- * number the student can check on their own screen is worth more than one only
- * this app believes.
- */
-export function behindClause(state: AppState, assignmentId: string): string | undefined {
-  const assignment = state.assignments.find((a) => a.id === assignmentId);
-  const link = assignment?.edgenuity;
-  if (!link) return undefined;
-
-  const actual = link.lastVerifiedProgress;
-  const target = link.targetProgressPercent;
-  if (typeof actual !== 'number' || typeof target !== 'number') return undefined;
-
-  const gap = Math.round(target - actual);
-  // Ahead of pace, or level with it, is not something to interrupt anyone about.
-  return gap >= 1 ? `Edgenuity says you’re ${gap}% behind target.` : undefined;
-}
 
 export function buildReminderSchedule(state: AppState, now: number): ReminderScheduleItem[] {
   const items: ReminderScheduleItem[] = [];
@@ -81,7 +60,6 @@ export function buildReminderSchedule(state: AppState, now: number): ReminderSch
       first: assignment.reminders.firstReminderMinutes,
       escalation: assignment.reminders.escalationMinutes,
       warning: assignment.reminders.focusWarningMinutes,
-      behind: behindClause(state, assignment.id),
     });
   }
 

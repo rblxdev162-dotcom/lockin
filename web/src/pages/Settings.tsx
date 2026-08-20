@@ -13,7 +13,6 @@ import { DataPanel } from '../components/features/DataPanel';
 import { BrowserProtectionSetup } from '../components/features/BrowserProtectionSetup';
 import { BlockingConsent } from '../components/features/BlockingConsent';
 import { CanvasSettings } from '../components/features/CanvasSettings';
-import { EdgenuitySettings } from '../components/features/EdgenuitySettings';
 import { CanvasImportModal } from '../components/features/CanvasImportModal';
 import { ParentPinDialog } from '../components/features/ParentPinDialog';
 import { toast } from '../components/ui/Toast';
@@ -326,8 +325,6 @@ export function SettingsPage() {
       <CanvasSettings onOpenImport={() => setImportOpen(true)} />
       <CanvasImportModal open={importOpen} onClose={() => setImportOpen(false)} />
 
-      {/* ---------------- Edgenuity ---------------- */}
-      <EdgenuitySettings />
 
       {/* ---------------- Blocked websites ---------------- */}
       <Card>

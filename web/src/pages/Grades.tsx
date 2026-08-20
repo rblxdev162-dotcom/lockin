@@ -72,7 +72,7 @@ export function Grades() {
         <EmptyState
           icon={<Icon name="badge" size={28} />}
           title="No grades read yet"
-          hint="Open Canvas, go to Grades — either the all-courses list or one class — and press Check Canvas. LockIn reads the page you have open and never opens Canvas itself."
+          hint="Open a class in Canvas and click Grades, then press Check Canvas. The all-classes page gives class totals only; a class's own Grades page is what says which work is done, late or missing."
           action={<CheckCanvasButton size="md" />}
         />
       ) : (

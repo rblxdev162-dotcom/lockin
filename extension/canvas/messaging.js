@@ -183,6 +183,12 @@ export function validateDetectionMessage(raw, expectedDomain) {
     for (const [key, value] of Object.entries(raw.diagnostics)) {
       if (typeof value === 'boolean') diagnostics[key.slice(0, 30)] = value;
       else if (Number.isFinite(value)) diagnostics[key.slice(0, 30)] = Math.min(99999, Number(value));
+      else if (typeof value === 'string') {
+        // Only `linkShapes`: paths with every number already replaced by `N`.
+        // The alphabet is the guarantee — no page text can ride through here.
+        const text = value.slice(0, 200);
+        if (/^[/A-Za-z0-9_ .-]*$/.test(text)) diagnostics[key.slice(0, 30)] = text;
+      }
     }
   }
 

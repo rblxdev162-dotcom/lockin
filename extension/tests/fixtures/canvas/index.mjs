@@ -434,11 +434,11 @@ const allGradesModern = canvasShell({
   <h1>Grades</h1>
   <div class="grades-list">
     <div class="course-card">
-      <div class="course-card__title"><a href="/courses/${MATH.id}">${MATH.name}</a></div>
+      <div class="course-card__title"><a href="/courses/${MATH.id}/grades/10364">${MATH.name}</a></div>
       <div class="course-card__grade"><span>93.75%</span><span>A</span></div>
     </div>
     <div class="course-card">
-      <div class="course-card__title"><a href="/courses/303">Museum Studies</a></div>
+      <div class="course-card__title"><a href="/courses/303/grades/10364">Museum Studies</a></div>
       <div class="course-card__grade"><span>88.2%</span><span>B+</span></div>
     </div>
     <div class="course-card">

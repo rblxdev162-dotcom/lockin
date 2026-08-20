@@ -72,7 +72,8 @@ export function CheckCanvasButton({
             explain(preview)
           ) : (
             <>
-              Open Canvas → <strong>Grades</strong>, then press this.
+              Open a class → <strong>Grades</strong> for what's done, or{' '}
+              <strong>/grades</strong> for class totals, then press this.
               {lastRead && <> Last read {relativeTime(lastRead, new Date(now))}.</>}
             </>
           )}

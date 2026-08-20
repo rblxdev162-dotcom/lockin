@@ -480,6 +480,13 @@ function sanitizeDiagnostics(raw) {
   for (const [key, value] of Object.entries(raw)) {
     if (typeof value === 'boolean') out[key.slice(0, 30)] = value;
     else if (Number.isFinite(value)) out[key.slice(0, 30)] = Math.min(99999, Number(value));
+      else if (typeof value === 'string') {
+        // One field is a string: `linkShapes`, which is path shapes with every
+        // number already replaced by `N`. Constrained to that alphabet so no
+        // page text can ride through this channel.
+        const text = value.slice(0, 200);
+        if (/^[/A-Za-z0-9_ .-]*$/.test(text)) out[key.slice(0, 30)] = text;
+      }
   }
   return out;
 }

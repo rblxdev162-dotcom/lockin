@@ -143,7 +143,25 @@ export function describeSync(view: CanvasExtensionView | null): {
     return {
       ok: false,
       message:
-        'Read your Canvas dashboard, which carries no scores. Open Canvas → Grades, then press Check Canvas again.',
+        'Read your Canvas dashboard, which carries no scores. Open a class → Grades, then press Check Canvas again.',
+    };
+  }
+
+  /**
+   * The all-courses page gives class totals and nothing else.
+   *
+   * Worth saying out loud, because the guidance here was wrong for days: `/grades`
+   * lists one row per class, so it can never say whether a particular
+   * assignment was handed in, marked or missed. That lives on a *class's* own
+   * Grades page, `/courses/<id>/grades`. Reporting "done" after reading the
+   * summary page is how a student ends up staring at finished work still
+   * listed as not done.
+   */
+  if (sync.pageKind === 'grades_all' && (sync.updated ?? 0) === 0) {
+    return {
+      ok: true,
+      message:
+        'Class grades updated. For which assignments are done, late or missing, open one class → Grades and press again.',
     };
   }
 

@@ -752,7 +752,16 @@ export function parseCanvasAllGradesPage(doc, baseUrl) {
     } catch {
       continue;
     }
-    const match = absolute.pathname.match(/^\/courses\/(\d+)(?:\/grades)?\/?$/);
+    /**
+     * Any link into a course counts as that course.
+     *
+     * This demanded the path *end* at `/courses/<id>` or `/courses/<id>/grades`.
+     * On the real page every link carried more — a student id, a tab, a
+     * submission — so all ten were rejected and the page read as empty. The
+     * course id is the only part that identifies anything; whatever follows it
+     * is Canvas's business, not this parser's.
+     */
+    const match = absolute.pathname.match(/^\/courses\/(\d+)(?:\/|$)/);
     if (!match) continue;
     const courseId = match[1];
     if (courseId.length > LIMITS.MAX_ID_LENGTH) continue;
@@ -804,13 +813,41 @@ export function parseCanvasAllGradesPage(doc, baseUrl) {
   return {
     assignments: [],
     grades: [...grades.values()],
-    diagnostics: {
-      courseLinks: doc.querySelectorAll('a[href*="/courses/"]').length,
-      rowsFound: grades.size,
-      withGrade: [...grades.values()].filter((g) => !g.totalsHidden).length,
-      tables: doc.querySelectorAll('table').length,
-      percentOnPage: percentIn(clean(contentRoot(doc).textContent, 8000)) !== null,
-    },
+    diagnostics: gradesPageDiagnostics(doc, baseUrl, grades),
+  };
+}
+
+/**
+ * What this page looked like, in a form safe to write to disk.
+ *
+ * Counts, booleans, and **path shapes with every number replaced by `N`** —
+ * so `/courses/25741/grades/10364` is recorded as `/courses/N/grades/N`. That
+ * is enough to write a selector against and carries no ids, no names, and no
+ * scores. Added because a page that answers and yields nothing is otherwise
+ * invisible, and guessing at its markup wasted days.
+ */
+function gradesPageDiagnostics(doc, baseUrl, grades) {
+  const shapes = new Set();
+  for (const anchor of doc.querySelectorAll('a[href*="/courses/"]')) {
+    try {
+      const path = new URL(anchor.getAttribute('href'), baseUrl).pathname;
+      shapes.add(path.replace(/\d+/g, 'N').slice(0, 60));
+    } catch {
+      /* not a URL we can read */
+    }
+    if (shapes.size >= 8) break;
+  }
+
+  const text = clean(contentRoot(doc).textContent, 8000);
+  return {
+    courseLinks: doc.querySelectorAll('a[href*="/courses/"]').length,
+    rowsFound: grades.size,
+    withGrade: [...grades.values()].filter((g) => !g.totalsHidden).length,
+    tables: doc.querySelectorAll('table').length,
+    rows: doc.querySelectorAll('tr').length,
+    percentOnPage: percentIn(text) !== null,
+    letterOnPage: letterIn(text) !== null,
+    linkShapes: [...shapes].join(' '),
   };
 }
 

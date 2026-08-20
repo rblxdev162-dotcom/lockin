@@ -24,10 +24,10 @@ import { applyRules, isBlockingActive, effectiveBlocklist } from './rules.js';
 import { getState, setState, getStats, recordBlock, clearStats } from './storage.js';
 import { CANVAS_MSG } from '../canvas/messaging.js';
 import {
-  closeCanvasSyncTab,
   configureCanvas,
+  canvasGate,
   disconnectCanvas,
-  openCanvasForSync,
+  setCheckWindow,
   getCanvasView,
   handleCanvasContentMessage,
   openCanvasUrl,
@@ -159,8 +159,11 @@ async function reassertCalendarAlarm() {
 async function startupSync() {
   const config = await getCalendarConfig();
   if (!config.url) return;
+  // Even the startup catch-up asks the gate. Chrome starting is not consent,
+  // and 8am on a school day is exactly when it must not fetch.
+  const gate = await canvasGate('automatic');
+  if (!gate.allowed) return;
   await runCalendarRefresh();
-  if (config.openCanvasOnStartup !== false) await openCanvasForSync();
 }
 
 // If the student revokes Canvas access from chrome://extensions, stop the
@@ -179,12 +182,15 @@ chrome.alarms.onAlarm.addListener((alarm) => {
    * times a day, not 1,440.
    */
   if (alarm.name === CALENDAR_ALARM) {
-    void runCalendarRefresh();
+    // The feed refresh is Canvas traffic like any other, so it goes through
+    // the same gate: off entirely in manual mode, and never during configured
+    // school hours.
+    void canvasGate('automatic').then((gate) => {
+      if (gate.allowed) return runCalendarRefresh();
+      return undefined;
+    });
   }
   if (alarm.name === HEARTBEAT_ALARM) {
-    // The background Canvas tab, if one is open, gets taken away here rather
-    // than on a timer — a worker killed mid-`setTimeout` would leave it behind.
-    void closeCanvasSyncTab();
     // Reminders ride the existing one-minute heartbeat rather than adding an
     // alarm of their own; the check is a storage read and some arithmetic.
     // `studyPresence` is passed in so a student already working is not
@@ -265,8 +271,15 @@ async function handlePageMessage(envelope, sender) {
     }
 
     case MSG.CANVAS_SYNC: {
-      const result = await syncCanvasNow();
+      // `override` is the student's second, explicit press after a refusal —
+      // "I am not at school right now". It is honoured and it is logged.
+      const result = await syncCanvasNow({ override: envelope.payload?.override === true });
       return { type: MSG.CANVAS_VIEW, payload: { ...(await getCanvasView()), sync: result } };
+    }
+
+    case MSG.CANVAS_SET_WINDOW: {
+      await setCheckWindow(envelope.payload?.window);
+      return { type: MSG.CANVAS_VIEW, payload: await getCanvasView() };
     }
 
     case MSG.CANVAS_DISCONNECT: {

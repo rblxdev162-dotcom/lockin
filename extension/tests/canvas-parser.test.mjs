@@ -343,6 +343,86 @@ async function main() {
     courses.some((c) => c.originalName === 'MATH-7-P3-26-27-SMITH'),
   );
 
+  /* ---- Grades pages (Phase 18) ---- */
+  console.log('\nGrades pages');
+  const gradebook = await inPage(
+    browser,
+    `https://${CANVAS_HOST}/courses/101/grades`,
+    `({ parser }) => parser.parseCanvasPage(document, location.href)`,
+  );
+  const row = (title) => gradebook.assignments.find((a) => a.title === title);
+
+  check('the gradebook is recognised as its own page kind', gradebook.pageKind === 'grades');
+  check(
+    'every row is identified from its href, not its text',
+    gradebook.assignments.every((a) => /^\d+$/.test(a.externalAssignmentId)),
+    JSON.stringify(gradebook.assignments.map((a) => a.externalAssignmentId)),
+  );
+  check(
+    'a marked row reads as graded, with its score and points',
+    row('Chapter 7 Homework')?.submissionStatus === 'graded' &&
+      row('Chapter 7 Homework')?.score === 18 &&
+      row('Chapter 7 Homework')?.pointsPossible === 20,
+    JSON.stringify(row('Chapter 7 Homework')),
+  );
+  check(
+    '"Score unavailable" is submitted, NOT graded',
+    row('Unit 3 Practice')?.submissionStatus === 'submitted' &&
+      row('Unit 3 Practice')?.score === undefined,
+    JSON.stringify(row('Unit 3 Practice')),
+  );
+  check(
+    'a missing row stays missing even with a dash in the score cell',
+    row('Graphing Worksheet')?.submissionStatus === 'missing',
+    JSON.stringify(row('Graphing Worksheet')),
+  );
+  check(
+    'an excused row is settled and says so in words',
+    row('Field Trip Reflection')?.submissionStatus === 'graded' &&
+      row('Field Trip Reflection')?.scoreText === 'Excused',
+    JSON.stringify(row('Field Trip Reflection')),
+  );
+  check(
+    'a row with nothing on it stays unknown rather than guessing',
+    row('Quiz Corrections')?.submissionStatus === 'unknown',
+    JSON.stringify(row('Quiz Corrections')),
+  );
+  check(
+    'the course total is read from the sidebar',
+    gradebook.grades[0]?.currentScore === 93.75 && gradebook.grades[0]?.totalsHidden === false,
+    JSON.stringify(gradebook.grades),
+  );
+
+  const hidden = await inPage(
+    browser,
+    `https://${CANVAS_HOST}/courses/202/grades`,
+    `({ parser }) => parser.parseCanvasPage(document, location.href)`,
+  );
+  check(
+    'a hidden total is recorded as hidden, never as a number',
+    hidden.grades[0]?.totalsHidden === true && hidden.grades[0]?.currentScore === null,
+    JSON.stringify(hidden.grades),
+  );
+
+  const all = await inPage(
+    browser,
+    `https://${CANVAS_HOST}/grades`,
+    `({ parser }) => parser.parseCanvasPage(document, location.href)`,
+  );
+  check('the all-courses grades page is its own kind', all.pageKind === 'grades_all');
+  const math = all.grades.find((g) => g.externalCourseId === '101');
+  const english = all.grades.find((g) => g.externalCourseId === '202');
+  check(
+    'each class row yields its course id and published grade',
+    math?.currentScore === 93.75 && math?.currentGrade === 'A',
+    JSON.stringify(all.grades),
+  );
+  check(
+    'a class with no published grade is hidden, not zero',
+    english?.totalsHidden === true && english?.currentScore === null,
+    JSON.stringify(english),
+  );
+
   browser.close();
 }
 

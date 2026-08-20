@@ -69,6 +69,8 @@ const BRIDGE_ROUTES = new Set([
   '/api/canvas/feed',
   /** page → here: forget the URL entirely */
   '/api/canvas/disconnect',
+  /** page → here: the school-hours window this service must also obey */
+  '/api/canvas/window',
 ]);
 
 export function bridgeCallerAllowed(headers, port = PORT) {
@@ -99,6 +101,36 @@ function sendJson(res, status, body) {
  * which is the student's own data and the whole point; `/status` returns the
  * host and some timestamps.
  */
+/**
+ * A small JSON body, or null.
+ *
+ * Capped hard: this server is on loopback but it is still a server, and an
+ * unbounded body read is an unbounded body read.
+ */
+function readJson(req, limit = 4096) {
+  return new Promise((resolve) => {
+    let body = '';
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      body += chunk;
+      if (body.length > limit) {
+        tooLarge = true;
+        body = '';
+      }
+    });
+    req.on('end', () => {
+      if (tooLarge) return resolve(null);
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        resolve(null);
+      }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
 async function handleCanvas(pathname, req, res) {
   if (pathname === '/api/canvas/status' && req.method === 'GET') {
     sendJson(res, 200, canvasFeed.toView());
@@ -109,6 +141,13 @@ async function handleCanvas(pathname, req, res) {
     const force = new URL(req.url, `http://localhost:${PORT}`).searchParams.get('force') === '1';
     const result = await canvasFeed.fetchFeed({ force });
     sendJson(res, 200, { ...result, view: canvasFeed.toView() });
+    return;
+  }
+
+  if (pathname === '/api/canvas/window' && req.method === 'POST') {
+    const parsed = await readJson(req);
+    canvasFeed.setCheckWindow(parsed?.window);
+    sendJson(res, 200, { ok: true, view: canvasFeed.toView() });
     return;
   }
 

@@ -20,6 +20,7 @@ import { MSG, checkCompatibility } from '../lib/protocol';
 import { toBridgeState } from '../lib/selectors';
 import { canvasProvider, sanitizeView } from '../lib/canvas/pageProvider';
 import { applyCanvasView } from '../lib/canvas/reconcile';
+import { setServiceCheckWindow } from '../lib/canvas/serviceFeed';
 import { buildReminderSchedule, scheduleKey } from '../lib/reminderSchedule';
 
 const CHANNEL_NAME = 'lockin-sync';
@@ -122,6 +123,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (ok) setLastSyncedAt(Date.now());
     return ok;
   }, []);
+
+  /**
+   * The Canvas check window has to exist on the extension's side too.
+   *
+   * The gate must be able to refuse a reading when no LockIn tab is open — a
+   * setting only the page knows about is not a guarantee, it is a hope. The
+   * app is the source of truth and pushes a copy whenever it changes.
+   */
+  const checkWindow = state.settings.canvasCheckWindow;
+  useEffect(() => {
+    if (extStatus === 'connected') void canvasProvider.setCheckWindow(checkWindow);
+    // The local service gets its own copy: it keeps fetching with Chrome
+    // closed, so the window has to exist on that side too. Returns false and
+    // costs nothing when the service is not installed.
+    void setServiceCheckWindow(checkWindow);
+  }, [checkWindow, extStatus]);
 
   /**
    * Records a successful handshake.

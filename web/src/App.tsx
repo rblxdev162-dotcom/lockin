@@ -16,6 +16,7 @@ import { FocusPage } from './pages/Focus';
 import { PlannerPage } from './pages/Planner';
 import { ActivityPage } from './pages/Activity';
 import { ProgressPage } from './pages/Progress';
+import { Grades } from './pages/Grades';
 import { IntegrationsPage } from './pages/Integrations';
 import { SettingsPage } from './pages/Settings';
 import { PrivacyPage } from './pages/Privacy';
@@ -92,6 +93,14 @@ export default function App() {
           element={
             <Protected>
               <PlannerPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/grades"
+          element={
+            <Protected>
+              <Grades />
             </Protected>
           }
         />

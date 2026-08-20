@@ -38,6 +38,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 12 | **Screen-capture proofs** — sharing the Edgenuity window for OCR | **Removed in Phase 17** |
 | 11 | **Edgenuity browser reading** — read course progress off the Edgenuity page the student opens | **Removed in Phase 16** |
 | 17 | **Canvas only** — Edgenuity scrapped, 30-minute auto-sync, graded-vs-undone, urgency ordering, class columns, and a large deletion pass | **Done** |
+| 18 | **The Grades page reader** — read the Canvas page the student opened, class grades, the school-hours gate, and the layout pass | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -54,6 +55,7 @@ Tagline: *Finish what matters before distractions take over.*
 | Release safety: packaging, versions, export secrets, no-network | 17 | `npm run test:release` |
 | Performance budgets on a 100-assignment dataset | 7 | `npm run test:perf` |
 | **Provenance + Pace Engine** | 20 | `npm run test:pace` |
+| **The Canvas gate, its 3 mirrors, grades** | 21 | `npm run test:canvas-grades` |
 | **Work states, urgency, class grouping** | 16 | `npm run test:worklist` |
 | **Canvas ICS: parser, mapper, reconciler** | 36 | `npm run test:canvas-ics` |
 | **Companion: activity, cooldowns, calendar** | 28 | `npm run test:companion` |
@@ -64,10 +66,10 @@ dev server on `:5173`:
 
 | Suite | Checks | Command |
 | --- | --- | --- |
-| Canvas parser (real DOM, in Node) | 28 | `npm run test:parser` |
+| Canvas parser + Grades pages (real DOM) | 40 | `npm run test:parser` |
 | Phase 2 blocking e2e | 26 | `npm run test:e2e` |
 | Canvas e2e | 57 | `npm run test:canvas-e2e` |
-| Parent Dashboard e2e (PIN, controls, enforcement) | 51 | `npm run test:parent-e2e` |
+| Parent Dashboard e2e (PIN, controls, enforcement) | **BROKEN** | `npm run test:parent-e2e` |
 | Planner e2e (plan → start → partial → recalculate) | 54 | `npm run test:planner-e2e` |
 | **Release e2e** (production build + packaged zip) | 22 | `npm run test:release-e2e` |
 | **Accessibility e2e** (names, focus, keyboard, 320–768px, 200% zoom) | 40 | `npm run test:a11y-e2e` |
@@ -81,6 +83,15 @@ directly — Node strips the types, and `extension/tests/ts-resolve.mjs` resolve
 the extensionless imports. They therefore test the shipping modules, not copies.
 
 If a suite says the debug port is in use: `pkill -f "Chrome for Testing"`.
+
+**`test:parent-e2e` does not run at all, and has not since Phase 17.** It
+imports `extension/tests/edgenuity-fixtures.mjs`, which that phase deleted, and
+about a third of its checks exercise features that no longer exist (the camera
+proof flow, Enhanced trust, the `edgenuity` slice). It fails at import, so
+`npm run test:all` cannot be green until it is either rewritten around the PIN /
+controls / enforcement checks that are still meaningful, or retired. Verified
+pre-existing on `5264871`, before Phase 18. **The Parent Dashboard itself is
+fine** — this is dead test code, not a broken feature.
 
 **Known flake:** `test:parent-e2e` and the Edgenuity suites drive real OCR over
 rendered fixtures. A capture occasionally needs its retry budget and, rarely,
@@ -250,7 +261,32 @@ one.
     `missing` are distinct states and must stay distinct — collapsing them into
     a tick box is what made the old list unable to answer "what have I got
     left?". Canvas's own word always outranks LockIn's inference.
-34. **A removed integration never takes history with it.** Migrations may drop
+34. **LockIn makes no request to Canvas.** It reads pages the student opened,
+    on the student's press. No `/api/v1/` call, no access token, no session
+    used as an authentication mechanism, no background tab, no poller that is
+    on by default, and never a quiz or assessment page. If a future phase needs
+    more than the rendered page gives, the answer is to ask the district — not
+    to find a cleverer way in.
+35. **One gate, in front of every Canvas path.** `canvasGateAllows()` in
+    `extension/background/canvas.js`, `evaluateCheckWindow()` in
+    `web/src/lib/canvas/checkWindow.ts`, and `autoFetchAllowed()` in
+    `scripts/canvas-feed.mjs` are three copies of one rule, pinned against each
+    other by a ~1,000-case test. Adding a Canvas code path that does not ask
+    first is the bug this invariant exists to make obvious. When it says no,
+    **zero** Canvas activity happens — not less, none — and the decision is
+    logged either way, because a guarantee nobody can check is a promise, not a
+    guarantee.
+36. **The copy never claims more than the gate enforces.** LockIn cannot know
+    when a test is happening; it knows the hours it was told about. The
+    sentence is *"Automatic Canvas checks are disabled during your configured
+    school hours"*, in onboarding, in Settings, in the refusal toast and in the
+    log — and nothing stronger anywhere.
+37. **A grade is never computed.** Every percentage was printed on a page the
+    student opened. A class whose total Canvas hides says so; averaging the
+    assignments LockIn happens to know about would be most wrong exactly when
+    it matters most. Scores are display data and can never promote a submission
+    status.
+38. **A removed integration never takes history with it.** Migrations may drop
     a slice, a link or a setting; they may not drop a `verificationRecords`
     entry, a completion, or logged minutes.
 
@@ -294,7 +330,11 @@ one.
 | Connections and course progress | `types/integrations.ts` |
 | **Ahead / on track / behind** | `lib/pace/engine.ts` |
 | **What state work is in, and its order** | `lib/workState.ts` |
-| Canvas auto-sync every 30 minutes | `hooks/useCanvasAutoSync.ts` |
+| Canvas auto-sync (gated; off by default) | `hooks/useCanvasAutoSync.ts` |
+| **When Canvas may be touched at all** | `lib/canvas/checkWindow.ts` |
+| The Check Canvas action | `hooks/useCanvasCheck.ts`, `components/features/CheckCanvasButton.tsx` |
+| Class grades model | `types/grades.ts` |
+| Grades page and its settings | `pages/Grades.tsx`, `components/features/CanvasCheckSettings.tsx` |
 | iCalendar parser | `lib/ics/parse.ts` |
 | Canvas feed → items, and the diff | `lib/canvas/calendarFeed.ts`, `lib/canvas/calendarReconcile.ts` |
 | Canvas feed client (no URL ever) | `lib/canvas/calendarClient.ts` |
@@ -319,7 +359,10 @@ one.
 | **The same, via the local service** | `scripts/canvas-feed.mjs` |
 | Which transport answers | `lib/canvas/feedTransport.ts` |
 | The page's side of the service | `lib/canvas/serviceFeed.ts` |
-| Background Canvas tab for status | `background/canvas.js` → `openCanvasForSync()` |
+| **The gate** | `background/canvas.js` → `canvasGate()` |
+| Grades-page parsers | `canvas/parser.js` → `parseCanvasGradesPage`, `parseCanvasAllGradesPage` |
+| Window rule (extension mirror) | `canvas/checkWindow.js` |
+| Window rule (service mirror) | `scripts/canvas-feed.mjs` → `autoFetchAllowed()` |
 | Activity awareness (metadata only) | `background/activity.js` |
 | **The one notification door** | `background/reminders.js` → `deliver()` |
 | Companion settings page | `options/options.{html,js,css}` |
@@ -342,8 +385,133 @@ one.
 ⚠️ `web/src/lib/domains.ts` ↔ `extension/shared/domains.js` and
 `web/src/lib/canvas/verification.ts` ↔ `extension/canvas/status.js` are
 hand-synced mirrors (the extension has no build step). Change both together.
+Since Phase 18 there is a third, and it is a safety rule:
+`web/src/lib/canvas/checkWindow.ts` ↔ `extension/canvas/checkWindow.js` ↔
+`autoFetchAllowed()` in `scripts/canvas-feed.mjs`. All three are run over the
+same matrix by `npm run test:canvas-grades`.
 
 ---
+
+## Phase 18 — The Grades page reader (done)
+
+### The bug that started it, and what it turned out to be
+
+"LockIn can't tell what's already graded and done." True, and for two reasons
+that had to be found by looking at the machine rather than the code:
+
+1. The Canvas connection on this install is the **calendar feed**, through the
+   local service (`~/.lockin/canvas-feed.json`). An ICS feed carries a title
+   and a due date. It has never carried submission status and never will.
+2. The Phase 3 page reader — the only thing that *could* answer — lives in the
+   extension, and **the extension was not installed in any Chrome profile.**
+   Which also meant website blocking had never actually run, on the machine
+   this whole project was built for.
+
+So the feature was not broken; it had no path to the data at all.
+
+### The approach, and the two it beat
+
+The student made the call, and it is the right one:
+
+| Option | Why not |
+| --- | --- |
+| Canvas REST API with a student access token | The district **disables student token generation**. Dead on arrival. |
+| Canvas API with the logged-in session cookie | Would probably work — it is what the Canvas UI does — but Canvas's *documented* auth is OAuth2/tokens, so this is using a session as an undocumented API credential. Defensible right up until somebody asks. |
+| **Read the rendered Grades page** | The student opened it themselves. LockIn issues no request at all. The explanation is one sentence: *"I opened my own Grades page after school and my local study app organised what was on it."* |
+
+The third one also happens to be *sufficient*: Canvas's student Grades page
+carries, per assignment, the name, due date, status, score and points possible,
+and the all-courses screen carries the current grade per class. That is
+everything the app wanted from the API.
+
+### The gate is the load-bearing part
+
+The student takes proctored tests at school on a district Chromebook while
+LockIn runs at home. The requirement was not "be careful", it was "nothing of
+mine is talking to the school's Canvas during a test". Hence invariant 35: one
+function, in front of every path, three copies pinned by a test.
+
+Three things follow, and each was a deliberate choice rather than a default:
+
+- **`mode: 'manual'` ships.** Automatic polling of a school system is the part
+  nobody has authorised, so it is off until the student turns it on.
+- **The service obeys the window too.** `scripts/canvas-feed.mjs` is a
+  LaunchAgent: it kept fetching every 30 minutes, school hours included, with
+  every browser closed. A gate that lived only in the page would have been a
+  promise that holds only while LockIn is open. A service that was never told
+  the window **does not fetch at all** — silence is not permission.
+- **A refusal is overridable, once, explicitly, and logged.** LockIn does not
+  know the timetable; refusing a student who is home sick on a Tuesday would be
+  the app deciding it knows better. "I'm not at school — check anyway" is one
+  extra press and an activity-log line.
+
+### What was deleted
+
+- `openCanvasForSync()` and `closeCanvasSyncTab()`, the background Canvas tab,
+  and the `openCanvasOnStartup` setting — **removed, not switched off**, along
+  with its toggle and its test. A setting that still exists but controls
+  nothing is worse than none: the UI keeps a promise the code no longer keeps.
+- The 30-minute Canvas alarm's unconditional fire. It now asks the gate, and in
+  the shipped default the answer is always no.
+- `syncCanvasNow()` messaged *every* open Canvas tab. It now messages **the
+  active tab only**, and refuses politely if that tab is not Canvas. Reading
+  the page in front of the student is the entire claim; it should be true by
+  construction.
+
+### The two new parsers
+
+`classifyCanvasUrl` already returned `kind: 'grades'` for
+`/courses/:id/grades` — it just fell through to the generic link harvester.
+Phase 18 adds `grades_all` for `/grades`, and:
+
+- **`parseCanvasGradesPage`** — `#grades_summary`, row by row. Identity still
+  comes from the href (rule 1 of that file). `graded` is asserted **only** when
+  a real score cell is present; `-`, an empty cell and Canvas's "Score
+  unavailable" screenreader text all fall back to the status pills, and to
+  `unknown` when those say nothing. An excused row is settled and carries the
+  word "Excused" rather than a number.
+- **`parseCanvasAllGradesPage`** — one row per class. Written tolerantly (this
+  page's markup varies more), and cells containing the course-name link are
+  excluded from the grade scan so a class called "Algebra 100%" cannot be read
+  as a grade.
+
+Both are tested against fixture pages in a real browser
+(`npm run test:parser`, +12 checks), because they work on documents.
+
+### Grades in the app
+
+`types/grades.ts` + a `grades` slice + one reducer action, deliberately
+touching no assignment: a percentage is not a completion, and routing it
+through the verification path would make a number capable of ending Focus Mode.
+
+`formatScore` truncates rather than rounds — 89.95% shows as 89.9%, because a
+student reading "90%" and being contradicted by Canvas has been misled by
+LockIn.
+
+### Layout
+
+Nav six → five (Progress folds into Home, Integrations into Settings, both
+routes still live). Assignment tabs took the vocabulary students already read
+daily — Canvas's own widget filters by Missing/Upcoming, Google Classroom's
+tabs are Assigned/Missing/Done — so `Next up`/`Overdue` became
+**To do**/**Missing**. Home's Connections section became one quiet line: it had
+a heading, a card and a "Manage" link, which gave plumbing the same weight as
+the work.
+
+### Things that will bite you
+
+- **`grades` is a whole new slice, so schema v11.** The migration is additive
+  and sets the window to the conservative default, which means an existing
+  install *stops* its 30-minute feed refresh on upgrade rather than inheriting
+  an automatic behaviour nobody chose. That is intended.
+- **Three copies of the window rule.** Web (TS, source of truth), extension
+  (JS, no build step), service (JS, LaunchAgent). Change one, change all three;
+  `extension/tests/canvas-grades.test.mjs` runs the matrix and will fail loudly.
+- **The service's `checkWindow` is pushed by the page**, on every load and on
+  every change (`/api/canvas/window`). Until it arrives, the service refuses to
+  auto-fetch.
+- The passive observer now stops itself when the background refuses a passive
+  read, so "only when I press the button" costs nothing while idle.
 
 ## Phase 17 — Canvas only (done)
 

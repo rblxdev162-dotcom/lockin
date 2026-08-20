@@ -19,6 +19,8 @@ import { useCanvas } from '../hooks/useCanvas';
 import { CanvasLinkModal } from '../components/features/CanvasLinkModal';
 import { QuickAdd } from '../components/features/QuickAdd';
 import { CanvasCallout } from '../components/features/CanvasCallout';
+import { CheckCanvasButton } from '../components/features/CheckCanvasButton';
+import { formatScore, hasPublishedTotal } from '../types/grades';
 
 const ALL = 'All';
 
@@ -27,12 +29,18 @@ const ALL = 'All';
  *
  * These replaced a status dropdown and a priority dropdown. A dropdown makes
  * you name the thing you want before you can see it; a tab shows you what is
- * there. `Next up` is first and is the default, because "what do I do now" is
+ * there. `To do` is first and is the default, because "what do I do now" is
  * the question the page is opened to answer.
+ *
+ * Phase 18 took the wording from the two systems students already read every
+ * day — Canvas's own coursework widget filters by Missing / Upcoming, and
+ * Google Classroom's tabs are Assigned / Missing / Done. Inventing a fifth
+ * vocabulary for the same four ideas costs recognition and buys nothing.
+ * `Missing` still means "late or unhanded-in", which is what it means in both.
  */
 const VIEWS = [
-  { id: 'next', label: 'Next up' },
-  { id: 'overdue', label: 'Overdue' },
+  { id: 'next', label: 'To do' },
+  { id: 'overdue', label: 'Missing' },
   { id: 'upcoming', label: 'Upcoming' },
   { id: 'done', label: 'Done' },
 ] as const;
@@ -59,7 +67,7 @@ function viewOf(assignment: Assignment, now: number): ViewId {
 /** Empty states say what is true, not that a filter returned nothing. */
 const EMPTY_TITLES: Record<ViewId, string> = {
   next: 'Nothing to do right now',
-  overdue: 'Nothing overdue',
+  overdue: 'Nothing missing',
   upcoming: 'Nothing coming up',
   done: 'Nothing finished yet',
 };
@@ -164,6 +172,24 @@ export function AssignmentsPage() {
   const filtersOn = platform !== ALL || priority !== ALL || query.trim() !== '';
 
   /**
+   * A class's current grade, matched by the Canvas course name LockIn stored
+   * when it read the Grades page. Matched on the name because that is what the
+   * column is keyed by; no match simply shows nothing, which is the right
+   * answer for a class that was typed in by hand.
+   */
+  const gradeFor = (subject: string) => {
+    const grade = state.grades.courses.find(
+      (g) => g.courseName && g.courseName.toLowerCase() === subject.toLowerCase(),
+    );
+    if (!grade || !hasPublishedTotal(grade)) return null;
+    return (
+      <span className="mr-2 font-bold lk-strong">
+        {grade.currentScore !== null ? formatScore(grade.currentScore) : grade.currentGrade}
+      </span>
+    );
+  };
+
+  /**
    * One row, wired the same way in both layouts.
    *
    * Written once rather than duplicated per layout: the list and the columns
@@ -203,7 +229,7 @@ export function AssignmentsPage() {
             {buckets.next.length + buckets.overdue.length + buckets.upcoming.length} unfinished
           </p>
         </div>
-
+        <CheckCanvasButton showStatus={false} />
       </header>
 
       <CanvasCallout />
@@ -374,6 +400,11 @@ export function AssignmentsPage() {
                       {group.subject}
                     </h3>
                     <span className="shrink-0 text-caption tabular-nums lk-muted">
+                      {/* The class's own grade, when one has been read. It
+                          belongs here rather than only on /grades: "how am I
+                          doing in this class" and "what do I owe it" are the
+                          same glance. */}
+                      {gradeFor(group.subject)}
                       {group.assignments.length}
                     </span>
                   </div>

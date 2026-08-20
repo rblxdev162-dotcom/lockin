@@ -19,6 +19,7 @@
  * and it does not care which browser profile is in front.
  */
 import { readFeed } from './calendarFeed';
+import type { CanvasCheckWindow } from './checkWindow';
 import type { FeedReadResult } from './calendarFeed';
 
 export interface ServiceFeedView {
@@ -98,6 +99,21 @@ export async function serviceAvailable(): Promise<boolean> {
 export async function getServiceView(): Promise<ServiceFeedView | null> {
   const raw = await call('/api/canvas/status');
   return raw === null ? null : sanitizeServiceView(raw);
+}
+
+/**
+ * Tells the local service which hours it may fetch in.
+ *
+ * The service is a LaunchAgent: it keeps running with every browser closed,
+ * so a gate that only existed in the page would be a promise that holds only
+ * while LockIn is open. Pushed whenever the setting changes, and on load.
+ */
+export async function setServiceCheckWindow(window: CanvasCheckWindow): Promise<boolean> {
+  const raw = await call('/api/canvas/window', {
+    method: 'POST',
+    body: JSON.stringify({ window }),
+  });
+  return raw !== null;
 }
 
 export interface ServiceConnectResult {

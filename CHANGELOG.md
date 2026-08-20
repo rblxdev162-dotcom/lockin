@@ -3,6 +3,64 @@
 User-visible changes only. Internal architecture and phase history live in
 `HANDOFF.md`.
 
+## 1.5.0
+
+### LockIn can finally tell what you've already handed in
+
+Your Canvas connection is a **calendar feed**, and a calendar feed carries a
+title and a due date and nothing else — no submission status, no scores. So
+everything looked permanently undone, however much you'd handed in.
+
+Now: open Canvas, go to **Grades** — either the all-classes list or one class —
+and press **Check Canvas**. LockIn reads the page that is already on your
+screen and fills in what's *submitted*, *graded*, *missing*, *excused*, and the
+actual scores.
+
+It does that by reading the page you opened. It does **not** call the Canvas
+API, use an access token, poll anything, or open Canvas in a background tab.
+Nothing is sent anywhere.
+
+### Grades for every class
+
+A new **Grades** page: each class with the grade Canvas publishes for it,
+oldest-first by need (the class that wants attention is at the top), and the
+marked work behind each one with its score out of the points possible.
+
+Where your teacher has totals switched off, LockIn says *"Canvas isn't
+publishing a total for this class"* rather than working one out. It never
+computes a grade — every number here was printed on a page you opened.
+
+Your class grade also shows on the Assignments class columns, and there's a
+one-line grades strip on Home.
+
+### Nothing touches Canvas during your school hours
+
+There is now a single rule in front of **everything** Canvas-shaped: reading a
+page, refreshing your calendar, the startup catch-up, all of it.
+
+- **Automatic checks are off out of the box.** LockIn reads Canvas when you
+  press the button, and at no other time.
+- **Automatic Canvas checks are disabled during your configured school hours** —
+  set in onboarding and changeable in Settings → Canvas checks. This applies to
+  the local service too, which keeps running with Chrome closed.
+- Not at school on a weekday? A refused check offers **"I'm not at school —
+  check anyway"**, and that override is written to your activity log.
+- **Pause for an hour / until tomorrow**, whenever you want.
+- Every decision — allowed or refused — is logged, so you can show exactly when
+  LockIn did and did not read Canvas.
+
+The background Canvas tab from 1.4.0 is **gone**, not switched off.
+
+### A calmer layout
+
+- Five things in the nav instead of six: Home, Assignments, **Grades**, Plan,
+  Focus. Progress and Integrations moved one tap away; every old link still
+  works.
+- Assignment tabs now use the words Canvas and Google Classroom already use:
+  **To do · Missing · Upcoming · Done**.
+- Home lost the Connections card — connection state is one quiet line at the
+  bottom, and the banner still shouts when something is actually wrong.
+
 ## 1.4.1
 
 ### Connecting Canvas actually works now

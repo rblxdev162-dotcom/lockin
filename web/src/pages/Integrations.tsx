@@ -17,7 +17,7 @@ import type { ReactNode } from 'react';
 import { useApp } from '../store/context';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Field, TextInput, Toggle } from '../components/ui/Field';
+import { Field, TextInput } from '../components/ui/Field';
 import { Icon } from '../components/ui/Icon';
 import type { IconName } from '../components/ui/Icon';
 import { Modal } from '../components/ui/Modal';
@@ -25,7 +25,7 @@ import { toast } from '../components/ui/Toast';
 import { SectionHeader } from '../components/ui/Status';
 import { cx } from '../lib/cx';
 import { relativeAge } from '../lib/sources/freshness';
-import { readCalendarFile, setCalendarOptions } from '../lib/canvas/calendarClient';
+import { readCalendarFile } from '../lib/canvas/calendarClient';
 import {
   FEED_MESSAGES,
   connectFeed,
@@ -405,25 +405,18 @@ function CanvasCard() {
           />
         </div>
 
-        {view?.configured && view.transport === 'extension' && (
+        {view?.configured && (
           <div className="mt-3.5 space-y-2.5 border-t lk-border pt-3">
             <p className="text-caption lk-muted">
-              LockIn checks your feed every 30 minutes on its own, and once when
-              Chrome starts.
+              Your feed is fetched on a timer only when automatic checks are
+              switched on, and never during your school hours. Set both in
+              Settings → Canvas checks.
             </p>
-            <Toggle
-              checked={view.openCanvasOnStartup}
-              onChange={(on) => {
-                void setCalendarOptions({ openCanvasOnStartup: on }).then(refresh);
-              }}
-              label="Open Canvas in the background to check what's graded"
-            />
             <p className="text-caption lk-muted">
               A calendar feed says when work is due but never whether it was
-              handed in. With this on, the Companion opens your Canvas dashboard
-              in a background tab at startup and reads submitted / graded /
-              missing status from your own session. It closes the tab
-              afterwards, and it only ever opens Canvas.
+              handed in. That comes from opening Canvas → Grades yourself and
+              pressing <strong>Check Canvas</strong> — LockIn reads the page in
+              front of you and never opens Canvas on its own.
             </p>
           </div>
         )}

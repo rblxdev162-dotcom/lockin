@@ -7,6 +7,8 @@
  */
 
 import type { CanvasLink, CanvasState } from './canvas';
+import type { CanvasCheckWindow } from '../lib/canvas/checkWindow';
+import type { GradesState } from './grades';
 import type { FocusRun, ParentControls } from './parent';
 import type { PlannerState } from './planner';
 import type { IntegrationsState } from './integrations';
@@ -293,6 +295,17 @@ export interface Settings {
    * has to be remembered as one.
    */
   blockingAsked: boolean;
+  /**
+   * When LockIn is allowed to touch Canvas at all (schema v11).
+   *
+   * The student takes proctored tests at school on a district device while
+   * this app runs at home, and nobody should have to explain why their home
+   * computer was talking to the school's Canvas mid-assessment. So the answer
+   * is not "be careful": one gate decides, every Canvas path asks it first,
+   * and it ships in `manual` mode where nothing at all happens unless the
+   * student presses the button. See `lib/canvas/checkWindow.ts`.
+   */
+  canvasCheckWindow: CanvasCheckWindow;
 }
 
 /* ------------------------------------------------------------------ */
@@ -338,6 +351,10 @@ export const ACTIVITY_TYPES = [
   'feed_assignment_updated',
   'feed_assignment_cancelled',
   'course_progress_updated',
+  /* --- Canvas grades and the check gate (Phase 18) --- */
+  'canvas_grades_read',
+  'canvas_check_refused',
+  'canvas_check_override',
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -383,4 +400,6 @@ export interface AppState {
   planner: PlannerState;
   /** Connections to school systems, and the courses they describe (schema v9). */
   integrations: IntegrationsState;
+  /** Class grades read off the Canvas Grades page (schema v11). */
+  grades: GradesState;
 }

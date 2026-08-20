@@ -275,7 +275,12 @@ async function main() {
   execFileSync('npm', ['run', 'build'], { cwd: ROOT, stdio: 'pipe' });
   check('`npm run build` produced web/dist', existsSync(join(DIST, 'index.html')));
   check('no test fixtures were copied into it', !existsSync(join(DIST, 'fixtures')));
-  check('the OCR engine is bundled with it', existsSync(join(DIST, 'ocr')));
+  // Phase 17 deleted the OCR engine along with everything Edgenuity. This
+  // check used to assert the opposite and kept passing on a stale `web/dist`
+  // left over from before that deletion — a clean build is what exposed it.
+  // Inverted rather than removed: 5MB of language data reappearing in a
+  // release is exactly the kind of thing a release suite exists to catch.
+  check('the deleted OCR engine is not shipped', !existsSync(join(DIST, 'ocr')));
 
   /* --- 2. Package the extension for that origin ---------------------- */
   console.log('\nExtension packaging');

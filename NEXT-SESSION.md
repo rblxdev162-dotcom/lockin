@@ -39,13 +39,16 @@ says so.
 | `/exams` | Exams |
 | `/focus` | Focus timer + Focus Mode controls |
 | `/activity` | Activity log |
-| `/settings` | Blocking, Canvas, Edgenuity, parent PIN, **your data** |
+| `/grades` | Class grades read off your Canvas Grades page |
+| `/settings` | Blocking, Canvas, **Canvas checks (school hours)**, parent PIN, **your data** |
 | `/help` | Help, known limits, About + versions |
 | `/privacy` | What is stored, what is discarded, what is sent |
 | `/parent` | Parent Dashboard (PIN-gated, no student shell) |
 
-Camera note: Edgenuity verification needs a secure context. `localhost:5173` is
-fine; a LAN address like `192.168.1.5:5173` is not, and Settings says so.
+Canvas note: LockIn reads the Canvas **Grades** page you have open when you
+press **Check Canvas**, and nothing else. It makes no request to Canvas, and
+every path is behind the school-hours gate in `web/src/lib/canvas/checkWindow.ts`
+(mirrored into the extension and the local service). It ships manual-only.
 
 Dev shortcut (dev builds only): `lockinSeed()` in the browser console writes a
 realistic test profile; `lockinSeed.clear()` wipes it.

@@ -13,6 +13,7 @@ import { DataPanel } from '../components/features/DataPanel';
 import { BrowserProtectionSetup } from '../components/features/BrowserProtectionSetup';
 import { BlockingConsent } from '../components/features/BlockingConsent';
 import { CanvasSettings } from '../components/features/CanvasSettings';
+import { CanvasCheckSettings } from '../components/features/CanvasCheckSettings';
 import { CanvasImportModal } from '../components/features/CanvasImportModal';
 import { ParentPinDialog } from '../components/features/ParentPinDialog';
 import { toast } from '../components/ui/Toast';
@@ -323,6 +324,7 @@ export function SettingsPage() {
 
       {/* ---------------- Canvas ---------------- */}
       <CanvasSettings onOpenImport={() => setImportOpen(true)} />
+      <CanvasCheckSettings />
       <CanvasImportModal open={importOpen} onClose={() => setImportOpen(false)} />
 
 

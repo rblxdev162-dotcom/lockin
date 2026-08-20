@@ -437,6 +437,7 @@ export function parseCanvasCourses(doc, baseUrl) {
 export function parseCanvasPage(doc, baseUrl) {
   const info = classifyCanvasUrl(baseUrl);
   let assignments = [];
+  let grades = [];
 
   switch (info.kind) {
     case 'assignment':
@@ -452,8 +453,22 @@ export function parseCanvasPage(doc, baseUrl) {
     case 'assignments_index':
       assignments = parseCanvasAssignmentsPage(doc, baseUrl);
       break;
+    case 'grades': {
+      // The one page that carries status AND scores for a whole class.
+      const read = parseCanvasGradesPage(doc, baseUrl);
+      assignments = read.assignments;
+      grades = read.grades;
+      // A gradebook with no readable rows is still a course page; fall back
+      // rather than reporting the page unreadable.
+      if (assignments.length === 0) assignments = parseCanvasCoursePage(doc, baseUrl);
+      break;
+    }
+    case 'grades_all': {
+      const read = parseCanvasAllGradesPage(doc, baseUrl);
+      grades = read.grades;
+      break;
+    }
     case 'course':
-    case 'grades':
       assignments = parseCanvasCoursePage(doc, baseUrl);
       break;
     default:
@@ -469,8 +484,246 @@ export function parseCanvasPage(doc, baseUrl) {
     pageKind: info.kind,
     assignments: assignments.slice(0, LIMITS.MAX_ASSIGNMENTS_PER_MESSAGE),
     courses,
-    readable: assignments.length > 0 || courses.length > 0,
+    grades: grades.slice(0, LIMITS.MAX_COURSES_PER_MESSAGE),
+    readable: assignments.length > 0 || courses.length > 0 || grades.length > 0,
   };
 }
 
 export { mergeStatus };
+
+/* ------------------------------------------------------------------ */
+/* Grades pages                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ## Why the Grades page is the good one to read
+ *
+ * Every other Canvas page tells you a *little* about status: a pill here, a
+ * due date there. The student Grades page is the one screen where Canvas lays
+ * out, per assignment and in a table it has emitted the same way for years:
+ * the name, the due date, the submission status, the score and the points
+ * possible. Reading the page the student deliberately opened gives LockIn
+ * everything it needs while making zero requests of its own — no API call, no
+ * token, no background tab, nothing to explain.
+ *
+ * Rule 1 of this file still holds: identity comes from the href
+ * (`/courses/:id/assignments/:id`), never from the row's text.
+ *
+ * ## What "graded" is allowed to mean here
+ *
+ * Only a row with a real score cell. An empty score, a dash, "-", or Canvas's
+ * "Score unavailable" screenreader text is **not** graded — those rows fall
+ * back to whatever the status pills say, and to `unknown` if they say nothing.
+ * A false "graded" would settle an assignment the student still has to do,
+ * which is the one failure mode invariant 3 exists to prevent.
+ */
+
+/** Canvas renders "Score unavailable"/"-" for ungraded rows. Neither is a score. */
+function parseScoreCell(cell) {
+  if (!cell) return { score: null, text: '' };
+
+  // The visible number, with any screenreader-only prose removed first.
+  const clone = cell.cloneNode(true);
+  for (const hidden of clone.querySelectorAll('.screenreader-only, .hidden, [aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  const scoped = firstMatch(clone, ['.grade', '.score_value', '.what_if_score']) || clone;
+  const text = clean(scoped.textContent, 40);
+
+  if (!text || /^[-–—]$/.test(text)) return { score: null, text: '' };
+  if (/score unavailable|not yet graded|no score/i.test(text)) return { score: null, text: '' };
+  if (/^ex$|^excused$/i.test(text)) return { score: null, text: 'Excused', excused: true };
+
+  const match = text.match(/-?\d+(\.\d+)?/);
+  if (!match) {
+    // A letter or complete/incomplete grade is still a real mark.
+    if (/^(complete|incomplete|[A-F][+-]?)$/i.test(text)) return { score: null, text };
+    return { score: null, text: '' };
+  }
+  const score = Number(match[0]);
+  return Number.isFinite(score) ? { score, text } : { score: null, text: '' };
+}
+
+function parsePointsCell(cell) {
+  if (!cell) return undefined;
+  const match = clean(cell.textContent, 40).match(/\d+(\.\d+)?/);
+  if (!match) return undefined;
+  const points = Number(match[0]);
+  return Number.isFinite(points) && points >= 0 && points < 100000 ? points : undefined;
+}
+
+/** A percentage anywhere in a blob of text: "Total: 93.75%" → 93.75. */
+function percentIn(text) {
+  const match = clean(text, 200).match(/(\d{1,3}(?:\.\d+)?)\s*%/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value >= 0 && value <= 1000 ? value : null;
+}
+
+/** A letter grade standing on its own: A, B+, C-, F, and pass/fail wording. */
+function letterIn(text) {
+  const value = clean(text, 60);
+  const match = value.match(/\b([A-F][+-]?|Pass|Fail|Complete|Incomplete)\b/);
+  return match ? match[1] : null;
+}
+
+/**
+ * `/courses/:id/grades` — the table, plus the course total in the sidebar.
+ *
+ * @returns {{ assignments: object[], grades: object[] }}
+ */
+export function parseCanvasGradesPage(doc, baseUrl) {
+  const info = classifyCanvasUrl(baseUrl);
+  const courseId = info.courseId;
+  const assignments = [];
+
+  const table = doc.querySelector('#grades_summary') || contentRoot(doc);
+  const rows = table.querySelectorAll('tr.student_assignment, tr[id^="submission_"]');
+
+  for (const row of rows) {
+    if (assignments.length >= LIMITS.MAX_ASSIGNMENTS_PER_MESSAGE) break;
+
+    const anchor = row.querySelector('th a[href], td a[href], a[href]');
+    const ids = anchor ? idsFromHref(anchor.getAttribute('href'), baseUrl) : null;
+    if (!ids) continue;
+
+    const title = clean(anchor.getAttribute('aria-label') || anchor.textContent, LIMITS.MAX_TITLE_LENGTH);
+    if (!title) continue;
+
+    const scoreCell = row.querySelector('.assignment_score, .score, td.grade');
+    const { score, text: scoreText, excused } = parseScoreCell(scoreCell);
+    const pointsPossible = parsePointsCell(row.querySelector('.points_possible'));
+
+    // Status: the row's own pills and status cell first, then the score.
+    const statusCell = row.querySelector('td.status, .submission_status') || row;
+    const pillStatus = parseCanvasSubmissionState(statusCell).status;
+    const rowSignals = signalsFromText(clean(statusCell.textContent, 200));
+
+    let submissionStatus;
+    if (score !== null || scoreText) {
+      // A mark is on the page. Late still matters, but it is finished work.
+      submissionStatus = 'graded';
+    } else if (pillStatus !== 'verification_unavailable') {
+      submissionStatus = pillStatus;
+    } else {
+      const combined = combineSignals(rowSignals);
+      // Nothing said either way on this row: silence is not evidence.
+      submissionStatus = combined === 'verification_unavailable' ? 'unknown' : combined;
+    }
+
+    assignments.push({
+      externalAssignmentId: ids.externalAssignmentId,
+      externalCourseId: ids.externalCourseId || courseId,
+      title,
+      dueAt: parseDueDate(row),
+      url: ids.url,
+      pointsPossible,
+      submissionStatus,
+      score: score === null ? undefined : score,
+      scoreText: scoreText || undefined,
+      excused: excused === true ? true : undefined,
+      detectedAt: new Date().toISOString(),
+      courseName: courseNameFrom(doc, row) || undefined,
+      kind: ids.kind,
+    });
+  }
+
+  return { assignments, grades: parseCourseTotal(doc, baseUrl, courseId) };
+}
+
+/**
+ * The course total from the Grades page sidebar.
+ *
+ * Canvas hides this entirely when a teacher turns totals off, and an absent
+ * total is recorded as hidden rather than as a zero — a made-up grade is worse
+ * than no grade (invariant 26).
+ */
+function parseCourseTotal(doc, baseUrl, courseId) {
+  if (!courseId) return [];
+
+  const region =
+    firstMatch(doc, [
+      '#student-grades-right-content',
+      '.student_assignment.final_grade',
+      '#submission_final-grade',
+      '.final_grade',
+    ]) || null;
+
+  const text = region ? clean(region.textContent, 400) : '';
+  const percent = percentIn(text);
+  const letter = letterIn(text);
+
+  return [
+    {
+      externalCourseId: courseId,
+      courseName: courseNameFrom(doc, null) || undefined,
+      currentScore: percent,
+      currentGrade: letter,
+      totalsHidden: percent === null && letter === null,
+      readAt: new Date().toISOString(),
+      url: String(baseUrl).slice(0, LIMITS.MAX_URL_LENGTH),
+    },
+  ];
+}
+
+/**
+ * `/grades` — the all-courses screen: one row per class, with the current
+ * grade Canvas is publishing for it.
+ *
+ * Written tolerantly on purpose. This page's markup varies more than the
+ * course gradebook's, so a row counts if it contains a link to a course and a
+ * percentage or letter *somewhere in that row*. Anything else is recorded as
+ * "Canvas isn't publishing a total", never guessed at.
+ */
+export function parseCanvasAllGradesPage(doc, baseUrl) {
+  const grades = new Map();
+  const rows = doc.querySelectorAll('tr, li, [role="listitem"]');
+
+  for (const row of rows) {
+    if (grades.size >= LIMITS.MAX_COURSES_PER_MESSAGE) break;
+
+    let courseId = null;
+    let courseName = '';
+    for (const anchor of row.querySelectorAll('a[href]')) {
+      let absolute;
+      try {
+        absolute = new URL(anchor.getAttribute('href'), baseUrl);
+      } catch {
+        continue;
+      }
+      const match = absolute.pathname.match(/^\/courses\/(\d+)(\/grades)?\/?$/);
+      if (!match) continue;
+      if (match[1].length > LIMITS.MAX_ID_LENGTH) continue;
+      courseId = match[1];
+      const text = clean(anchor.getAttribute('aria-label') || anchor.textContent, LIMITS.MAX_COURSE_NAME_LENGTH);
+      if (text) courseName = text;
+      break;
+    }
+    if (!courseId) continue;
+
+    // Only the cells that are not the course-name link, so a course called
+    // "Algebra 100%" cannot be read as a grade.
+    const cells = [...row.querySelectorAll('td, .percent, .grade, .course_grade')].filter(
+      (cell) => !cell.querySelector('a[href*="/courses/"]'),
+    );
+    const cellText = cells.map((cell) => clean(cell.textContent, 60)).join(' ');
+
+    const percent = percentIn(cellText);
+    const letter = letterIn(cellText);
+
+    const existing = grades.get(courseId);
+    if (existing && existing.currentScore !== null && percent === null) continue;
+
+    grades.set(courseId, {
+      externalCourseId: courseId,
+      courseName: courseName || existing?.courseName,
+      currentScore: percent,
+      currentGrade: letter,
+      totalsHidden: percent === null && letter === null,
+      readAt: new Date().toISOString(),
+      url: String(baseUrl).slice(0, LIMITS.MAX_URL_LENGTH),
+    });
+  }
+
+  return { assignments: [], grades: [...grades.values()] };
+}

@@ -25,8 +25,15 @@ export const MSG = {
   CANVAS_REQUEST_PERMISSION: 'CANVAS_REQUEST_PERMISSION',
   /** web → ext: current config, permission and cached detections */
   CANVAS_GET_VIEW: 'CANVAS_GET_VIEW',
-  /** web → ext: re-parse every open Canvas tab now */
+  /** web → ext: re-read the Canvas page in the active tab now */
   CANVAS_SYNC: 'CANVAS_SYNC',
+  /**
+   * web → ext: the school-hours check window.
+   *
+   * The web app owns this setting; the extension keeps a copy because the
+   * gate has to be able to refuse a reading when no LockIn tab is open.
+   */
+  CANVAS_SET_WINDOW: 'CANVAS_SET_WINDOW',
   /** web → ext: forget the domain, drop the permission, clear the cache */
   CANVAS_DISCONNECT: 'CANVAS_DISCONNECT',
   /** web → ext: open a Canvas URL (Open in Canvas / Check Canvas Status) */

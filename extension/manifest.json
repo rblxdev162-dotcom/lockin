@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LockIn \u2014 Focus Blocker",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Blocks distracting websites while LockIn Focus Mode is active. School sites and Google always stay open.",
   "minimum_chrome_version": "116",
   "permissions": [

@@ -88,8 +88,9 @@ To watch it work: add a site under **Blocked websites**, then press **Start
 | **Focus Mode** | Blocks the sites you chose until the work you chose is done. |
 | **Focus Guard** | With no extension at all, notices when you leave the LockIn tab during Focus Mode and times it. It cannot block, and cannot see where you went — and says both. |
 | **Chrome extension** | Does the blocking for real, with `declarativeNetRequest`. Survives closing LockIn and restarting Chrome. |
-| **Canvas calendar feed** | Assignments, courses and due dates from Canvas's own calendar feed, checked every 30 minutes — by LockIn's local service (no extension needed, keeps running with Chrome closed) or by the Companion. |
-| **Canvas status** | Graded, submitted, missing or late — read from Canvas pages in your own logged-in session, including a background tab opened at startup if you want it. |
+| **Canvas calendar feed** | Assignments, courses and due dates from Canvas's own calendar feed — by LockIn's local service (no extension needed, keeps running with Chrome closed) or by the Companion. Refreshed on a timer only if you switch that on, and never during your school hours. |
+| **Canvas status and grades** | Graded, submitted, missing, excused, scores, and each class's current grade — read off the Canvas **Grades** page you opened yourself, when you press **Check Canvas**. LockIn makes no request to Canvas: no API call, no token, no polling, no background tab. |
+| **The check gate** | One rule in front of every Canvas path, in the app, the extension and the local service. Manual-only by default; automatic checks are disabled during your configured school hours; every decision, allowed or refused, is logged. |
 | **What to do next** | One ordering everywhere: missing, then overdue, then today, then upcoming — strictly by due time inside each. Priority never beats a deadline. |
 | **By class** | The same list as columns, one per class, most urgent class first. |
 | **Pace** | Ahead / on track / at risk / behind — with reasons, and "not enough data" as a real answer when a sync failed. |
@@ -233,7 +234,8 @@ serves the production site itself on `:4173`.
 | Release safety | No fixture, no secret, no drifted version ships | `npm run test:release` |
 | Performance | Budgets on a 100-assignment dataset | `npm run test:perf` |
 | Focus Guard + quick-add | Away tracking stays honest; the parser never guesses | `npm run test:phase9` |
-| Canvas parser | Real Canvas DOM | `npm run test:parser` |
+| Canvas parser | Real Canvas DOM, incl. Grades pages | `npm run test:parser` |
+| The Canvas gate | Its three mirrors, over ~1,000 cases | `npm run test:canvas-grades` |
 | Blocking E2E | Real Chrome, real rules | `npm run test:e2e` |
 | Canvas E2E | Detection → verification → unlock | `npm run test:canvas-e2e` |
 | Parent E2E | PIN, controls, enforcement | `npm run test:parent-e2e` |
@@ -283,15 +285,21 @@ The in-app `/privacy` page says the same thing to students. Keep them in step.
   `Access-Control-Allow-Origin` header — measured against a real feed. Either
   LockIn's local service or the Companion extension has to do it; with neither,
   the `.ics` file import still works.
-- **Graded status needs Canvas open in the same Chrome profile as the
-  extension.** There is no way around that: a calendar feed does not carry
-  submission state, and the Canvas API needs a Developer Key a student cannot
-  issue. If Canvas lives in a different profile, LockIn shows due dates only
-  and says so.
-- **The background Canvas tab is a real page load** in your own session, once
-  at startup. It is off with one toggle.
+- **Graded status needs you to open the Canvas Grades page, in the same Chrome
+  profile as the extension, and press Check Canvas.** That is the deal, and it
+  is deliberate: a calendar feed does not carry submission state, and every
+  automatic alternative either needs credentials a student cannot issue or
+  amounts to a program contacting the school's systems on its own. LockIn reads
+  the page you opened. If Canvas lives in a different profile, LockIn shows due
+  dates only and says so.
+- **Nothing is read during your configured school hours**, including the
+  calendar refresh, including while every browser is closed. A refusal can be
+  overridden by an explicit second press, and that override is logged.
+- **LockIn never computes a grade.** A class whose total Canvas hides is shown
+  as "Canvas isn't publishing a total for this class".
 - **Canvas submission state via OAuth** would need a school administrator and a
-  backend for the client secret. Neither exists.
+  backend for the client secret. Neither exists, and student access-token
+  generation is disabled on the Canvas instance this was built against.
 
 These are honest, and they are a product feature rather than an embarrassment —
 a student told that blocking is unbreakable will find out otherwise in ten

@@ -22,6 +22,7 @@ import { MAX_PLAN_HISTORY, MAX_PLAN_SKIPS } from '../types/planner';
 import { buildPlan, statusContext, unfinishedBefore } from '../lib/planner';
 import { orderItems } from '../lib/planner/engine';
 import { canvasKey, defaultCanvasState } from '../types/canvas';
+import type { CourseGrade } from '../types/grades';
 import type { FeedDiff } from '../lib/canvas/calendarReconcile';
 import type { IntegrationId, IntegrationStatus } from '../types/integrations';
 import { MAX_FOCUS_RUNS, PROTECTED_SETTING_KEYS } from '../types/parent';
@@ -108,6 +109,7 @@ export type Action =
   | { type: 'CANVAS_LINK'; assignmentId: string; detected: CanvasDetectedAssignment }
   | { type: 'CANVAS_UNLINK'; assignmentId: string }
   | { type: 'CANVAS_SET_COURSE_NAME'; externalCourseId: string; displayName: string }
+  | { type: 'CANVAS_GRADES'; grades: CourseGrade[]; readAt: string }
   /* ---- Canvas Calendar Feed (Phase 16) ---- */
   /**
    * Apply a reconciled feed diff.
@@ -1069,7 +1071,14 @@ export function reducer(state: AppState, action: Action): AppState {
 
         // Nothing new: only refresh when we actually learned something, so a
         // noisy page cannot churn state (and persistence) on every mutation.
-        if (!statusChanged && !shouldComplete && assignment.canvas?.lastCheckedAt === seenAt) {
+        const scoreChanged =
+          detected.score !== undefined && detected.score !== assignment.canvas?.score;
+        if (
+          !statusChanged &&
+          !shouldComplete &&
+          !scoreChanged &&
+          assignment.canvas?.lastCheckedAt === seenAt
+        ) {
           continue;
         }
 
@@ -1085,6 +1094,9 @@ export function reducer(state: AppState, action: Action): AppState {
               : (assignment.canvas?.lastStatusChangeAt ?? seenAt),
             courseName: detected.courseName ?? assignment.canvas?.courseName,
             kind: detected.kind ?? assignment.canvas?.kind,
+            score: detected.score ?? assignment.canvas?.score,
+            scoreText: detected.scoreText ?? assignment.canvas?.scoreText,
+            pointsPossible: detected.pointsPossible ?? assignment.canvas?.pointsPossible,
           },
           updatedAt: seenAt,
         };
@@ -1175,6 +1187,60 @@ export function reducer(state: AppState, action: Action): AppState {
       // met, ends Focus Mode — which removes the blocking rules. The planner
       // reacts to the resulting assignment status, not to Canvas itself.
       return settle(next, 'assignment_completed');
+    }
+
+    /**
+     * Class grades, read off a Canvas Grades page the student opened.
+     *
+     * Deliberately its own action and its own slice, touching no assignment:
+     * a grade is not a completion, and routing it through the verification
+     * path would make a percentage capable of unlocking Focus Mode. There is
+     * still exactly one completion engine (invariant 1).
+     */
+    case 'CANVAS_GRADES': {
+      if (action.grades.length === 0) return state;
+
+      const byCourse = new Map(state.grades.courses.map((g) => [g.externalCourseId, g]));
+      let changed = 0;
+
+      for (const grade of action.grades) {
+        const previous = byCourse.get(grade.externalCourseId);
+
+        // Canvas published nothing this time but had before: keep the number
+        // that was really on the page, dated, rather than blanking it.
+        // Absence is not news about the student (invariant 27).
+        if (grade.totalsHidden && previous && !previous.totalsHidden) {
+          byCourse.set(grade.externalCourseId, {
+            ...previous,
+            totalsHiddenSince: grade.readAt,
+          });
+          continue;
+        }
+
+        if (
+          !previous ||
+          previous.currentScore !== grade.currentScore ||
+          previous.currentGrade !== grade.currentGrade
+        ) {
+          changed += 1;
+        }
+        byCourse.set(grade.externalCourseId, {
+          ...grade,
+          courseName: grade.courseName ?? previous?.courseName,
+          totalsHiddenSince: undefined,
+        });
+      }
+
+      const next: AppState = {
+        ...state,
+        grades: { courses: [...byCourse.values()], lastReadAt: action.readAt },
+      };
+
+      return changed > 0
+        ? log(next, 'canvas_grades_read', `Read grades for ${changed} class${changed === 1 ? '' : 'es'}`, {
+            classes: changed,
+          })
+        : next;
     }
 
     case 'CANVAS_IMPORT': {

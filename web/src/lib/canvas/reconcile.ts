@@ -9,8 +9,15 @@
 import type { Dispatch } from 'react';
 import type { Action } from '../../store/reducer';
 import type { CanvasExtensionView } from './pageProvider';
-import { sanitizeDetected } from './pageProvider';
+import { sanitizeDetected, sanitizeGrade } from './pageProvider';
 import type { CanvasDetectedAssignment } from '../../types/canvas';
+import type { CourseGrade } from '../../types/grades';
+
+export function gradesFromView(view: CanvasExtensionView): CourseGrade[] {
+  return (view.grades ?? [])
+    .map(sanitizeGrade)
+    .filter((g): g is CourseGrade => g !== null);
+}
 
 export function detectedFromView(view: CanvasExtensionView): CanvasDetectedAssignment[] {
   return view.detected
@@ -26,13 +33,13 @@ export function applyCanvasView(
   dispatch: Dispatch<Action>,
   view: CanvasExtensionView | null,
   options: { markSynced?: boolean } = {},
-): { detectedCount: number } {
+): { detectedCount: number; gradeCount: number } {
   if (!view) {
     dispatch({
       type: 'CANVAS_SET_CONNECTION',
       lastError: 'The LockIn extension did not respond.',
     });
-    return { detectedCount: 0 };
+    return { detectedCount: 0, gradeCount: 0 };
   }
 
   dispatch({
@@ -52,7 +59,42 @@ export function applyCanvasView(
       seenAt: view.lastSeenAt || new Date().toISOString(),
     });
   }
-  return { detectedCount: detected.length };
+
+  // Grades go their own way: a percentage is not evidence that work is done,
+  // and must never reach the completion path (invariant 1).
+  const grades = gradesFromView(view);
+  if (grades.length > 0) {
+    dispatch({
+      type: 'CANVAS_GRADES',
+      grades,
+      readAt: view.lastSeenAt || new Date().toISOString(),
+    });
+  }
+
+  return { detectedCount: detected.length, gradeCount: grades.length };
+}
+
+/**
+ * Why the gate said no, in the student's own terms.
+ *
+ * Deliberately never stronger than what the gate actually enforces: LockIn
+ * cannot know whether a test is happening, only what window it was told about.
+ */
+export function refusalMessage(verdict: string | undefined): string {
+  switch (verdict) {
+    case 'school_hours':
+      return 'Automatic Canvas checks are disabled during your configured school hours.';
+    case 'outside_window':
+      return 'Canvas checks are set to run only inside your check window.';
+    case 'paused':
+      return 'Canvas checks are paused.';
+    case 'automatic_disabled':
+      return 'LockIn reads Canvas only when you press Check Canvas.';
+    case 'not_connected':
+      return 'Canvas is not connected yet.';
+    default:
+      return 'LockIn did not read Canvas.';
+  }
 }
 
 /** Human-readable summary of a sync, for the toast. */
@@ -67,7 +109,14 @@ export function describeSync(view: CanvasExtensionView | null): {
   if (!sync || !sync.ok) {
     switch (sync?.reason) {
       case 'no-canvas-tab':
-        return { ok: false, message: 'Open Canvas in Chrome, then try Sync again.' };
+        return {
+          ok: false,
+          message: 'Open Canvas → Grades in this tab, then press Check Canvas.',
+        };
+      case 'tab-not-ready':
+        return { ok: false, message: 'Reload the Canvas tab, then press Check Canvas again.' };
+      case 'gate-refused':
+        return { ok: false, message: refusalMessage(sync.verdict) };
       case 'no-permission':
         return {
           ok: false,
@@ -76,8 +125,17 @@ export function describeSync(view: CanvasExtensionView | null): {
       case 'not-configured':
         return { ok: false, message: 'Set up Canvas first.' };
       default:
-        return { ok: false, message: 'Could not reach Canvas.' };
+        return { ok: false, message: 'Could not read Canvas.' };
     }
+  }
+
+  // Read a page that carries no scores: say so, rather than reporting a
+  // successful check that found nothing and letting them assume the worst.
+  if (!sync.readGrades && (sync.found ?? 0) === 0) {
+    return {
+      ok: false,
+      message: 'That Canvas page had nothing to read. Open Grades and press Check Canvas.',
+    };
   }
 
   const parts = [`${sync.found ?? 0} assignment${sync.found === 1 ? '' : 's'} found`];

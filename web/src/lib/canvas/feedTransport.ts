@@ -39,7 +39,6 @@ export interface FeedView {
   lastError: string | null;
   refreshMinutes: number;
   /** Extension only; the service has no browser to open a tab in. */
-  openCanvasOnStartup: boolean;
   transport: Transport;
 }
 
@@ -49,7 +48,6 @@ const NONE: FeedView = {
   lastFetchedAt: null,
   lastError: null,
   refreshMinutes: 30,
-  openCanvasOnStartup: false,
   transport: 'none',
 };
 
@@ -69,8 +67,7 @@ export async function getFeedView(): Promise<FeedView> {
       lastFetchedAt: service.lastFetchedAt,
       lastError: service.lastError,
       refreshMinutes: service.refreshMinutes,
-      openCanvasOnStartup: false,
-      transport: 'service',
+          transport: 'service',
     };
   }
 
@@ -82,7 +79,6 @@ export async function getFeedView(): Promise<FeedView> {
       lastFetchedAt: extension.lastFetchedAt,
       lastError: extension.lastError,
       refreshMinutes: extension.refreshMinutes,
-      openCanvasOnStartup: extension.openCanvasOnStartup,
       transport: 'extension',
     };
   }

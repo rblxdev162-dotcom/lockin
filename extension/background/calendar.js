@@ -59,7 +59,6 @@ const DEFAULTS = {
    * Developer Key that no student can issue themselves. It is one page load,
    * in the student's own session, on the site they were about to open anyway.
    */
-  openCanvasOnStartup: true,
   /** The last successful body, so opening LockIn is instant and offline-safe. */
   cachedText: '',
   cachedAt: 0,
@@ -94,7 +93,6 @@ export function toCalendarView(config) {
     lastFetchedAt: config.lastFetchedAt || null,
     lastError: config.lastError || null,
     refreshMinutes: config.refreshMinutes,
-    openCanvasOnStartup: config.openCanvasOnStartup !== false,
     hasCache: !!config.cachedText,
     cachedAt: config.cachedAt || null,
   };
@@ -159,9 +157,6 @@ export async function configureCalendar(rawUrl, refreshMinutes) {
  */
 export async function setCalendarOptions(patch) {
   const next = {};
-  if (typeof patch?.openCanvasOnStartup === 'boolean') {
-    next.openCanvasOnStartup = patch.openCanvasOnStartup;
-  }
   if (Number.isFinite(patch?.refreshMinutes)) {
     next.refreshMinutes = Math.min(1440, Math.max(15, Math.round(patch.refreshMinutes)));
   }

@@ -366,15 +366,17 @@ test('the view the page receives has no field for the feed URL', async () => {
   assert.equal(view.url, undefined);
 });
 
-test('opening Canvas at startup is on by default, and can be switched off', async () => {
+test('the startup Canvas tab option is gone, not merely off', async () => {
+  // Phase 18 deleted the background Canvas tab. A setting that still existed
+  // but controlled nothing would be worse than none: the UI would offer a
+  // promise the code no longer keeps.
   await calendar.configureCalendar('https://school.instructure.com/f.ics');
-  assert.equal(calendar.toCalendarView(await calendar.getCalendarConfig()).openCanvasOnStartup, true);
+  const view = calendar.toCalendarView(await calendar.getCalendarConfig());
+  assert.equal(view.openCanvasOnStartup, undefined);
 
-  await calendar.setCalendarOptions({ openCanvasOnStartup: false });
-  assert.equal(
-    calendar.toCalendarView(await calendar.getCalendarConfig()).openCanvasOnStartup,
-    false,
-  );
+  await calendar.setCalendarOptions({ openCanvasOnStartup: true });
+  const after = await calendar.getCalendarConfig();
+  assert.equal(after.openCanvasOnStartup, undefined, 'the option is not settable either');
 });
 
 test('options cannot be used to swap the feed URL behind the validation', async () => {

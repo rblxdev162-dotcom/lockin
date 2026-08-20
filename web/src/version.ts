@@ -9,4 +9,4 @@
  *
  * Bump all three together, and add a CHANGELOG.md entry in the same change.
  */
-export const APP_VERSION = '1.4.1';
+export const APP_VERSION = '1.5.0';

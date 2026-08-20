@@ -14,10 +14,17 @@ import { LIMITS } from '../canvas/types.js';
 import { normalizeCanvasDomain, originPattern, isConfiguredCanvasUrl } from '../canvas/urls.js';
 import { mergeStatus } from '../canvas/status.js';
 import { CANVAS_MSG, validateDetectionMessage } from '../canvas/messaging.js';
+import { defaultCheckWindow, evaluateCheckWindow, normalizeCheckWindow } from '../canvas/checkWindow.js';
 
 const CONFIG_KEY = 'lockin_canvas_config';
 const CACHE_KEY = 'lockin_canvas_cache';
+const GRADES_KEY = 'lockin_canvas_grades';
+const WINDOW_KEY = 'lockin_canvas_window';
+const GATE_LOG_KEY = 'lockin_canvas_gate_log';
 const SCRIPT_ID = 'lockin-canvas';
+
+/** Gate decisions kept for the student to inspect. Small on purpose. */
+const MAX_GATE_LOG = 60;
 
 /* ------------------------------------------------------------------ */
 /* Config                                                              */
@@ -86,6 +93,85 @@ export async function hasBroadHostAccess() {
 }
 
 /* ------------------------------------------------------------------ */
+/* THE GATE — the only thing that decides if Canvas is touched at all   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Every path that reads Canvas, or asks Canvas's servers for anything, goes
+ * through `canvasGate()` first. Not most paths. All of them:
+ *
+ *   - a detection arriving from the content script  (`passive` / `manual`)
+ *   - the Check Canvas button                       (`manual` / `override`)
+ *   - the calendar feed's refresh alarm             (`automatic`)
+ *   - the startup catch-up                          (`automatic`)
+ *
+ * The rule this enforces is the student's, and it is about school: they take
+ * proctored tests on a district device while this app is running at home, and
+ * a machine of theirs quietly talking to the school's Canvas mid-assessment is
+ * not something anyone should have to explain. So the guarantee is structural
+ * rather than careful — if the gate says no, nothing happens, and the refusal
+ * is written down.
+ *
+ * The decision itself is pure and lives in `canvas/checkWindow.js`, mirrored
+ * from `web/src/lib/canvas/checkWindow.ts`, with a test that runs both.
+ */
+
+export async function getCheckWindow() {
+  try {
+    const stored = await chrome.storage.local.get(WINDOW_KEY);
+    return normalizeCheckWindow(stored[WINDOW_KEY]);
+  } catch {
+    return defaultCheckWindow();
+  }
+}
+
+/** The web app is the source of truth for the window; this stores its copy. */
+export async function setCheckWindow(raw) {
+  const next = normalizeCheckWindow(raw);
+  await chrome.storage.local.set({ [WINDOW_KEY]: next });
+  return next;
+}
+
+export async function getGateLog() {
+  try {
+    const stored = await chrome.storage.local.get(GATE_LOG_KEY);
+    const raw = stored[GATE_LOG_KEY];
+    return Array.isArray(raw) ? raw.slice(0, MAX_GATE_LOG) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function recordGateDecision(entry) {
+  const log = await getGateLog();
+  log.unshift(entry);
+  await chrome.storage.local.set({ [GATE_LOG_KEY]: log.slice(0, MAX_GATE_LOG) });
+}
+
+/**
+ * @param {'manual'|'override'|'passive'|'automatic'} reason
+ * @returns {Promise<{allowed:boolean, verdict:string, overridable:boolean, nextAllowedAt:number|null}>}
+ */
+export async function canvasGate(reason, now = Date.now(), options = {}) {
+  const window = await getCheckWindow();
+  const config = options.config === undefined ? await getCanvasConfig() : options.config;
+  const decision = evaluateCheckWindow(window, reason, now, { connected: !!config });
+
+  // Passive refusals are the common case once the observer is off, and logging
+  // one per mutation would drown the log the guarantee depends on.
+  const worthRecording = decision.allowed || reason !== 'passive';
+  if (worthRecording) {
+    await recordGateDecision({
+      at: now,
+      reason,
+      verdict: decision.verdict,
+      allowed: decision.allowed,
+    });
+  }
+  return decision;
+}
+
+/* ------------------------------------------------------------------ */
 /* Detection cache                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -115,6 +201,68 @@ export async function clearCanvasCache() {
 
 function cacheKey(domain, courseId, assignmentId) {
   return `${domain}|${courseId}|${assignmentId}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Class grades                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One entry per class, replaced wholesale each time the student opens a
+ * Grades page. Deliberately *not* merged field-by-field: a grade is a single
+ * fact with a timestamp, and a stitched-together one from three different
+ * readings would be a number that never appeared on any page.
+ *
+ * A reading where Canvas published no total does not erase a real number read
+ * earlier — it is recorded as hidden, and the older figure keeps its own
+ * `readAt` so the UI can say how old it is (invariants 25–27).
+ */
+export async function getCanvasGrades() {
+  try {
+    const stored = await chrome.storage.local.get(GRADES_KEY);
+    const raw = stored[GRADES_KEY];
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+async function applyGrades(message) {
+  if (!message.grades || message.grades.length === 0) return { gradesChanged: 0 };
+  const store = await getCanvasGrades();
+  let gradesChanged = 0;
+
+  for (const grade of message.grades) {
+    const key = `${message.domain}|${grade.externalCourseId}`;
+    const previous = store[key];
+
+    // Nothing published now, something published before: keep the old reading
+    // and say so, rather than replacing a real grade with a blank.
+    if (grade.totalsHidden && previous && !previous.totalsHidden) {
+      store[key] = { ...previous, totalsHiddenSince: grade.readAt };
+      continue;
+    }
+
+    if (
+      !previous ||
+      previous.currentScore !== grade.currentScore ||
+      previous.currentGrade !== grade.currentGrade
+    ) {
+      gradesChanged += 1;
+    }
+    store[key] = {
+      ...grade,
+      courseName: grade.courseName ?? previous?.courseName,
+      totalsHiddenSince: undefined,
+    };
+  }
+
+  await chrome.storage.local.set({ [GRADES_KEY]: store });
+  return { gradesChanged };
+}
+
+export async function clearCanvasGrades() {
+  await chrome.storage.local.set({ [GRADES_KEY]: {} });
 }
 
 /**
@@ -164,7 +312,9 @@ async function applyDetection(message) {
     await setCanvasConfig({ ...config, lastSeenAt: message.detectedAt });
   }
 
-  return { changed, newlyComplete, total: message.assignments.length };
+  const { gradesChanged } = await applyGrades(message);
+
+  return { changed, newlyComplete, gradesChanged, total: message.assignments.length };
 }
 
 /* ------------------------------------------------------------------ */
@@ -257,6 +407,7 @@ export async function disconnectCanvas() {
   const config = await getCanvasConfig();
   await unregisterCanvasScript();
   await clearCanvasCache();
+  await clearCanvasGrades();
 
   let permissionRemoved = false;
   if (config) {
@@ -293,12 +444,24 @@ export async function getCanvasView() {
     }
   }
 
+  const grades = Object.values(await getCanvasGrades());
+  const checkWindow = await getCheckWindow();
+
   return {
     configured: !!config,
     domain: config?.domain ?? null,
     connectedAt: config?.connectedAt ?? null,
     lastSeenAt: config?.lastSeenAt ?? null,
     permissionGranted,
+    grades,
+    checkWindow,
+    gateLog: await getGateLog(),
+    /**
+     * Whether the tab in front of the student right now is Canvas. The button
+     * can then say "open Canvas → Grades" *before* they press it rather than
+     * after — the read only ever happens on the page they are looking at.
+     */
+    activeTabIsCanvas: await activeTabIsCanvas(config?.domain),
     // Lets the UI tell the truth about whether Chrome will actually prompt.
     broadHostAccess: await hasBroadHostAccess(),
     scriptRegistered: await isCanvasScriptRegistered(),
@@ -306,6 +469,17 @@ export async function getCanvasView() {
     detectedCount: detected.length,
     openTabs,
   };
+}
+
+/** True when the focused tab is on the configured Canvas origin. */
+async function activeTabIsCanvas(domain) {
+  if (!domain) return false;
+  try {
+    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return !!(active && active.url && isConfiguredCanvasUrl(active.url, domain));
+  } catch {
+    return false;
+  }
 }
 
 /** Whether the Canvas content script is currently registered. */
@@ -319,42 +493,68 @@ export async function isCanvasScriptRegistered() {
 }
 
 /**
- * Sync: ask every open Canvas tab to re-parse right now.
- * Returns counts the UI can report honestly.
+ * Check Canvas: re-read the Canvas page the student is looking at.
+ *
+ * ## Why the *active* tab only
+ *
+ * The old version messaged every open Canvas tab, and an earlier phase went
+ * further and opened one in the background. Both are gone. LockIn now reads
+ * exactly the page the student deliberately has in front of them, when they
+ * press the button — which is the whole claim this feature makes, and it
+ * should be true by construction rather than by policy.
+ *
+ * If the active tab is not Canvas, that is not an error: it is an instruction
+ * to the student ("open Canvas → Grades"), and LockIn does not navigate there
+ * for them.
+ *
+ * @param {{ override?: boolean, now?: number }} options
  */
-export async function syncCanvasNow() {
+export async function syncCanvasNow(options = {}) {
+  const now = typeof options.now === 'number' ? options.now : Date.now();
   const config = await getCanvasConfig();
   if (!config) return { ok: false, reason: 'not-configured' };
   if (!(await hasCanvasPermission(config.domain))) {
     return { ok: false, reason: 'no-permission', domain: config.domain };
   }
 
-  let tabs = [];
-  try {
-    tabs = await chrome.tabs.query({ url: `https://${config.domain}/*` });
-  } catch {
-    tabs = [];
+  const gate = await canvasGate(options.override ? 'override' : 'manual', now, { config });
+  if (!gate.allowed) {
+    return {
+      ok: false,
+      reason: 'gate-refused',
+      verdict: gate.verdict,
+      overridable: gate.overridable,
+      nextAllowedAt: gate.nextAllowedAt,
+      domain: config.domain,
+    };
   }
-  if (tabs.length === 0) {
+
+  let tab = null;
+  try {
+    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (active && active.url && isConfiguredCanvasUrl(active.url, config.domain)) tab = active;
+  } catch {
+    tab = null;
+  }
+  if (!tab || tab.id === undefined) {
     return { ok: false, reason: 'no-canvas-tab', domain: config.domain };
   }
 
   const before = await getCanvasCache();
   const beforeCount = Object.keys(before).length;
 
-  await Promise.all(
-    tabs.map((tab) =>
-      tab.id === undefined
-        ? Promise.resolve()
-        : chrome.tabs
-            .sendMessage(tab.id, { type: CANVAS_MSG.REPARSE })
-            .catch(() => {
-              /* tab not ready / script not injected yet */
-            }),
-    ),
-  );
+  let pageKind = 'unknown';
+  try {
+    const reply = await chrome.tabs.sendMessage(tab.id, { type: CANVAS_MSG.REPARSE });
+    if (reply && typeof reply.pageKind === 'string') pageKind = reply.pageKind;
+  } catch {
+    // The content script is not in that tab yet — a page loaded before the
+    // permission was granted, usually. A reload fixes it, and saying so is
+    // more useful than a silent zero.
+    return { ok: false, reason: 'tab-not-ready', domain: config.domain };
+  }
 
-  // Detections arrive as separate messages; give them a moment to land.
+  // The detection arrives as its own message; give it a moment to land.
   await new Promise((resolve) => setTimeout(resolve, 900));
 
   const after = await getCanvasCache();
@@ -371,12 +571,17 @@ export async function syncCanvasNow() {
 
   return {
     ok: true,
-    tabsChecked: tabs.length,
+    pageKind,
+    // True when they were on a page that actually carries scores, so the UI can
+    // nudge them to Grades instead of silently finding little.
+    readGrades: pageKind === 'grades' || pageKind === 'grades_all',
+    tabsChecked: 1,
     found: afterEntries.length,
     added: Math.max(0, afterEntries.length - beforeCount),
     updated,
     newlySubmitted,
     detected: afterEntries.map(([, value]) => value),
+    grades: Object.values(await getCanvasGrades()),
   };
 }
 
@@ -433,6 +638,13 @@ export async function handleCanvasContentMessage(message, sender) {
     return { ok: false, reason: 'no-permission' };
   }
 
+  // 5. and the gate agrees this reading may happen at all. A page the student
+  //    merely browsed past is refused unless they asked for that; anything
+  //    during configured school hours is refused outright.
+  const trigger = message.trigger === 'passive' ? 'passive' : 'manual';
+  const gate = await canvasGate(trigger, Date.now(), { config });
+  if (!gate.allowed) return { ok: false, reason: gate.verdict };
+
   if (message.type === CANVAS_MSG.UNREADABLE) {
     await setCanvasConfig({ ...config, lastSeenAt: new Date().toISOString() });
     return { ok: true, readable: false };
@@ -445,102 +657,4 @@ export async function handleCanvasContentMessage(message, sender) {
   return { ok: true, ...result };
 }
 
-export const CANVAS_STORAGE_KEYS = { CONFIG_KEY, CACHE_KEY };
-
-/**
- * Opens the Canvas dashboard in a background tab so the content script can read
- * submission status.
- *
- * ## Why this exists
- *
- * A calendar feed carries due dates and nothing else — it cannot say whether
- * something was handed in, marked, or missed. The only other way to know is the
- * Canvas API, which needs a Developer Key a student cannot issue themselves. So
- * the remaining honest option is to read the page the student is already
- * entitled to see, in their own logged-in session.
- *
- * ## The limits it keeps
- *
- *  - **Only Canvas.** The URL is built from the configured domain; nothing a
- *    caller passes in reaches it.
- *  - **Only when the student asked for it**, and only when they have already
- *    granted the Canvas host permission.
- *  - **Never steals focus** (`active: false`), and never opens a second tab
- *    while one it opened is still going.
- *  - **Nothing is fetched by LockIn.** It is an ordinary navigation the
- *    student's own browser makes.
- *
- * ## About closing it again
- *
- * Invariant 5 says LockIn never closes a tab. That rule is about never fighting
- * the student for control of their own browser, and it stands — but it was
- * written when every tab was one *they* opened. A background tab LockIn opened
- * itself, unasked and unseen, is the one case where leaving it is the ruder
- * option. So the invariant is now scoped: **LockIn may close a tab it opened
- * itself, and only that tab.** The id is recorded, checked before the close,
- * and forgotten immediately after; if the student adopted the tab and navigated
- * it somewhere else, the URL check fails and it is left alone.
- *
- * The close happens on the next alarm tick rather than a `setTimeout`, because
- * a service worker can be killed mid-timer and would leave the tab behind.
- */
-const SYNC_TAB_KEY = 'lockin_canvas_sync_tab';
-
-export async function openCanvasForSync() {
-  const config = await getCanvasConfig();
-  if (!config.domain || !config.permissionGranted) {
-    return { ok: false, reason: 'not-connected' };
-  }
-
-  // Already open? The content script is already reporting, and a second tab
-  // would be pure noise.
-  try {
-    const existing = await chrome.tabs.query({ url: `https://${config.domain}/*` });
-    if (existing.length > 0) return { ok: true, reason: 'already-open' };
-  } catch {
-    /* fall through and open one */
-  }
-
-  try {
-    const tab = await chrome.tabs.create({ url: `https://${config.domain}/`, active: false });
-    await chrome.storage.local.set({
-      [SYNC_TAB_KEY]: { id: tab.id, domain: config.domain, openedAt: Date.now() },
-    });
-    return { ok: true, reason: 'opened' };
-  } catch {
-    return { ok: false, reason: 'open-failed' };
-  }
-}
-
-/**
- * Closes the tab `openCanvasForSync` opened, if it is still ours.
- *
- * Called from the heartbeat, so the worker being killed in between changes
- * nothing: the record is in storage and the next tick picks it up.
- */
-export async function closeCanvasSyncTab(now = Date.now()) {
-  let record;
-  try {
-    record = (await chrome.storage.local.get(SYNC_TAB_KEY))[SYNC_TAB_KEY];
-  } catch {
-    return { closed: false };
-  }
-  if (!record || typeof record.id !== 'number') return { closed: false };
-
-  // Give the page a moment to load and report before taking it away.
-  if (now - (record.openedAt ?? 0) < 25_000) return { closed: false, waiting: true };
-
-  await chrome.storage.local.remove(SYNC_TAB_KEY);
-  try {
-    const tab = await chrome.tabs.get(record.id);
-    // Only if it is still the tab we opened. If the student adopted it and
-    // navigated somewhere else, it is theirs now.
-    if (tab?.url && new URL(tab.url).hostname === record.domain) {
-      await chrome.tabs.remove(record.id);
-      return { closed: true };
-    }
-  } catch {
-    /* already gone */
-  }
-  return { closed: false };
-}
+export const CANVAS_STORAGE_KEYS = { CONFIG_KEY, CACHE_KEY, GRADES_KEY, WINDOW_KEY, GATE_LOG_KEY };

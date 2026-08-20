@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../store/context';
+import { formatMinutes } from '../lib/canvas/checkWindow';
 import { useTheme } from '../hooks/useTheme';
 import { Button } from '../components/ui/Button';
 import { Chip, Field, TextInput } from '../components/ui/Field';
@@ -51,7 +52,7 @@ export function Onboarding() {
    * used the app once. They live in Settings now. Onboarding asks only what
    * changes what LockIn *does* on day one.
    */
-  const steps = ['Name', 'Your work', 'Your time', 'How LockIn helps', 'Companion'];
+  const steps = ['Name', 'Your work', 'Your time', 'How LockIn helps', 'Companion', 'Canvas checks'];
   /**
    * Writes the availability a preset implies, and marks the planner as
    * configured so `/planner` opens with a real schedule instead of the
@@ -394,6 +395,83 @@ export function Onboarding() {
               without it. Whenever Focus Mode is running and the Companion is
               not answering, LockIn says so across every screen rather than
               letting you believe sites are blocked.
+            </p>
+
+            <div className="mt-7 flex gap-2">
+              <Button variant="secondary" onClick={back}>
+                Back
+              </Button>
+              <Button block size="lg" onClick={next}>
+                Continue
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- Step 6: when LockIn may read Canvas ----------
+            Phase 18, and the one step here that is not about convenience.
+
+            The student takes proctored tests at school on a district device
+            while LockIn runs at home. This screen exists so the after-school
+            window is a decision they made on day one rather than a setting
+            they never found — and so the promise LockIn makes is stated in
+            exactly the words the code enforces, no stronger. */}
+        {step === 5 && (
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
+              When LockIn may check Canvas
+            </h1>
+            <p className="mt-1.5 text-sm lk-muted">
+              LockIn never opens Canvas by itself and never asks Canvas for
+              anything. It reads the page you already have open, when you press
+              Check Canvas.
+            </p>
+
+            <div className="mt-5 rounded-2xl border lk-border p-4">
+              <p className="text-body font-semibold lk-strong">
+                Automatic Canvas checks are disabled during your school hours.
+              </p>
+              <p className="mt-1.5 text-sm lk-muted">
+                Pick when your school day ends. Before that time, on the days
+                you choose, LockIn will not read Canvas or refresh your
+                calendar — and every refusal is written to your activity log.
+              </p>
+
+              <div className="mt-4">
+                <span className="text-caption font-bold tracking-wide lk-muted uppercase">
+                  School days end at
+                </span>
+                <select
+                  value={state.settings.canvasCheckWindow.schoolDayStart}
+                  onChange={(event) =>
+                    dispatch({
+                      type: 'UPDATE_SETTINGS',
+                      patch: {
+                        canvasCheckWindow: {
+                          ...state.settings.canvasCheckWindow,
+                          schoolDayStart: Number(event.target.value),
+                        },
+                      },
+                    })
+                  }
+                  className="mt-1 w-full rounded-xl border lk-border lk-raised px-3 py-2.5 text-body lk-strong"
+                >
+                  {[14 * 60, 14 * 60 + 30, 15 * 60, 15 * 60 + 30, 16 * 60, 16 * 60 + 30, 17 * 60].map(
+                    (minutes) => (
+                      <option key={minutes} value={minutes}>
+                        {formatMinutes(minutes)}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <p className="mt-5 rounded-2xl border border-dashed lk-border p-3.5 text-xs leading-relaxed lk-muted">
+              You can change this, pause checks entirely, or check anyway on a
+              day you are not at school — from Settings → Canvas checks. LockIn
+              cannot know when a test is happening; it only knows the hours you
+              set here, and it refuses everything outside them.
             </p>
 
             <div className="mt-7 flex gap-2">

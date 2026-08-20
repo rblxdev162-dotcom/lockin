@@ -76,6 +76,7 @@ export function validateDetectedAssignment(raw, expectedDomain) {
   if (!url) return null;
 
   const points = Number(raw.pointsPossible);
+  const score = Number(raw.score);
 
   return {
     externalCourseId,
@@ -84,6 +85,12 @@ export function validateDetectedAssignment(raw, expectedDomain) {
     url,
     dueAt: validIso(raw.dueAt),
     pointsPossible: Number.isFinite(points) && points >= 0 && points < 100000 ? points : undefined,
+    // Scores come from the Grades page. A score is display data only — it can
+    // never change a submission status, which is decided above and by
+    // `status.js`, so a hostile page cannot promote itself by shouting "100".
+    score: Number.isFinite(score) && score > -100000 && score < 100000 ? score : undefined,
+    scoreText: str(raw.scoreText, 40) || undefined,
+    excused: raw.excused === true ? true : undefined,
     submissionStatus: coerceStatus(raw.submissionStatus),
     detectedAt: validIso(raw.detectedAt) || new Date().toISOString(),
     courseName: str(raw.courseName, LIMITS.MAX_COURSE_NAME_LENGTH) || undefined,
@@ -103,6 +110,33 @@ export function validateCourse(raw, expectedDomain) {
     externalCourseId,
     originalName,
     displayName: str(raw.displayName, LIMITS.MAX_COURSE_NAME_LENGTH) || originalName,
+    url: validUrl(raw.url, expectedDomain) || undefined,
+  };
+}
+
+/**
+ * One class's current grade, as printed on the page the student opened.
+ *
+ * `currentScore` is a percentage or null; null with `totalsHidden` is the
+ * honest record of Canvas not publishing a total, and is never turned into a
+ * zero anywhere downstream.
+ */
+export function validateCourseGrade(raw, expectedDomain) {
+  if (!raw || typeof raw !== 'object') return null;
+  const externalCourseId = validId(raw.externalCourseId);
+  if (!externalCourseId) return null;
+
+  const score = Number(raw.currentScore);
+  const currentScore = Number.isFinite(score) && score >= 0 && score <= 1000 ? score : null;
+  const currentGrade = str(raw.currentGrade, 20) || null;
+
+  return {
+    externalCourseId,
+    courseName: str(raw.courseName, LIMITS.MAX_COURSE_NAME_LENGTH) || undefined,
+    currentScore,
+    currentGrade,
+    totalsHidden: currentScore === null && currentGrade === null,
+    readAt: validIso(raw.readAt) || new Date().toISOString(),
     url: validUrl(raw.url, expectedDomain) || undefined,
   };
 }
@@ -132,6 +166,13 @@ export function validateDetectionMessage(raw, expectedDomain) {
         .filter(Boolean)
     : [];
 
+  const grades = Array.isArray(raw.grades)
+    ? raw.grades
+        .slice(0, LIMITS.MAX_COURSES_PER_MESSAGE)
+        .map((g) => validateCourseGrade(g, domain))
+        .filter(Boolean)
+    : [];
+
   return {
     type: CANVAS_MSG.DETECTION,
     domain,
@@ -139,6 +180,7 @@ export function validateDetectionMessage(raw, expectedDomain) {
     readable: raw.readable === true,
     assignments,
     courses,
+    grades,
     detectedAt: validIso(raw.detectedAt) || new Date().toISOString(),
   };
 }

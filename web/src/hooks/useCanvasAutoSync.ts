@@ -24,12 +24,23 @@
  *
  * A manual "Sync now" on the Integrations page still shows the full review
  * screen. That is the difference between a background job and a deliberate act.
+ *
+ * ## Phase 18: this only runs if the student switched it on
+ *
+ * Refreshing the feed is a request to the school's server, so it goes through
+ * the same gate as everything else Canvas-shaped. The shipped default is
+ * `manual`, in which this hook does nothing at all and the Check Canvas button
+ * runs `runFeedSync` directly. See `lib/canvas/checkWindow.ts`.
  */
 import { useCallback, useEffect, useRef } from 'react';
 import { useApp } from '../store/context';
 import { syncFeed } from '../lib/canvas/feedTransport';
 import { describeDiff, diffIsInteresting, reconcileFeed } from '../lib/canvas/calendarReconcile';
 import { toast } from '../components/ui/Toast';
+import { evaluateCheckWindow } from '../lib/canvas/checkWindow';
+import type { AppState } from '../types';
+import type { Action } from '../store/reducer';
+import type { Dispatch } from 'react';
 
 /** Matches the extension's alarm. One cadence, defined in two places that agree. */
 export const AUTO_SYNC_MS = 30 * 60 * 1000;
@@ -47,59 +58,21 @@ export function useCanvasAutoSync(): void {
 
   const runSync = useCallback(async () => {
     const { state: current, dispatch: send } = latest.current;
-    const connected = current.integrations.records.find((r) => r.id === 'canvas_calendar');
-    // Nothing configured, nothing to do. This is the common case for a new
-    // install and must cost nothing.
-    if (!connected || connected.status === 'not_configured') return;
 
-    const now = Date.now();
-    // `force: false` — the extension's cache is what this reads, so a page open
-    // in two tabs does not become two requests to the school's server.
-    const result = await syncFeed(now, current.integrations.canvasCalendar.horizonDays, false);
-    if (!result.ok || !result.feed) {
-      // A failed background sync is not worth a toast. The Integrations page
-      // and the pace engine both surface staleness on their own, and a popup
-      // about a network blip the student did not ask for is noise.
-      if (result.reason !== 'no-transport') {
-        send({
-          type: 'INTEGRATION_STATUS',
-          id: 'canvas_calendar',
-          status: 'error',
-          error: 'Canvas could not be reached. Your assignments are still here.',
-        });
-      }
-      return;
-    }
+    /**
+     * The gate, before anything else.
+     *
+     * Refreshing the calendar feed is a request to the school's server like
+     * any other, so it obeys the same rule as reading a page: nothing on a
+     * timer unless the student switched automatic checks on, and nothing at
+     * all during their configured school hours. In the default `manual` mode
+     * this returns immediately, every time, and the feed is refreshed by the
+     * Check Canvas button instead.
+     */
+    const gate = evaluateCheckWindow(current.settings.canvasCheckWindow, 'automatic', Date.now());
+    if (!gate.allowed) return;
 
-    const diff = reconcileFeed(result.feed.items, current.assignments, {
-      sourceId: 'canvas-calendar',
-      syncedAt: new Date(result.fetchedAt ?? now).toISOString(),
-      live: true,
-    });
-
-    send({
-      type: 'FEED_APPLY',
-      diff,
-      sourceId: 'canvas-calendar',
-      syncedAt: new Date(result.fetchedAt ?? now).toISOString(),
-      live: true,
-    });
-    send({
-      type: 'INTEGRATION_STATUS',
-      id: 'canvas_calendar',
-      status: 'connected',
-      itemCount: diff.create.length,
-    });
-
-    // Only speak when something actually changed, and only once.
-    if (diffIsInteresting(diff)) {
-      toast(
-        diff.cancel.length > 0
-          ? `Canvas: ${describeDiff(diff)}. Cancelled work is still here with reminders off.`
-          : `Canvas: ${describeDiff(diff)}`,
-        diff.cancel.length > 0 ? 'info' : 'success',
-      );
-    }
+    await runFeedSync(current, send);
   }, []);
 
   useEffect(() => {
@@ -115,4 +88,66 @@ export function useCanvasAutoSync(): void {
     // `extension.status` is a dependency so a companion appearing mid-session
     // triggers an immediate catch-up sync.
   }, [extension.status, runSync]);
+}
+
+/**
+ * Fold the cached Canvas calendar feed into assignments.
+ *
+ * Exported because the Check Canvas button runs exactly this, as the
+ * student's own act — it is the same work, differing only in who asked for
+ * it, and a second copy would be a second set of reconciliation rules.
+ */
+export async function runFeedSync(
+  current: AppState,
+  send: Dispatch<Action>,
+): Promise<{ ok: boolean; changed: boolean }> {
+  const connected = current.integrations.records.find((r) => r.id === 'canvas_calendar');
+  // Nothing configured, nothing to do. The common case for a new install, and
+  // it must cost nothing.
+  if (!connected || connected.status === 'not_configured') return { ok: false, changed: false };
+
+  const now = Date.now();
+  // `force: false` — this reads whatever was cached, so the same page open in
+  // two tabs does not become two requests to the school's server.
+  const result = await syncFeed(now, current.integrations.canvasCalendar.horizonDays, false);
+  if (!result.ok || !result.feed) {
+    // A failed background sync is not worth a toast. The Integrations page and
+    // the pace engine both surface staleness on their own, and a popup about a
+    // network blip nobody asked for is noise.
+    if (result.reason !== 'no-transport') {
+      send({
+        type: 'INTEGRATION_STATUS',
+        id: 'canvas_calendar',
+        status: 'error',
+        error: 'Canvas could not be reached. Your assignments are still here.',
+      });
+    }
+    return { ok: false, changed: false };
+  }
+
+  const syncedAt = new Date(result.fetchedAt ?? now).toISOString();
+  const diff = reconcileFeed(result.feed.items, current.assignments, {
+    sourceId: 'canvas-calendar',
+    syncedAt,
+    live: true,
+  });
+
+  send({ type: 'FEED_APPLY', diff, sourceId: 'canvas-calendar', syncedAt, live: true });
+  send({
+    type: 'INTEGRATION_STATUS',
+    id: 'canvas_calendar',
+    status: 'connected',
+    itemCount: diff.create.length,
+  });
+
+  // Only speak when something actually changed, and only once.
+  if (diffIsInteresting(diff)) {
+    toast(
+      diff.cancel.length > 0
+        ? `Canvas: ${describeDiff(diff)}. Cancelled work is still here with reminders off.`
+        : `Canvas: ${describeDiff(diff)}`,
+      diff.cancel.length > 0 ? 'info' : 'success',
+    );
+  }
+  return { ok: true, changed: diffIsInteresting(diff) };
 }

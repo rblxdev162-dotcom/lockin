@@ -48,6 +48,20 @@ const DEFAULTS = {
   lastFetchedAt: 0,
   lastError: '',
   refreshMinutes: DEFAULT_REFRESH_MINUTES,
+  /**
+   * The school-hours gate, pushed here by the app (Phase 18).
+   *
+   * This service is a LaunchAgent: it keeps running with every browser closed,
+   * which is exactly why it must obey the window too. A student who has been
+   * promised "nothing talks to Canvas during school" is not helped by a
+   * guarantee that only holds while Chrome is open.
+   *
+   * Shape mirrors `web/src/lib/canvas/checkWindow.ts`. Unset means the app has
+   * never told this service anything — and in that case it does **not** fetch
+   * on a timer, because the conservative reading of silence is the only safe
+   * one here.
+   */
+  checkWindow: null,
 };
 
 /** In-memory only. The body is a copy of the school's data; it is not ours to keep. */
@@ -91,6 +105,8 @@ export function toView(config = read()) {
     refreshMinutes: config.refreshMinutes,
     hasCache: !!cache.text,
     cachedAt: cache.at || null,
+    /** Whether the timer is currently allowed to fetch, and why not. */
+    autoFetch: autoFetchAllowed(Date.now(), config),
     /** Tells the page which transport answered, so the UI can say so. */
     transport: 'service',
   };
@@ -232,19 +248,76 @@ export async function fetchFeed({ force = false } = {}) {
  * including while Chrome is shut. `unref()` so it never holds the process open
  * on its own account.
  */
+/**
+ * May the timer fetch right now?
+ *
+ * Deliberately its own small copy of the rule rather than an import: this file
+ * runs in a LaunchAgent with no build step and no access to the web app's
+ * TypeScript. `extension/tests/canvas-grades.test.mjs` runs this function over
+ * the same matrix as the other two copies and fails if they disagree.
+ */
+export function autoFetchAllowed(now = Date.now(), config = read()) {
+  const w = config.checkWindow;
+  // Never told what the window is → never fetch on a timer. Silence is not
+  // permission, and the app refreshes the feed on Check Canvas anyway.
+  if (!w || typeof w !== 'object') return { allowed: false, verdict: 'unknown_window' };
+  if (w.mode !== 'scheduled') return { allowed: false, verdict: 'automatic_disabled' };
+  if (typeof w.pausedUntil === 'number' && w.pausedUntil > now) {
+    return { allowed: false, verdict: 'paused' };
+  }
+
+  const date = new Date(now);
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  const schoolDay = Array.isArray(w.schoolDays) && w.schoolDays.includes(date.getDay());
+  const start = schoolDay ? w.schoolDayStart : w.freeDayStart;
+  if (minutes < start) {
+    return { allowed: false, verdict: schoolDay ? 'school_hours' : 'outside_window' };
+  }
+  if (minutes >= w.dayEnd) return { allowed: false, verdict: 'outside_window' };
+  return { allowed: true, verdict: 'allowed' };
+}
+
+/** Stores the window the app is enforcing. Rebuilt field by field. */
+export function setCheckWindow(raw) {
+  if (!raw || typeof raw !== 'object') return write({ checkWindow: null });
+  const num = (value, fallback) => {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) && n >= 0 && n <= 1440 ? n : fallback;
+  };
+  return write({
+    checkWindow: {
+      mode: raw.mode === 'scheduled' ? 'scheduled' : 'manual',
+      schoolDays: Array.isArray(raw.schoolDays)
+        ? raw.schoolDays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+        : [1, 2, 3, 4, 5],
+      schoolDayStart: num(raw.schoolDayStart, 15 * 60 + 30),
+      dayEnd: num(raw.dayEnd, 21 * 60 + 30),
+      freeDayStart: num(raw.freeDayStart, 9 * 60),
+      pausedUntil:
+        typeof raw.pausedUntil === 'number' && Number.isFinite(raw.pausedUntil)
+          ? raw.pausedUntil
+          : null,
+    },
+  });
+}
+
 export function startAutoRefresh() {
   const config = read();
   const minutes = Math.min(1440, Math.max(15, config.refreshMinutes || DEFAULT_REFRESH_MINUTES));
-  const timer = setInterval(() => {
-    if (isConfigured()) void fetchFeed({ force: true });
-  }, minutes * 60_000);
+  const tick = () => {
+    if (!isConfigured()) return;
+    // The gate, on this side too. A timer that fires at 10am on a Tuesday must
+    // do nothing at all.
+    if (!autoFetchAllowed().allowed) return;
+    void fetchFeed({ force: true });
+  };
+
+  const timer = setInterval(tick, minutes * 60_000);
   timer.unref?.();
 
-  // And once shortly after boot, so a machine switched on in the morning has
-  // the day's assignments before anyone opens the app.
-  const first = setTimeout(() => {
-    if (isConfigured()) void fetchFeed({ force: true });
-  }, 5000);
+  // And once shortly after boot, so a machine switched on after school has the
+  // day's assignments before anyone opens the app.
+  const first = setTimeout(tick, 5000);
   first.unref?.();
 
   return () => {

@@ -506,6 +506,44 @@ async function main() {
   check('no data was wiped', (migrated?.assignments?.length ?? 0) === 1 && (migrated?.exams?.length ?? 0) === 1);
   await closeTab(migrationTab.targetId);
 
+  /* ============ TEST 0b: the Phase 18 gate, in a real browser ============ */
+  console.log('\nTEST 0b — the gate refuses before anything else runs');
+  /**
+   * Phase 18 put one gate in front of every Canvas path, and it ships closed:
+   * manual mode, passive reading off. That means the reader tests below are
+   * testing a path that, by default, never runs — so the default is asserted
+   * here first, and only then opened for the rest of the suite.
+   *
+   * This is the safety property the whole phase exists for: the student takes
+   * proctored tests at school while LockIn runs at home, and "nothing happens
+   * unless I press the button" has to be true of the running extension, not
+   * just of a unit test.
+   */
+  const gateApp = await openLockIn(lockinState({ linkedCanvas: true }));
+  await bridgeRequest(gateApp.sessionId, 'CANVAS_CONFIGURE', { domain: CANVAS_HOST });
+  await swEval(`chrome.storage.local.remove('lockin_canvas_window').then(() => 1)`);
+  await swEval(`chrome.storage.local.set({ lockin_canvas_cache: {} }).then(() => 1)`);
+
+  const passiveTab = await openTab(`https://${CANVAS_HOST}/courses/101/grades`);
+  await sleep(1500);
+  const afterPassive = await swEval(
+    `chrome.storage.local.get('lockin_canvas_cache').then((s) => JSON.stringify(s.lockin_canvas_cache || {}))`,
+  );
+  check(
+    'by default, browsing a Canvas page records nothing at all',
+    afterPassive === '{}' || afterPassive === '"{}"',
+    String(afterPassive).slice(0, 120),
+  );
+  await closeTab(passiveTab.targetId);
+
+  // Now open the window for the reader tests that follow: they are about the
+  // parser and the verification chain, not about when it is allowed to run.
+  await swEval(`chrome.storage.local.set({ lockin_canvas_window: {
+    mode: 'scheduled', schoolDays: [], schoolDayStart: 0, dayEnd: 1440,
+    freeDayStart: 0, pausedUntil: null, readAsIBrowse: true,
+  } }).then(() => 1)`);
+  await closeTab(gateApp.targetId);
+
   /* ============ TEST 1: connect a custom Canvas domain ============ */
   console.log('TEST 1 — connect Canvas');
   let app = await openLockIn(lockinState({ linkedCanvas: true }));

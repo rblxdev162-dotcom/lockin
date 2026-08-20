@@ -27,7 +27,6 @@ export interface CalendarView {
   lastError: string | null;
   refreshMinutes: number;
   /** Whether Canvas is opened in the background at browser startup. */
-  openCanvasOnStartup: boolean;
   hasCache: boolean;
   cachedAt: number | null;
   /** Set on the reply to a configure attempt. */
@@ -42,7 +41,6 @@ const EMPTY_VIEW: CalendarView = {
   lastFetchedAt: null,
   lastError: null,
   refreshMinutes: 30,
-  openCanvasOnStartup: true,
   hasCache: false,
   cachedAt: null,
 };
@@ -72,7 +70,6 @@ export function sanitizeCalendarView(raw: unknown): CalendarView {
       typeof value.refreshMinutes === 'number' && Number.isFinite(value.refreshMinutes)
         ? Math.min(1440, Math.max(15, Math.round(value.refreshMinutes)))
         : 30,
-    openCanvasOnStartup: value.openCanvasOnStartup !== false,
     hasCache: value.hasCache === true,
     cachedAt: number(value.cachedAt),
     ok: value.ok === true ? true : value.ok === false ? false : undefined,
@@ -102,7 +99,6 @@ export async function connectCalendar(
  * `connectCalendar`, which validates it and drops the cache.
  */
 export async function setCalendarOptions(patch: {
-  openCanvasOnStartup?: boolean;
   refreshMinutes?: number;
 }): Promise<CalendarView | null> {
   const reply = await bridge.request(MSG.CALENDAR_SET_OPTIONS, patch);

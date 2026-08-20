@@ -44,6 +44,9 @@ const ICONS: Record<ActivityType, IconName> = {
   feed_assignment_updated: 'calendar',
   feed_assignment_cancelled: 'close',
   course_progress_updated: 'edgenuity',
+  canvas_grades_read: 'badge',
+  canvas_check_refused: 'lock',
+  canvas_check_override: 'unlock',
 };
 
 const TONES: Partial<Record<ActivityType, 'brand' | 'mint' | 'flame' | 'amber'>> = {

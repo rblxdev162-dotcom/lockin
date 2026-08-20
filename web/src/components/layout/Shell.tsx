@@ -18,12 +18,16 @@ interface NavItem {
 }
 
 /**
- * Six destinations, and no more.
+ * Five destinations, and no more.
  *
- * Exams moved inside Plan and Activity inside Progress in Phase 16. Both were
- * top-level items because they were built as phases, not because a student
- * thinks of them as places — and seven flat items on a 375px phone leaves
- * every tap target too small to hit reliably.
+ * Phase 16 cut seven to six by folding Exams into Plan and Activity into
+ * Progress. Phase 18 cuts six to five: **Progress folds into Home** and
+ * **Integrations into Settings**, and the slot they free goes to Grades —
+ * which is the question students actually open a study app to ask, and the
+ * one LockIn could not answer at all until now.
+ *
+ * Both old routes still exist and still work; they are simply not competing
+ * for a place in the bar. Nothing a student had bookmarked breaks.
  *
  * Parent and Settings sit apart at the bottom: they are not destinations you
  * move between, they are somewhere you go for a reason and come back from.
@@ -31,14 +35,15 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/home', label: 'Home', icon: 'home' },
   { to: '/assignments', label: 'Work', icon: 'list' },
+  { to: '/grades', label: 'Grades', icon: 'badge' },
   { to: '/planner', label: 'Plan', icon: 'calendar' },
   { to: '/focus', label: 'Focus', icon: 'timer' },
-  { to: '/progress', label: 'Progress', icon: 'activity' },
-  { to: '/integrations', label: 'Connect', icon: 'link' },
 ];
 
 /** Bottom of the sidebar, and behind a "More" row on a phone. */
 const SECONDARY: NavItem[] = [
+  { to: '/progress', label: 'Progress', icon: 'activity' },
+  { to: '/integrations', label: 'Integrations', icon: 'link' },
   { to: '/parent', label: 'Parent', icon: 'shield' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ];
@@ -104,7 +109,7 @@ function Sidebar() {
             }
           >
             <Icon name={item.icon} size={19} />
-            {item.label === 'Work' ? 'Assignments' : item.label === 'Connect' ? 'Integrations' : item.label}
+            {item.label === 'Work' ? 'Assignments' : item.label}
           </NavLink>
         ))}
       </nav>
@@ -187,7 +192,15 @@ function BottomNav() {
             role="dialog"
             aria-label="More"
           >
-            {[...SECONDARY, { to: '/help', label: 'Help', icon: 'search' as IconName }, { to: '/privacy', label: 'Privacy', icon: 'shield' as IconName }].map(
+            {[
+              // Demoted from the bar in Phase 18, not removed: still one tap
+              // away, and every old link still resolves.
+              { to: '/progress', label: 'Progress', icon: 'activity' as IconName },
+              { to: '/integrations', label: 'Integrations', icon: 'link' as IconName },
+              ...SECONDARY,
+              { to: '/help', label: 'Help', icon: 'search' as IconName },
+              { to: '/privacy', label: 'Privacy', icon: 'shield' as IconName },
+            ].map(
               (item) => (
                 <NavLink
                   key={item.to}

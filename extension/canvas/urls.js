@@ -96,6 +96,10 @@ export function classifyCanvasUrl(url) {
   if (/^\/courses\/\d+$/.test(path)) {
     return { kind: 'course', courseId, assignmentId: null };
   }
+  // The all-courses grades screen: one row per class, with its current grade.
+  if (path === '/grades') {
+    return { kind: 'grades_all', courseId: null, assignmentId: null };
+  }
   if (path === '/' || path === '/dashboard') {
     return { kind: 'dashboard', courseId: null, assignmentId: null };
   }

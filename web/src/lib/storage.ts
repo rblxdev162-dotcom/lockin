@@ -53,6 +53,9 @@ import {
   defaultPlannerState,
 } from '../types/planner';
 import { ACTIVITY_TYPES } from '../types';
+import { defaultGradesState } from '../types/grades';
+import type { CourseGrade, GradesState } from '../types/grades';
+import { defaultCheckWindow, normalizeCheckWindow } from './canvas/checkWindow';
 import { DEFAULT_ALLOWLIST } from './domains';
 import {
   MAX_BLOCK_STATS,
@@ -68,7 +71,7 @@ import {
  */
 export const STORAGE_KEY = 'lockin.state.v1';
 export const CORRUPT_KEY = 'lockin.state.corrupt';
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 export function defaultSettings(): Settings {
   return {
@@ -85,6 +88,7 @@ export function defaultSettings(): Settings {
     // students actually keep. Onboarding still announces it.
     focusGuard: true,
     blockingAsked: false,
+    canvasCheckWindow: defaultCheckWindow(),
   };
 }
 
@@ -117,6 +121,7 @@ export function defaultState(): AppState {
     focusRuns: [],
     planner: defaultPlannerState(),
     integrations: defaultIntegrationsState(),
+    grades: defaultGradesState(),
   };
 }
 
@@ -313,6 +318,25 @@ const MIGRATIONS: Record<number, Migration> = {
       }),
     };
   },
+  // 10 -> 11 (Phase 18): the Canvas check window, and class grades.
+  //
+  // Both are additive, and the window's default is the conservative one:
+  // `manual`, so an existing install that was quietly refreshing a calendar
+  // feed every thirty minutes stops doing that on upgrade rather than
+  // inheriting an automatic behaviour the student never chose. Nothing is
+  // dropped — an upgrade must never cost a student their history
+  // (invariant 34).
+  10: (s) => ({
+    ...s,
+    schemaVersion: 11,
+    settings: {
+      ...((s.settings ?? {}) as Record<string, unknown>),
+      canvasCheckWindow: normalizeCheckWindow(
+        ((s.settings ?? {}) as Record<string, unknown>).canvasCheckWindow,
+      ),
+    },
+    grades: defaultGradesState(),
+  }),
 };
 
 function migrate(raw: Record<string, unknown>): Record<string, unknown> {
@@ -563,6 +587,10 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
   );
   settings.focusGuard = settings.focusGuard !== false;
   settings.blockingAsked = settings.blockingAsked === true;
+  // Rebuilt rather than trusted: a hand-edited save file must not be able to
+  // widen the window LockIn is allowed to touch Canvas in, and an unreadable
+  // one falls back to the conservative default rather than to "always".
+  settings.canvasCheckWindow = normalizeCheckWindow(settings.canvasCheckWindow);
 
   const rawAssignments = asArray<unknown>(raw.assignments);
   const assignments = rawAssignments
@@ -625,6 +653,55 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
     focusRuns,
     planner,
     integrations: coerceIntegrations(raw.integrations),
+    grades: coerceGrades(raw.grades),
+  };
+}
+
+/**
+ * Class grades from a save file.
+ *
+ * Every entry is rebuilt: a stored grade is only ever a copy of what a page
+ * showed, so a malformed one is dropped rather than repaired, and a score
+ * outside 0–1000 is treated as no score at all rather than clamped into a
+ * number nobody ever saw.
+ */
+function coerceGrades(raw: unknown): GradesState {
+  const base = defaultGradesState();
+  if (!raw || typeof raw !== 'object') return base;
+  const value = raw as Partial<GradesState>;
+
+  const courses = asArray<unknown>(value.courses)
+    .map((entry): CourseGrade | null => {
+      if (!entry || typeof entry !== 'object') return null;
+      const g = entry as Partial<CourseGrade>;
+      if (typeof g.externalCourseId !== 'string' || !g.externalCourseId) return null;
+      if (typeof g.readAt !== 'string') return null;
+      const score =
+        typeof g.currentScore === 'number' &&
+        Number.isFinite(g.currentScore) &&
+        g.currentScore >= 0 &&
+        g.currentScore <= 1000
+          ? g.currentScore
+          : null;
+      const letter = typeof g.currentGrade === 'string' ? g.currentGrade.slice(0, 20) : null;
+      return {
+        externalCourseId: g.externalCourseId.slice(0, 40),
+        courseName: typeof g.courseName === 'string' ? g.courseName.slice(0, 120) : undefined,
+        currentScore: score,
+        currentGrade: letter,
+        totalsHidden: score === null && letter === null,
+        readAt: g.readAt,
+        totalsHiddenSince:
+          typeof g.totalsHiddenSince === 'string' ? g.totalsHiddenSince : undefined,
+        url: typeof g.url === 'string' ? g.url.slice(0, 500) : undefined,
+      };
+    })
+    .filter((g): g is CourseGrade => g !== null)
+    .slice(0, 50);
+
+  return {
+    courses,
+    lastReadAt: typeof value.lastReadAt === 'string' ? value.lastReadAt : null,
   };
 }
 

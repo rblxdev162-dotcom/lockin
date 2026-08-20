@@ -821,6 +821,25 @@ async function main() {
   // The extension holds its own Canvas configuration; the web state alone does
   // not make the content script run on a host.
   await bridgeRequest('CANVAS_CONFIGURE', { domain: CANVAS_HOST });
+  /**
+   * Phase 18 put a gate in front of every Canvas read, and it ships closed —
+   * manual mode, passive reading off. This suite is about the planner
+   * reacting to a completion, not about when a read is permitted (that is
+   * `canvas-grades` and TEST 0b of `canvas-e2e`), so the window is opened
+   * explicitly here rather than left to a default that would make the whole
+   * step silently do nothing.
+   */
+  await bridgeRequest('CANVAS_SET_WINDOW', {
+    window: {
+      mode: 'scheduled',
+      schoolDays: [],
+      schoolDayStart: 0,
+      dayEnd: 1440,
+      freeDayStart: 0,
+      pausedUntil: null,
+      readAsIBrowse: true,
+    },
+  });
   canvasFixtures.setSubmitted('/courses/101/assignments/5001');
   const canvasTab = await openTab(canvasUrl);
   await sleep(3000);

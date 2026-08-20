@@ -45,5 +45,6 @@ export const CANVAS_PAGE_KINDS = [
   'assignment',
   'quiz',
   'grades',
+  'grades_all',
   'unknown',
 ];

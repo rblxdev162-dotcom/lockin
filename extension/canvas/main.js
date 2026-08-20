@@ -25,11 +25,23 @@ export function startCanvasContentScript() {
   const domain = location.hostname.toLowerCase();
   let lastPayloadKey = '';
 
+  let observer = null;
+
   function send(message) {
     try {
-      chrome.runtime.sendMessage(message).catch(() => {
-        /* worker asleep or extension reloaded; the next parse retries */
-      });
+      chrome.runtime
+        .sendMessage(message)
+        .then((reply) => {
+          // The background gate refused passive reads. Stop watching the page
+          // rather than re-offering a reading it will keep declining: "only
+          // when I press the button" should cost nothing while idle.
+          if (reply && reply.ok === false && reply.reason === 'passive_disabled') {
+            observer?.stop();
+          }
+        })
+        .catch(() => {
+          /* worker asleep or extension reloaded; the next parse retries */
+        });
     } catch {
       /* extension context invalidated — nothing to do */
     }
@@ -62,6 +74,10 @@ export function startCanvasContentScript() {
       readable: true,
       assignments: result.assignments,
       courses: result.courses,
+      grades: result.grades || [],
+      // Which half of the gate this reading has to pass: a press, or the
+      // observer noticing the page changed while the student browses.
+      trigger: reason === 'forced' ? 'manual' : 'passive',
       detectedAt: new Date().toISOString(),
     };
 
@@ -76,6 +92,7 @@ export function startCanvasContentScript() {
         a.dueAt,
       ]),
       c: payload.courses.map((c) => [c.externalCourseId, c.originalName]),
+      g: payload.grades.map((g) => [g.externalCourseId, g.currentScore, g.currentGrade]),
       k: payload.pageKind,
     });
     if (key === lastPayloadKey && reason !== 'forced') return;
@@ -84,7 +101,7 @@ export function startCanvasContentScript() {
     send(payload);
   }
 
-  const observer = createCanvasObserver(parseAndReport);
+  observer = createCanvasObserver(parseAndReport);
   observer.start();
 
   // The background worker can ask for a fresh read (Sync Canvas / status check).
@@ -92,11 +109,15 @@ export function startCanvasContentScript() {
     if (!message || message.type !== CANVAS_MSG.REPARSE) return false;
     lastPayloadKey = '';
     parseAndReport('forced');
-    sendResponse({ ok: true, url: location.href.slice(0, 500) });
+    sendResponse({
+      ok: true,
+      url: location.href.slice(0, 500),
+      pageKind: detectCanvasPage(document, location.href, domain).pageKind,
+    });
     return true;
   });
 
-  window.addEventListener('pagehide', () => observer.stop(), { once: true });
+  window.addEventListener('pagehide', () => observer?.stop(), { once: true });
 
   return observer;
 }

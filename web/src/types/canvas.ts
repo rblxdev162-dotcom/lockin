@@ -68,6 +68,18 @@ export interface CanvasDetectedAssignment {
   url: string;
   pointsPossible?: number;
   submissionStatus: CanvasSubmissionStatus;
+  /**
+   * The mark itself, when the Grades page showed one (Phase 18).
+   *
+   * Display data only. A score can never promote a submission status — that is
+   * decided by `verification.ts` from the page's own status signals — so a
+   * page shouting "100" cannot complete an assignment.
+   */
+  score?: number;
+  /** What the score cell actually said: "18", "A-", "Excused". */
+  scoreText?: string;
+  /** Canvas marked it excused: nothing to hand in, and nothing to worry about. */
+  excused?: boolean;
   detectedAt: string;
   /** Canvas course name at detection time, used to name the subject on import. */
   courseName?: string;
@@ -87,6 +99,10 @@ export interface CanvasLink {
   lastStatusChangeAt: string | null;
   courseName?: string;
   kind?: string;
+  /** The mark from the Grades page, when there was one (Phase 18). */
+  score?: number;
+  scoreText?: string;
+  pointsPossible?: number;
 }
 
 export interface CanvasState {

@@ -21,6 +21,9 @@ import type {
 } from '../../types/canvas';
 import type { CanvasProvider } from './provider';
 import { coerceStatus } from './verification';
+import type { CourseGrade } from '../../types/grades';
+import { normalizeCheckWindow } from './checkWindow';
+import type { CanvasCheckWindow } from './checkWindow';
 
 /** Shape the extension returns for CANVAS_GET_VIEW / CANVAS_VIEW. */
 export interface CanvasExtensionView {
@@ -40,10 +43,25 @@ export interface CanvasExtensionView {
   detected: unknown[];
   detectedCount: number;
   openTabs: number;
+  /** Class grades read off a Grades page (Phase 18). Re-validated below. */
+  grades: unknown[];
+  /** The gate the extension enforces, so the UI can explain a refusal. */
+  checkWindow?: CanvasCheckWindow;
+  /** Recent gate decisions — allowed and refused — newest first. */
+  gateLog?: { at: number; reason: string; verdict: string; allowed: boolean }[];
+  /** Whether the tab in front of the student right now is Canvas. */
+  activeTabIsCanvas: boolean;
   /** Present on the reply to CANVAS_SYNC. */
   sync?: {
     ok: boolean;
     reason?: string;
+    /** Set when the gate refused: which rule, and whether a press can pass it. */
+    verdict?: string;
+    overridable?: boolean;
+    nextAllowedAt?: number | null;
+    /** Which kind of Canvas page was read, so the UI can suggest Grades. */
+    pageKind?: string;
+    readGrades?: boolean;
     tabsChecked?: number;
     found?: number;
     added?: number;
@@ -90,12 +108,53 @@ export function sanitizeDetected(raw: unknown): CanvasDetectedAssignment | null 
     dueAt: typeof d.dueAt === 'string' && !Number.isNaN(Date.parse(d.dueAt)) ? d.dueAt : undefined,
     pointsPossible: Number.isFinite(points) && points >= 0 ? points : undefined,
     submissionStatus: coerceStatus(d.submissionStatus),
+    score: Number.isFinite(Number(d.score)) && d.score !== null && d.score !== undefined
+      ? Number(d.score)
+      : undefined,
+    scoreText: typeof d.scoreText === 'string' ? d.scoreText.slice(0, 40) : undefined,
+    excused: d.excused === true ? true : undefined,
     detectedAt:
       typeof d.detectedAt === 'string' && !Number.isNaN(Date.parse(d.detectedAt))
         ? d.detectedAt
         : new Date().toISOString(),
     courseName: typeof d.courseName === 'string' ? d.courseName.slice(0, 120) : undefined,
     kind: typeof d.kind === 'string' ? d.kind.slice(0, 30) : undefined,
+  };
+}
+
+/**
+ * One class grade from the extension, rebuilt.
+ *
+ * A score outside 0–100(0) is treated as no score rather than clamped: LockIn
+ * showing a number that was never on the page is the failure this whole
+ * feature is trying to avoid.
+ */
+export function sanitizeGrade(raw: unknown): CourseGrade | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const g = raw as Record<string, unknown>;
+  const courseId = typeof g.externalCourseId === 'string' ? g.externalCourseId : '';
+  if (!/^\d+$/.test(courseId)) return null;
+
+  const rawScore = Number(g.currentScore);
+  const currentScore =
+    g.currentScore !== null && Number.isFinite(rawScore) && rawScore >= 0 && rawScore <= 1000
+      ? rawScore
+      : null;
+  const currentGrade = typeof g.currentGrade === 'string' ? g.currentGrade.slice(0, 20) : null;
+
+  return {
+    externalCourseId: courseId,
+    courseName: typeof g.courseName === 'string' ? g.courseName.slice(0, 120) : undefined,
+    currentScore,
+    currentGrade,
+    totalsHidden: currentScore === null && currentGrade === null,
+    readAt:
+      typeof g.readAt === 'string' && !Number.isNaN(Date.parse(g.readAt))
+        ? g.readAt
+        : new Date().toISOString(),
+    totalsHiddenSince:
+      typeof g.totalsHiddenSince === 'string' ? g.totalsHiddenSince : undefined,
+    url: typeof g.url === 'string' && /^https:\/\//.test(g.url) ? g.url.slice(0, 500) : undefined,
   };
 }
 
@@ -114,6 +173,12 @@ export function sanitizeView(payload: unknown): CanvasExtensionView | null {
     detected,
     detectedCount: Number.isFinite(v.detectedCount) ? Number(v.detectedCount) : detected.length,
     openTabs: Number.isFinite(v.openTabs) ? Number(v.openTabs) : 0,
+    grades: Array.isArray(v.grades) ? v.grades.slice(0, 60) : [],
+    checkWindow: v.checkWindow ? normalizeCheckWindow(v.checkWindow) : undefined,
+    gateLog: Array.isArray(v.gateLog)
+      ? (v.gateLog.slice(0, 60) as CanvasExtensionView['gateLog'])
+      : undefined,
+    activeTabIsCanvas: v.activeTabIsCanvas === true,
     sync: (v.sync as CanvasExtensionView['sync']) ?? undefined,
     disconnect: (v.disconnect as CanvasExtensionView['disconnect']) ?? undefined,
     open: (v.open as CanvasExtensionView['open']) ?? undefined,
@@ -178,8 +243,18 @@ export class CanvasPageProvider implements CanvasProvider {
   }
 
   /** Re-parses every open Canvas tab. Slower than other calls by design. */
-  async sync(): Promise<CanvasExtensionView | null> {
-    return this.view(MSG.CANVAS_SYNC, undefined, 6000);
+  /**
+   * @param override the student's second, explicit press after a refusal
+   *                 ("I'm not at school right now"). Honoured, and logged by
+   *                 the extension as an override rather than a normal check.
+   */
+  async sync(override = false): Promise<CanvasExtensionView | null> {
+    return this.view(MSG.CANVAS_SYNC, { override }, 6000);
+  }
+
+  /** Pushes the check window the gate enforces into the extension. */
+  async setCheckWindow(window: CanvasCheckWindow): Promise<CanvasExtensionView | null> {
+    return this.view(MSG.CANVAS_SET_WINDOW, { window });
   }
 
   async disconnect(): Promise<CanvasExtensionView | null> {

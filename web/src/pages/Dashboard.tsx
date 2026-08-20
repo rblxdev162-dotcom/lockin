@@ -31,6 +31,8 @@ import { requiredAssignments } from '../lib/selectors';
 import { whatToDoNext } from '../lib/workState';
 import { paceHeadline } from '../lib/pace/engine';
 import { classify } from '../lib/sources/freshness';
+import { CheckCanvasButton } from '../components/features/CheckCanvasButton';
+import { formatScore, hasPublishedTotal, sortGrades } from '../types/grades';
 import { formatClock, greeting } from '../lib/time';
 import { cx } from '../lib/cx';
 import type { Assignment } from '../types';
@@ -77,14 +79,17 @@ export function Dashboard() {
             <PaceBadge status={report.status} size="sm" />
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          icon={<Icon name="plus" size={15} />}
-          onClick={() => navigate('/assignments?new=1')}
-        >
-          Add work
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <CheckCanvasButton showStatus={false} />
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Icon name="plus" size={15} />}
+            onClick={() => navigate('/assignments?new=1')}
+          >
+            Add work
+          </Button>
+        </div>
       </header>
 
       {/*
@@ -154,42 +159,44 @@ export function Dashboard() {
         )}
       </section>
 
+      {/* ---- Grades, when any have been read ---- */}
+      <GradesStrip />
+
       {/* ---- The plan, when there is one ---- */}
       <TodayPlanCard />
 
-      {/* ---- Connection strip ---- */}
-      <section aria-labelledby="connections-heading">
-        <SectionHeader
-          id="connections-heading"
-          title="Connections"
-          action={
-            <Link
-              to="/integrations"
-              className="text-caption font-bold lk-muted underline-offset-2 hover:underline"
-            >
-              Manage
-            </Link>
+      {/*
+        ---- Connections ----
+        One line, not a section. Phase 18: this had a heading, a "Manage" link
+        and a card of its own, which gave plumbing the same weight as the work
+        — the thing the page is supposed to be about. It matters only when it
+        is wrong, and when it is wrong the banner across every screen says so.
+      */}
+      <p className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-caption lk-muted">
+        <ConnectionDot
+          label="Canvas"
+          ok={
+            state.integrations.records.find((r) => r.id === 'canvas_calendar')?.status ===
+            'connected'
+          }
+          detail={canvasDetail(state, now)}
+        />
+        <ConnectionDot
+          label="Companion"
+          ok={extension.status === 'connected'}
+          detail={
+            extension.status === 'connected'
+              ? 'Connected'
+              : state.settings.extensionSeen
+                ? 'Not answering'
+                : 'Not installed'
           }
         />
-        <Card className="flex flex-wrap items-center gap-x-6 gap-y-2.5">
-          <ConnectionDot
-            label="Canvas"
-            ok={state.integrations.records.find((r) => r.id === 'canvas_calendar')?.status === 'connected'}
-            detail={canvasDetail(state, now)}
-          />
-          <ConnectionDot
-            label="Companion"
-            ok={extension.status === 'connected'}
-            detail={
-              extension.status === 'connected'
-                ? 'Connected'
-                : state.settings.extensionSeen
-                  ? 'Not answering'
-                  : 'Not installed'
-            }
-          />
-        </Card>
-      </section>
+        <Link to="/integrations" className="font-bold underline-offset-2 hover:underline">
+          Manage
+        </Link>
+      </p>
+
     </div>
   );
 }
@@ -294,6 +301,52 @@ function NothingDueCard({ reason }: { reason: { kind: string; text: string } }) 
         )}
       </div>
     </Card>
+  );
+}
+
+/**
+ * A single row of class grades, and nothing more.
+ *
+ * It appears only once a Grades page has actually been read: an empty
+ * placeholder promising a feature is clutter, and this page is allowed exactly
+ * one primary thing. Numbers are shown exactly as Canvas published them — the
+ * full explanation lives on `/grades`.
+ */
+function GradesStrip() {
+  const { state } = useApp();
+  const grades = useMemo(
+    () => sortGrades(state.grades.courses).filter(hasPublishedTotal),
+    [state.grades.courses],
+  );
+  if (grades.length === 0) return null;
+
+  return (
+    <section aria-labelledby="grades-heading">
+      <SectionHeader
+        id="grades-heading"
+        title="Grades"
+        action={
+          <Link
+            to="/grades"
+            className="text-caption font-bold lk-muted underline-offset-2 hover:underline"
+          >
+            All grades
+          </Link>
+        }
+      />
+      <Card className="flex flex-wrap gap-x-6 gap-y-3">
+        {grades.slice(0, 6).map((grade) => (
+          <div key={grade.externalCourseId} className="min-w-0">
+            <p className="truncate text-caption font-bold lk-muted">
+              {grade.courseName || `Course ${grade.externalCourseId}`}
+            </p>
+            <p className="text-heading font-extrabold tabular-nums lk-strong">
+              {grade.currentScore !== null ? formatScore(grade.currentScore) : grade.currentGrade}
+            </p>
+          </div>
+        ))}
+      </Card>
+    </section>
   );
 }
 

@@ -1,8 +1,8 @@
 {
   "name": "lockin",
   "private": true,
-  "version": "1.4.1",
-  "description": "LockIn — finish what matters before distractions take over.",
+  "version": "1.5.0",
+  "description": "LockIn \u2014 finish what matters before distractions take over.",
   "type": "module",
   "scripts": {
     "dev": "npm --prefix web run dev",
@@ -14,7 +14,7 @@
     "build:extension": "node scripts/build-extension.mjs",
     "package:extension": "node scripts/build-extension.mjs --zip",
     "build:release": "npm run build && npm run package:extension",
-    "test": "npm run test:logic && npm run test:reminders && npm run test:bridge && npm run test:canvas-logic && npm run test:parent-selectors && npm run test:parent-state && npm run test:planner-logic && npm run test:planner-state && npm run test:storage && npm run test:security && npm run test:time && npm run test:release && npm run test:perf && npm run test:phase9 && npm run test:pace && npm run test:canvas-ics && npm run test:worklist && npm run test:companion && npm run test:phase16",
+    "test": "npm run test:logic && npm run test:reminders && npm run test:bridge && npm run test:canvas-logic && npm run test:parent-selectors && npm run test:parent-state && npm run test:planner-logic && npm run test:planner-state && npm run test:storage && npm run test:security && npm run test:time && npm run test:release && npm run test:perf && npm run test:phase9 && npm run test:pace && npm run test:canvas-ics && npm run test:worklist && npm run test:companion && npm run test:phase16 && npm run test:canvas-grades",
     "test:logic": "node --test extension/tests/blocking.test.mjs",
     "test:reminders": "node --test extension/tests/reminders.test.mjs",
     "test:bridge": "node --test extension/tests/bridge.test.mjs",
@@ -49,7 +49,6 @@
     "test:canvas-ics": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/canvas-ics.test.mjs",
     "test:companion": "node --test extension/tests/companion.test.mjs",
     "test:phase16": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/phase16-state.test.mjs",
-    "test:phase16": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/phase16-state.test.mjs",
     "test:worklist": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/worklist.test.mjs",
     "test:pace": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/pace.test.mjs",
     "test:phase9": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/phase9.test.mjs",
@@ -57,7 +56,8 @@
     "service:install": "node scripts/service.mjs install",
     "service:uninstall": "node scripts/service.mjs uninstall",
     "service:status": "node scripts/service.mjs status",
-    "service:restart": "node scripts/service.mjs restart"
+    "service:restart": "node scripts/service.mjs restart",
+    "test:canvas-grades": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/canvas-grades.test.mjs"
   },
   "engines": {
     "node": ">=22.0.0",

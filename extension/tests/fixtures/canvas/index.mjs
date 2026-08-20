@@ -253,6 +253,140 @@ const customDomain = canvasShell({
   </ul>`,
 });
 
+
+/* ------------------------------------------------------------------ */
+/* Grades pages (Phase 18)                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `/courses/:id/grades` — Canvas's student gradebook.
+ *
+ * Written to the markup Canvas has emitted for years: a `#grades_summary`
+ * table of `tr.student_assignment` rows, each with a title cell linking to the
+ * assignment, a due cell, a status cell, an `assignment_score` cell and a
+ * `points_possible` cell, plus the course total in the right-hand sidebar.
+ *
+ * The interesting rows are deliberately awkward:
+ *   - one graded with a score
+ *   - one submitted but not yet marked ("Score unavailable")
+ *   - one missing
+ *   - one excused
+ *   - one with a dash where the score would be, which must NOT read as graded
+ */
+const courseGrades = canvasShell({
+  title: 'Grades',
+  breadcrumbCourse: crumb(MATH.id, MATH.name),
+  body: `
+  <h1>Grades for ${MATH.name}</h1>
+  <table id="grades_summary" class="student_assignments editable">
+    <thead><tr><th>Name</th><th>Due</th><th>Status</th><th>Score</th><th>Out of</th></tr></thead>
+    <tbody>
+      <tr class="student_assignment editable" id="submission_5001">
+        <th class="title" scope="row">
+          <a href="/courses/${MATH.id}/assignments/5001">Chapter 7 Homework</a>
+          <div class="context">${MATH.name}</div>
+        </th>
+        <td class="due"><time datetime="${DUE_TODAY}">Aug 15 by 11:59pm</time></td>
+        <td class="status"><span class="submission-graded-pill">graded</span></td>
+        <td class="assignment_score">
+          <div class="score_holder">
+            <span class="tooltip"><span class="grade"><span class="screenreader-only">Score:</span> 18</span></span>
+          </div>
+        </td>
+        <td class="points_possible">20</td>
+      </tr>
+      <tr class="student_assignment editable" id="submission_5002">
+        <th class="title" scope="row">
+          <a href="/courses/${MATH.id}/assignments/5002">Unit 3 Practice</a>
+        </th>
+        <td class="due"><time datetime="${DUE_TOMORROW}">Aug 16 by 11:59pm</time></td>
+        <td class="status"><span class="submission-submitted-pill">submitted</span></td>
+        <td class="assignment_score">
+          <span class="grade"><span class="screenreader-only">Score unavailable</span>-</span>
+        </td>
+        <td class="points_possible">30</td>
+      </tr>
+      <tr class="student_assignment editable" id="submission_5004">
+        <th class="title" scope="row">
+          <a href="/courses/${MATH.id}/assignments/5004">Graphing Worksheet</a>
+        </th>
+        <td class="due"><time datetime="2026-08-10T23:59:00.000Z">Aug 10 by 11:59pm</time></td>
+        <td class="status"><span class="submission-missing-pill">missing</span></td>
+        <td class="assignment_score"><span class="grade">-</span></td>
+        <td class="points_possible">15</td>
+      </tr>
+      <tr class="student_assignment editable" id="submission_5006">
+        <th class="title" scope="row">
+          <a href="/courses/${MATH.id}/assignments/5006">Field Trip Reflection</a>
+        </th>
+        <td class="due"></td>
+        <td class="status"></td>
+        <td class="assignment_score"><span class="grade">EX</span></td>
+        <td class="points_possible">10</td>
+      </tr>
+      <tr class="student_assignment editable" id="submission_5007">
+        <th class="title" scope="row">
+          <a href="/courses/${MATH.id}/assignments/5007">Quiz Corrections</a>
+        </th>
+        <td class="due"><time datetime="${DUE_TOMORROW}">Aug 16 by 11:59pm</time></td>
+        <td class="status"></td>
+        <td class="assignment_score"></td>
+        <td class="points_possible">25</td>
+      </tr>
+    </tbody>
+  </table>
+  <div id="student-grades-right-content">
+    <div class="student_assignment final_grade">
+      Total: <span class="grade">93.75%</span>
+    </div>
+  </div>`,
+});
+
+/** The same page for a class whose teacher hides totals. */
+const courseGradesHidden = canvasShell({
+  title: 'Grades',
+  breadcrumbCourse: crumb(ENGLISH.id, ENGLISH.name),
+  body: `
+  <h1>Grades for ${ENGLISH.name}</h1>
+  <table id="grades_summary" class="student_assignments">
+    <tbody>
+      <tr class="student_assignment" id="submission_6001">
+        <th class="title" scope="row">
+          <a href="/courses/${ENGLISH.id}/assignments/6001">Argument Essay</a>
+        </th>
+        <td class="due"><time datetime="${DUE_TOMORROW}">Aug 16</time></td>
+        <td class="status"><span class="submission-submitted-pill">submitted</span></td>
+        <td class="assignment_score"><span class="grade">-</span></td>
+        <td class="points_possible">100</td>
+      </tr>
+    </tbody>
+  </table>
+  <div id="student-grades-right-content">
+    <div class="final_grade">Your teacher has hidden the total grade.</div>
+  </div>`,
+});
+
+/** `/grades` — every class, with the grade Canvas publishes for each. */
+const allGrades = canvasShell({
+  title: 'Grades',
+  body: `
+  <h1>Grades</h1>
+  <table class="course_details student_grades">
+    <thead><tr><th>Course</th><th>Grade</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><a href="/courses/${MATH.id}">${MATH.name}</a></td>
+        <td class="percent">93.75%</td>
+        <td class="grade">A</td>
+      </tr>
+      <tr>
+        <td><a href="/courses/${ENGLISH.id}">${ENGLISH.name}</a></td>
+        <td class="percent">No grades</td>
+      </tr>
+    </tbody>
+  </table>`,
+});
+
 /* A page that is NOT Canvas at all, for the rejection test. */
 const notCanvas = `<!doctype html>
 <html><head><title>News</title></head>
@@ -276,6 +410,9 @@ export const CANVAS_FIXTURES = {
   [`/courses/${ENGLISH.id}/quizzes/7002`]: quizAmbiguous,
   [`/courses/${MATH.id}/assignments/5005`]: externalTool,
   [`/courses/${MATH.id}/assignments/9999`]: malformed,
+  [`/courses/${MATH.id}/grades`]: courseGrades,
+  [`/courses/${ENGLISH.id}/grades`]: courseGradesHidden,
+  '/grades': allGrades,
   '/courses/777/assignments': customDomain,
   '/news': notCanvas,
 };

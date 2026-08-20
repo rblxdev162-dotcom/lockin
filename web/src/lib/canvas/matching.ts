@@ -27,6 +27,45 @@ export function detectedCanvasKey(
 }
 
 /**
+ * The assignment a Canvas reading belongs to, including work that arrived
+ * from the calendar feed and has never been linked.
+ *
+ * ## Why this exists
+ *
+ * `assignmentCanvasKey()` needs three things: a `canvas` link, a course id and
+ * an assignment id. **A feed-imported assignment has only the assignment id** —
+ * an `.ics` UID is `event-assignment-<id>`, and the feed carries no course id
+ * and no link object at all. So the exact lookup returned null for every
+ * assignment the feed created, which is nearly all of them, and a graded
+ * status read off the Grades page had nothing to attach to: the work stayed
+ * "Not Started" while Canvas showed a full score.
+ *
+ * Matching on the Canvas assignment id alone is safe *because it is an id*:
+ * unique within an instance, issued by Canvas, and carried identically by both
+ * sources. Titles are still never used for identity — they change and collide,
+ * which is the whole reason this file exists.
+ *
+ * The domain and course id are only ever *compared* when the stored assignment
+ * already has them; an unlinked one adopts them on the first match rather than
+ * being excluded for not having them yet.
+ */
+export function findByExternalId(
+  assignments: Assignment[],
+  domain: string,
+  detected: Pick<CanvasDetectedAssignment, 'externalCourseId' | 'externalAssignmentId'>,
+): Assignment | undefined {
+  if (!detected.externalAssignmentId) return undefined;
+  return assignments.find((a) => {
+    if (a.externalAssignmentId !== detected.externalAssignmentId) return false;
+    // A stored course id or domain that disagrees means this is a different
+    // assignment that happens to share an id across two Canvas installs.
+    if (a.externalCourseId && a.externalCourseId !== detected.externalCourseId) return false;
+    if (a.canvas?.domain && a.canvas.domain !== domain) return false;
+    return true;
+  });
+}
+
+/**
  * Exact identity lookup: host + course + assignment. Titles are never used —
  * this is what makes re-visiting Canvas idempotent.
  */

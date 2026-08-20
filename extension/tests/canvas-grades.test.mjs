@@ -358,3 +358,141 @@ test('"published" means Canvas said something, not that LockIn worked it out', (
     true,
   );
 });
+
+/* ------------------------------------------------------------------ */
+/* 5. The reading has to reach the assignment it belongs to            */
+/* ------------------------------------------------------------------ */
+
+const { reducer } = await import('../../web/src/store/reducer.ts');
+const storage = await import('../../web/src/lib/storage.ts');
+
+/**
+ * An assignment exactly as the calendar feed creates one.
+ *
+ * This is the shape that broke it: the feed gives an `externalAssignmentId`
+ * (from the `event-assignment-<id>` UID) and **nothing else** — no course id,
+ * no `canvas` link. Almost every assignment in a real install looks like this.
+ */
+function feedAssignment(patch = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: 'a-museum',
+    title: 'Museum Project',
+    subject: 'History',
+    platform: 'Canvas',
+    dueDate: '2026-08-18',
+    dueTime: '23:59',
+    estimatedMinutes: 60,
+    loggedMinutes: 0,
+    priority: 'Normal',
+    status: 'Not Started',
+    completionMethod: 'manual',
+    createdAt: now,
+    updatedAt: now,
+    reminders: { firstReminderMinutes: 120, escalationMinutes: 60, focusWarningMinutes: 30, enabled: true },
+    remindersFired: [],
+    verificationStatus: 'not_required',
+    verificationRecords: [],
+    externalAssignmentId: '77001',
+    // Deliberately absent, because the feed cannot supply them:
+    externalCourseId: undefined,
+    canvas: undefined,
+    ...patch,
+  };
+}
+
+function stateWithFeedAssignment() {
+  const base = storage.defaultState();
+  return {
+    ...base,
+    profile: { firstName: 'Alex', onboarded: true, createdAt: new Date().toISOString() },
+    assignments: [feedAssignment()],
+    canvas: {
+      ...base.canvas,
+      connection: {
+        domain: DOMAIN,
+        mode: 'browser',
+        connectedAt: new Date().toISOString(),
+        lastSeenAt: null,
+        permissionGranted: true,
+      },
+    },
+  };
+}
+
+const gradedDetection = {
+  externalCourseId: '404',
+  externalAssignmentId: '77001',
+  title: 'Museum Project',
+  url: `https://${DOMAIN}/courses/404/assignments/77001`,
+  submissionStatus: 'graded',
+  score: 100,
+  pointsPossible: 100,
+  detectedAt: new Date().toISOString(),
+};
+
+test('a graded reading completes the feed assignment it belongs to', () => {
+  // The reported bug, exactly: full score and graded on Canvas, "Not Started"
+  // in LockIn. The exact-key lookup could never match a feed assignment,
+  // because that key needs a course id and a link the feed never supplies.
+  const next = reducer(stateWithFeedAssignment(), {
+    type: 'CANVAS_DETECTED',
+    detected: [gradedDetection],
+    seenAt: new Date().toISOString(),
+  });
+
+  const assignment = next.assignments[0];
+  assert.equal(assignment.canvas?.submissionStatus, 'graded');
+  assert.equal(assignment.status, 'Completed');
+  assert.equal(assignment.canvas?.score, 100);
+});
+
+test('and it adopts the identity it was missing, so later reads take the fast path', () => {
+  const next = reducer(stateWithFeedAssignment(), {
+    type: 'CANVAS_DETECTED',
+    detected: [gradedDetection],
+    seenAt: new Date().toISOString(),
+  });
+  assert.equal(next.assignments[0].externalCourseId, '404');
+  assert.equal(next.assignments[0].canvas?.domain, DOMAIN);
+});
+
+test('it is not filed as a separate import candidate as well', () => {
+  // The old behaviour: the reading fell through to the "not linked to
+  // anything" pile, so the student was offered an import of work they already
+  // had, while the real assignment stayed unfinished.
+  const next = reducer(stateWithFeedAssignment(), {
+    type: 'CANVAS_DETECTED',
+    detected: [gradedDetection],
+    seenAt: new Date().toISOString(),
+  });
+  assert.equal(next.canvas.detected.length, 0);
+});
+
+test('an id that belongs to a different Canvas install is not adopted', () => {
+  const state = stateWithFeedAssignment();
+  state.assignments[0].canvas = {
+    domain: 'other-school.instructure.com',
+    url: 'https://other-school.instructure.com/courses/1/assignments/77001',
+    submissionStatus: 'not_submitted',
+    lastCheckedAt: null,
+    lastStatusChangeAt: null,
+  };
+  const next = reducer(state, {
+    type: 'CANVAS_DETECTED',
+    detected: [gradedDetection],
+    seenAt: new Date().toISOString(),
+  });
+  assert.equal(next.assignments[0].status, 'Not Started');
+});
+
+test('a matching id with a conflicting course id is left alone', () => {
+  const state = stateWithFeedAssignment();
+  state.assignments[0].externalCourseId = '999';
+  const next = reducer(state, {
+    type: 'CANVAS_DETECTED',
+    detected: [gradedDetection],
+    seenAt: new Date().toISOString(),
+  });
+  assert.equal(next.assignments[0].status, 'Not Started');
+});

@@ -30,7 +30,7 @@ import type { FocusRun } from '../types/parent';
 import { todayISO, uid } from '../lib/time';
 import { defaultState } from '../lib/storage';
 import { isVerifiedComplete, mergeStatus } from '../lib/canvas/verification';
-import { assignmentCanvasKey } from '../lib/canvas/matching';
+import { assignmentCanvasKey, findByExternalId } from '../lib/canvas/matching';
 import { createAssignmentFromCanvas, createAssignmentFromFeed } from './factories';
 import { MAX_ACTIVITY, MAX_COMPLETED_SESSIONS, trimActivity } from '../lib/retention';
 import { AWAY_GRACE_MS } from '../lib/focusGuard';
@@ -1060,7 +1060,22 @@ export function reducer(state: AppState, action: Action): AppState {
 
       for (const detected of action.detected) {
         const key = canvasKey(domain, detected.externalCourseId, detected.externalAssignmentId);
-        const index = assignments.findIndex((a) => assignmentCanvasKey(a) === key);
+        let index = assignments.findIndex((a) => assignmentCanvasKey(a) === key);
+
+        /**
+         * Fall back to the Canvas assignment id on its own.
+         *
+         * Work that came from the calendar feed has an `externalAssignmentId`
+         * and nothing else — no course id, no `canvas` link — so the exact key
+         * above never matched it, and a graded status had nothing to attach
+         * to. That is why a finished assignment with a full score on Canvas
+         * sat in LockIn as "Not Started". Identity is still an id issued by
+         * Canvas, never a title.
+         */
+        if (index === -1) {
+          const byId = findByExternalId(assignments, domain, detected);
+          if (byId) index = assignments.indexOf(byId);
+        }
         if (index === -1) continue;
 
         const assignment = assignments[index];
@@ -1084,6 +1099,10 @@ export function reducer(state: AppState, action: Action): AppState {
 
         let updated: Assignment = {
           ...assignment,
+          // A feed assignment adopts the identity it was missing, so every
+          // later reading takes the exact path above.
+          externalCourseId: assignment.externalCourseId ?? detected.externalCourseId,
+          externalAssignmentId: assignment.externalAssignmentId ?? detected.externalAssignmentId,
           canvas: {
             domain,
             url: detected.url || assignment.canvas?.url || '',

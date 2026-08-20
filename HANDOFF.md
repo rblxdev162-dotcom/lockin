@@ -511,8 +511,36 @@ tabs are Assigned/Missing/Done — so `Next up`/`Overdue` became
 a heading, a card and a "Manage" link, which gave plumbing the same weight as
 the work.
 
+### The bug that made the whole feature look broken
+
+A graded assignment with a full score on Canvas still read "Not Started" in
+LockIn, even after a successful Check Canvas. The reading was arriving and
+being thrown away.
+
+`assignmentCanvasKey()` needs three things — a `canvas` link, a course id and
+an assignment id — and **a feed-imported assignment has only the assignment
+id**. An `.ics` UID is `event-assignment-<id>`; the feed carries no course id
+and no link object. So the exact-identity lookup in `CANVAS_DETECTED` returned
+`null` for essentially every assignment in a real install, the reading fell
+through to the "not linked to anything" pile, and the student was offered an
+import of work they already had while the real assignment stayed unfinished.
+
+`findByExternalId()` is the fallback: match on the Canvas assignment id alone,
+which is safe *because it is an id* — issued by Canvas, unique in an instance,
+and carried identically by both sources. Domain and course id are compared only
+when the stored assignment already has them; an unlinked assignment adopts them
+on the first match, so every later reading takes the exact path. Titles are
+still never used for identity.
+
+Five tests in `canvas-grades` pin it, and they were checked to fail without the
+fallback (3 fail, 30 pass with it) rather than assumed to.
+
 ### Things that will bite you
 
+- **A feed assignment has an assignment id and nothing else.** Any new code
+  that matches Canvas data to LockIn work must go through
+  `findByExternalId()`, not `assignmentCanvasKey()` alone. This is the single
+  most likely place for this bug to come back.
 - **`grades` is a whole new slice, so schema v11.** The migration is additive
   and sets the window to the conservative default, which means an existing
   install *stops* its 30-minute feed refresh on upgrade rather than inheriting

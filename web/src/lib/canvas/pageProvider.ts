@@ -65,6 +65,8 @@ export interface CanvasExtensionView {
     pageKinds?: string[];
     readGrades?: boolean;
     tabsInjected?: number;
+    /** Which Canvas tabs the check found, and whether each answered. */
+    tabsSeen?: { path: string; answered: boolean; injected?: boolean; kind?: string; error?: string }[];
     tabsChecked?: number;
     found?: number;
     added?: number;

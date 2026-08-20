@@ -608,6 +608,39 @@ async function main() {
     JSON.stringify((pressed?.detected ?? []).map((d) => [d.title, d.submissionStatus])),
   );
   await closeTab(gradesTab.targetId);
+
+  /* ---- 0d: a Canvas tab that was already open before the check ---- */
+  /**
+   * NOT a test of the orphaned-content-script case, though it was written as
+   * one first. Setting `__lockinCanvasLoaded` over CDP writes it to the
+   * **page's** world; the content script's guard lives in the extension's
+   * isolated world, which is a different `window` entirely. The test passed
+   * while touching nothing it claimed to touch — a passing test that proves
+   * nothing is worse than no test, so it is relabelled to what it actually
+   * covers: a tab opened before the press is read.
+   *
+   * The real orphaned-tab case needs an extension reload mid-run, which this
+   * harness cannot do; it is instrumented on the live install instead
+   * (`tabsSeen` in the diagnostic record).
+   */
+  await swEval(`chrome.storage.local.set({ lockin_canvas_cache: {} }).then(() => 1)`);
+  const staleTab = await openTab(`https://${CANVAS_HOST}/courses/101/grades`);
+  await sleep(800);
+  await browser.send('Target.activateTarget', { targetId: gateApp.targetId });
+  await sleep(300);
+
+  const afterStale = await bridgeRequest(gateApp.sessionId, 'CANVAS_SYNC', null, 15_000);
+  check(
+    'a Canvas tab opened before the check is still read',
+    afterStale?.sync?.readGrades === true,
+    JSON.stringify({ reason: afterStale?.sync?.reason, kind: afterStale?.sync?.pageKind }),
+  );
+  check(
+    'and the check records which tabs it saw',
+    Array.isArray(afterStale?.sync?.tabsSeen) && afterStale.sync.tabsSeen.length > 0,
+    JSON.stringify(afterStale?.sync?.tabsSeen),
+  );
+  await closeTab(staleTab.targetId);
   await closeTab(gateApp.targetId);
   // The gradebook fixture marks 5001 graded; leaving that in the cache would
   // pre-complete the assignment the tests below start from.

@@ -603,6 +603,31 @@ Pinned by a test that stubs `declarativeNetRequest` faithfully enough to reject
 a duplicate id, fires six concurrent `applyRules`, and was checked to fail
 against the old implementation.
 
+### A test that passed while testing nothing
+
+Written to prove that a content script orphaned by an extension reload stays
+mute — setting `window.__lockinCanvasLoaded` over CDP and then pressing. It
+passed immediately, which should have been the tell: **CDP evaluates in the
+page's world, and the guard lives in the extension's isolated world.** Two
+different `window` objects. The test touched nothing it claimed to touch.
+
+It is relabelled to what it actually covers (a tab opened before the press is
+read). The orphaned-tab case needs a real extension reload mid-run, which this
+harness cannot do, so it is instrumented on the live install instead rather
+than asserted here.
+
+**When a test passes on the first run for a bug you have not fixed yet, suspect
+the test.**
+
+### Instrumenting instead of deducing
+
+Three reads on the user's install, all `pageKind: "dashboard"`, `grades: 0` —
+and no way to tell from disk whether their gradebook tab was closed at that
+moment or open-but-silent. Those need opposite fixes, so `syncCanvasNow` now
+records `tabsSeen`: the **path** of every Canvas tab it found (never the query
+string, which is where Canvas puts tokens), whether each answered, whether it
+had to be injected, and any error. One press then answers the question as fact.
+
 ### Things that will bite you
 
 - **`refresh()` has seven callers and they overlap.** Anything it touches needs

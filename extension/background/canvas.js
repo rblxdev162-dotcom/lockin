@@ -473,6 +473,15 @@ export async function getCanvasView() {
   };
 }
 
+/** Path only — never the query string, which is where Canvas puts tokens. */
+function pathOf(url) {
+  try {
+    return new URL(url).pathname.slice(0, 120);
+  } catch {
+    return '';
+  }
+}
+
 /** How useful a Canvas URL is to read: a gradebook outranks anything else. */
 function gradesRank(url) {
   if (typeof url !== 'string') return 0;
@@ -582,33 +591,66 @@ export async function syncCanvasNow(options = {}) {
    * already holds `scripting` permission for this origin.
    */
   const kinds = [];
+  const tabsSeen = [];
   let reached = 0;
   let injected = 0;
 
   for (const candidate of tabs) {
+    const seen = { path: pathOf(candidate.url), answered: false, injected: false };
     let reply = null;
     try {
       reply = await chrome.tabs.sendMessage(candidate.id, { type: CANVAS_MSG.REPARSE });
     } catch {
-      // Nobody home. Inject the reader into this tab and ask once more.
+      // Nobody home. That happens for a tab loaded before the reader was
+      // registered, and — the case that cost days — for a tab whose content
+      // script was orphaned by an extension reload. Clear the loader's guards
+      // before re-injecting: they live in this extension's isolated world and
+      // survive the script that set them, so an injection without this hits
+      // `if (window.__lockinCanvasLoaded) return;` and silently does nothing,
+      // leaving the tab mute forever.
       try {
+        await chrome.scripting.executeScript({
+          target: { tabId: candidate.id, allFrames: false },
+          func: () => {
+            window.__lockinCanvasLoaded = false;
+            window.__lockinCanvasActive = false;
+          },
+        });
         await chrome.scripting.executeScript({
           target: { tabId: candidate.id, allFrames: false },
           files: ['canvas/content.js'],
         });
         injected += 1;
+        seen.injected = true;
         // The loader pulls the module in dynamically, so give it a moment.
-        await new Promise((resolve) => setTimeout(resolve, 400));
+        await new Promise((resolve) => setTimeout(resolve, 500));
         reply = await chrome.tabs.sendMessage(candidate.id, { type: CANVAS_MSG.REPARSE });
-      } catch {
-        // Genuinely unreachable — a Chrome-internal page, or a tab that closed
-        // mid-check. Other tabs may still answer.
+      } catch (error) {
+        seen.error = String(error?.message ?? error).slice(0, 120);
       }
     }
     if (reply) {
       reached += 1;
-      if (typeof reply.pageKind === 'string') kinds.push(reply.pageKind);
+      seen.answered = true;
+      if (typeof reply.pageKind === 'string') {
+        kinds.push(reply.pageKind);
+        seen.kind = reply.pageKind;
+      }
     }
+    tabsSeen.push(seen);
+  }
+
+  // Recorded so a failure like "it only ever reads the dashboard" is a fact on
+  // disk rather than a guess. Paths only — no query strings, which is where
+  // Canvas puts anything sensitive.
+  try {
+    const key = LAST_READ_KEY;
+    const previous = (await chrome.storage.local.get(key))[key];
+    const history = Array.isArray(previous) ? previous : [];
+    history.unshift({ at: now, event: 'press', tabsSeen });
+    await chrome.storage.local.set({ [key]: history.slice(0, 10) });
+  } catch {
+    /* diagnostics must never break a check */
   }
 
   if (reached === 0) {
@@ -640,6 +682,7 @@ export async function syncCanvasNow(options = {}) {
     readGrades: pageKind === 'grades' || pageKind === 'grades_all',
     tabsChecked: reached,
     tabsInjected: injected,
+    tabsSeen,
     /** Every page kind that answered, so the UI can say what it actually read. */
     pageKinds: kinds,
     found: afterEntries.length,

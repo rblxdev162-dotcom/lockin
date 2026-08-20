@@ -575,3 +575,47 @@ test('two refreshes at once do not collide over rule ids', async () => {
   assert.equal(new Set(ids).size, ids.length, 'no duplicate rule ids may be left behind');
   assert.equal(ids.length, results[0], 'the final rule set is one clean copy, not six');
 });
+
+test('a duplicate-id rejection heals itself instead of dropping blocking', async () => {
+  // Belt and braces for the error the user saw three times on their own
+  // install. Even if some path escapes the queue, the outcome must be applied
+  // rules — not a caught error and an unblocked browser.
+  let stored = [{ id: 1, priority: 1, action: { type: 'block' }, condition: {} }];
+  let rejectedOnce = false;
+
+  globalThis.chrome = {
+    declarativeNetRequest: {
+      async getDynamicRules() {
+        return stored.map((r) => ({ ...r }));
+      },
+      async updateDynamicRules({ removeRuleIds = [], addRules = [] }) {
+        // Simulate the racy state: the first write is told to remove ids that
+        // are not the ones actually present, so id 1 collides.
+        if (!rejectedOnce && addRules.length > 0) {
+          rejectedOnce = true;
+          throw new Error('Rule with id 1 does not have a unique ID.');
+        }
+        const remove = new Set(removeRuleIds);
+        stored = stored.filter((r) => !remove.has(r.id)).concat(addRules);
+      },
+    },
+  };
+
+  const { applyRules } = await import(`../background/rules.js?heal=${Date.now()}`);
+  const count = await applyRules({
+    focusModeActive: true,
+    blockingEnabled: true,
+    blockedDomains: ['distraction.test'],
+    allowedDomains: [],
+    requiredRemaining: 1,
+    temporaryUnlockUntil: null,
+    isTest: false,
+    appUrl: 'http://localhost:5173',
+  });
+
+  assert.ok(rejectedOnce, 'the collision should actually have been exercised');
+  assert.ok(count > 0, 'rules were applied on the retry');
+  assert.ok(stored.length > 0, 'and they are really in place');
+  const ids = stored.map((r) => r.id);
+  assert.equal(new Set(ids).size, ids.length, 'with no duplicates left behind');
+});

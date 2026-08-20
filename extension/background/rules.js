@@ -123,7 +123,7 @@ export async function applyRules(state, now = Date.now()) {
   return run;
 }
 
-async function writeRules(state, now) {
+async function writeRules(state, now, attempt = 0) {
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
   const addRules = buildRules(state, now);
 
@@ -138,6 +138,29 @@ async function writeRules(state, now) {
    */
   const removeRuleIds = [...new Set([...existing.map((r) => r.id), ...addRules.map((r) => r.id)])];
 
-  await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds, addRules });
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds, addRules });
+  } catch (error) {
+    /**
+     * Self-heal rather than give up.
+     *
+     * The queue above serialises this extension's own writes, which is where
+     * the collision came from — but "blocking silently did not apply" is too
+     * expensive a failure to leave resting on one mechanism being complete.
+     * So a duplicate-id rejection is retried once against a freshly read rule
+     * set, wiping whatever is actually there first. If it fails again the
+     * error propagates, because a second identical failure means something
+     * this code does not understand and should be visible.
+     */
+    if (attempt === 0 && /unique ID/i.test(String(error?.message ?? error))) {
+      const current = await chrome.declarativeNetRequest.getDynamicRules();
+      await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: current.map((r) => r.id),
+        addRules: [],
+      });
+      return writeRules(state, now, 1);
+    }
+    throw error;
+  }
   return addRules.length;
 }

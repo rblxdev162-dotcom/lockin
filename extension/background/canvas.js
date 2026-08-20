@@ -21,6 +21,7 @@ const CACHE_KEY = 'lockin_canvas_cache';
 const GRADES_KEY = 'lockin_canvas_grades';
 const WINDOW_KEY = 'lockin_canvas_window';
 const GATE_LOG_KEY = 'lockin_canvas_gate_log';
+const LAST_READ_KEY = 'lockin_canvas_last_read';
 const SCRIPT_ID = 'lockin-canvas';
 
 /** Gate decisions kept for the student to inspect. Small on purpose. */
@@ -569,23 +570,52 @@ export async function syncCanvasNow(options = {}) {
   const before = await getCanvasCache();
   const beforeCount = Object.keys(before).length;
 
+  /**
+   * Ask each tab to re-read, injecting the reader first if it is not there.
+   *
+   * A tab that was already open when the extension started has no content
+   * script in it — registration only affects *future* navigations. That
+   * produced the worst possible failure: the student's gradebook tab stayed
+   * silent, a dashboard tab answered instead, and the check reported success
+   * having read nothing that carries a score. Telling them to reload the tab
+   * was a workaround for something the extension can simply fix, since it
+   * already holds `scripting` permission for this origin.
+   */
   const kinds = [];
   let reached = 0;
+  let injected = 0;
+
   for (const candidate of tabs) {
+    let reply = null;
     try {
-      const reply = await chrome.tabs.sendMessage(candidate.id, { type: CANVAS_MSG.REPARSE });
-      reached += 1;
-      if (reply && typeof reply.pageKind === 'string') kinds.push(reply.pageKind);
+      reply = await chrome.tabs.sendMessage(candidate.id, { type: CANVAS_MSG.REPARSE });
     } catch {
-      // The content script is not in that tab — usually a page that loaded
-      // before the permission was granted. Other tabs may still answer.
+      // Nobody home. Inject the reader into this tab and ask once more.
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: candidate.id, allFrames: false },
+          files: ['canvas/content.js'],
+        });
+        injected += 1;
+        // The loader pulls the module in dynamically, so give it a moment.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        reply = await chrome.tabs.sendMessage(candidate.id, { type: CANVAS_MSG.REPARSE });
+      } catch {
+        // Genuinely unreachable — a Chrome-internal page, or a tab that closed
+        // mid-check. Other tabs may still answer.
+      }
+    }
+    if (reply) {
+      reached += 1;
+      if (typeof reply.pageKind === 'string') kinds.push(reply.pageKind);
     }
   }
+
   if (reached === 0) {
-    // A reload fixes it, and saying so is more useful than a silent zero.
     return { ok: false, reason: 'tab-not-ready', domain: config.domain };
   }
-  const pageKind = kinds.find((kind) => kind === 'grades' || kind === 'grades_all') ?? kinds[0] ?? 'unknown';
+  const pageKind =
+    kinds.find((kind) => kind === 'grades' || kind === 'grades_all') ?? kinds[0] ?? 'unknown';
 
   // The detection arrives as its own message; give it a moment to land.
   await new Promise((resolve) => setTimeout(resolve, 900));
@@ -609,6 +639,9 @@ export async function syncCanvasNow(options = {}) {
     // nudge them to Grades instead of silently finding little.
     readGrades: pageKind === 'grades' || pageKind === 'grades_all',
     tabsChecked: reached,
+    tabsInjected: injected,
+    /** Every page kind that answered, so the UI can say what it actually read. */
+    pageKinds: kinds,
     found: afterEntries.length,
     added: Math.max(0, afterEntries.length - beforeCount),
     updated,
@@ -686,8 +719,32 @@ export async function handleCanvasContentMessage(message, sender) {
   const clean = validateDetectionMessage(message, config.domain);
   if (!clean) return { ok: false, reason: 'invalid-payload' };
 
+  // What the page looked like, in counts. Kept so a gradebook that reads as
+  // nothing can be diagnosed from this machine rather than guessed at.
+  try {
+    const previous = (await chrome.storage.local.get(LAST_READ_KEY))[LAST_READ_KEY];
+    const history = Array.isArray(previous) ? previous : [];
+    history.unshift({
+      at: Date.now(),
+      pageKind: clean.pageKind,
+      assignments: clean.assignments.length,
+      grades: clean.grades.length,
+      diagnostics: clean.diagnostics,
+    });
+    await chrome.storage.local.set({ [LAST_READ_KEY]: history.slice(0, 10) });
+  } catch {
+    /* diagnostics must never break a read */
+  }
+
   const result = await applyDetection(clean);
   return { ok: true, ...result };
 }
 
-export const CANVAS_STORAGE_KEYS = { CONFIG_KEY, CACHE_KEY, GRADES_KEY, WINDOW_KEY, GATE_LOG_KEY };
+export const CANVAS_STORAGE_KEYS = {
+  CONFIG_KEY,
+  CACHE_KEY,
+  GRADES_KEY,
+  WINDOW_KEY,
+  GATE_LOG_KEY,
+  LAST_READ_KEY,
+};

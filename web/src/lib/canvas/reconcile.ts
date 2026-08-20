@@ -129,16 +129,25 @@ export function describeSync(view: CanvasExtensionView | null): {
     }
   }
 
-  // Read a page that carries no scores: say so, rather than reporting a
-  // successful check that found nothing and letting them assume the worst.
-  if (!sync.readGrades && (sync.found ?? 0) === 0) {
+  /**
+   * Read something, but not a gradebook.
+   *
+   * This used to report a cheerful success whenever *any* Canvas page
+   * answered — so a dashboard tab could satisfy the check while the student's
+   * actual question ("is my finished work marked as finished?") went
+   * unanswered, and every assignment stayed "not done". A check that did not
+   * read a page carrying scores has not done the job, however many
+   * assignments it saw, and it has to say so.
+   */
+  if (!sync.readGrades) {
     return {
       ok: false,
-      message: 'That Canvas page had nothing to read. Open Grades and press Check Canvas.',
+      message:
+        'Read your Canvas dashboard, which carries no scores. Open Canvas → Grades, then press Check Canvas again.',
     };
   }
 
-  const parts = [`${sync.found ?? 0} assignment${sync.found === 1 ? '' : 's'} found`];
+  const parts = [`${sync.found ?? 0} assignment${sync.found === 1 ? '' : 's'} read`];
   if (sync.updated) parts.push(`${sync.updated} updated`);
   if (sync.newlySubmitted) {
     parts.push(`${sync.newlySubmitted} newly submitted`);

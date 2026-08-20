@@ -62,7 +62,9 @@ export interface CanvasExtensionView {
     nextAllowedAt?: number | null;
     /** Which kind of Canvas page was read, so the UI can suggest Grades. */
     pageKind?: string;
+    pageKinds?: string[];
     readGrades?: boolean;
+    tabsInjected?: number;
     tabsChecked?: number;
     found?: number;
     added?: number;

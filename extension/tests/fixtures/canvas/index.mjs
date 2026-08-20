@@ -366,6 +366,41 @@ const courseGradesHidden = canvasShell({
   </div>`,
 });
 
+/**
+ * A gradebook that does NOT use the classic markup.
+ *
+ * No `#grades_summary`, no `tr.student_assignment`, no `.assignment_score` —
+ * just rows with an assignment link and a "18/20" cell. This exists because
+ * the first version of the parser required the classic shape and produced
+ * absolutely nothing on anything else, which is indistinguishable from
+ * "LockIn cannot tell what is done".
+ */
+const courseGradesModern = canvasShell({
+  title: 'Grades',
+  breadcrumbCourse: crumb('303', 'Museum Studies'),
+  body: `
+  <h1>Grades</h1>
+  <div role="table" class="grades-table">
+    <table>
+      <tbody>
+        <tr>
+          <td><a href="/courses/303/assignments/88001">Museum Project</a></td>
+          <td><time datetime="${DUE_TOMORROW}">Aug 16</time></td>
+          <td>Graded</td>
+          <td>100/100</td>
+        </tr>
+        <tr>
+          <td><a href="/courses/303/assignments/88002">Reading Response</a></td>
+          <td><time datetime="${DUE_TOMORROW}">Aug 16</time></td>
+          <td>Submitted</td>
+          <td>-</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="student-grades-right-content">Total: <span class="grade">97%</span></div>`,
+});
+
 /** `/grades` — every class, with the grade Canvas publishes for each. */
 const allGrades = canvasShell({
   title: 'Grades',
@@ -412,6 +447,7 @@ export const CANVAS_FIXTURES = {
   [`/courses/${MATH.id}/assignments/9999`]: malformed,
   [`/courses/${MATH.id}/grades`]: courseGrades,
   [`/courses/${ENGLISH.id}/grades`]: courseGradesHidden,
+  '/courses/303/grades': courseGradesModern,
   '/grades': allGrades,
   '/courses/777/assignments': customDomain,
   '/news': notCanvas,

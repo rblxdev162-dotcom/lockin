@@ -535,8 +535,52 @@ still never used for identity.
 Five tests in `canvas-grades` pin it, and they were checked to fail without the
 fallback (3 fail, 30 pass with it) rather than assumed to.
 
+### Why it still looked broken after all that, and how it was found
+
+Three fixes in, a graded assignment still read as not done. The next three
+guesses would have been wrong too, so the answer came from reading what the
+extension had written to disk on the user's own machine
+(`Local Extension Settings/<id>/000003.log`, plain `strings` over the LevelDB):
+
+| Evidence | What it ruled out |
+| --- | --- |
+| 12 gate decisions, every one `allowed` | the gate |
+| `schoolDayFrom` present in the stored window | a stale extension build |
+| 0 statuses `graded`; 142 `unknown` | the reader was running, on the wrong pages |
+| **`lockin_canvas_grades` key absent entirely** | a Grades page had never once parsed |
+| cached titles: "Assignment, Syllabus", "Submission Details" | it was reading the dashboard |
+
+The cause: **a content script registered with `registerContentScripts` only
+attaches to pages loaded afterwards.** The student's gradebook tab predated the
+extension reload, so it was silent; a dashboard tab answered instead; and
+`describeSync` reported success because *some* page had been read. Every part
+of the chain worked, and the whole produced nothing.
+
+Three changes followed:
+
+1. **`syncCanvasNow` injects `canvas/content.js` into any Canvas tab that does
+   not answer**, then retries. The extension already holds `scripting` for that
+   origin, so "reload the Canvas tab" was a workaround for something it could
+   simply do. That class of failure is gone.
+2. **A check that read no gradebook is not a success.** It says which page it
+   read and what to open instead. Reporting "12 assignments read" after reading
+   a dashboard is how this stayed hidden.
+3. **The grades parser no longer requires Canvas's classic markup.** It wanted
+   `#grades_summary` + `tr.student_assignment` + `.assignment_score`; anything
+   else produced nothing and fell through to the link harvester, whose statuses
+   are all `unknown` — indistinguishable, from the student's side, from "LockIn
+   cannot tell what is done". It now falls back to any row carrying an
+   assignment link, and any cell shaped like `18/20`. A fixture with none of the
+   classic markup pins it.
+
+There is now a counts-only fingerprint of the last ten reads at
+`lockin_canvas_last_read` — booleans and numbers, no titles, no scores — so the
+next failure of this kind is read rather than guessed at.
+
 ### Things that will bite you
 
+- **A registered content script is not in tabs that were already open.** Inject,
+  do not ask the student to reload.
 - **A feed assignment has an assignment id and nothing else.** Any new code
   that matches Canvas data to LockIn work must go through
   `findByExternalId()`, not `assignmentCanvasKey()` alone. This is the single

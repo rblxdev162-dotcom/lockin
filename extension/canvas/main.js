@@ -75,6 +75,7 @@ export function startCanvasContentScript() {
       assignments: result.assignments,
       courses: result.courses,
       grades: result.grades || [],
+      diagnostics: result.diagnostics,
       // Which half of the gate this reading has to pass: a press, or the
       // observer noticing the page changed while the student browses.
       trigger: reason === 'forced' ? 'manual' : 'passive',

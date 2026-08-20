@@ -173,10 +173,24 @@ export function validateDetectionMessage(raw, expectedDomain) {
         .filter(Boolean)
     : [];
 
+  /**
+   * Counts and booleans only. A diagnostic that could carry a title or a score
+   * would be a second, unaudited path for page content to reach storage.
+   */
+  let diagnostics;
+  if (raw.diagnostics && typeof raw.diagnostics === 'object') {
+    diagnostics = {};
+    for (const [key, value] of Object.entries(raw.diagnostics)) {
+      if (typeof value === 'boolean') diagnostics[key.slice(0, 30)] = value;
+      else if (Number.isFinite(value)) diagnostics[key.slice(0, 30)] = Math.min(99999, Number(value));
+    }
+  }
+
   return {
     type: CANVAS_MSG.DETECTION,
     domain,
     pageKind: str(raw.pageKind, 40) || 'unknown',
+    diagnostics,
     readable: raw.readable === true,
     assignments,
     courses,

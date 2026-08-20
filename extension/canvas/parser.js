@@ -438,6 +438,7 @@ export function parseCanvasPage(doc, baseUrl) {
   const info = classifyCanvasUrl(baseUrl);
   let assignments = [];
   let grades = [];
+  let diagnostics;
 
   switch (info.kind) {
     case 'assignment':
@@ -458,6 +459,7 @@ export function parseCanvasPage(doc, baseUrl) {
       const read = parseCanvasGradesPage(doc, baseUrl);
       assignments = read.assignments;
       grades = read.grades;
+      diagnostics = read.diagnostics;
       // A gradebook with no readable rows is still a course page; fall back
       // rather than reporting the page unreadable.
       if (assignments.length === 0) assignments = parseCanvasCoursePage(doc, baseUrl);
@@ -485,6 +487,7 @@ export function parseCanvasPage(doc, baseUrl) {
     assignments: assignments.slice(0, LIMITS.MAX_ASSIGNMENTS_PER_MESSAGE),
     courses,
     grades: grades.slice(0, LIMITS.MAX_COURSES_PER_MESSAGE),
+    diagnostics,
     readable: assignments.length > 0 || courses.length > 0 || grades.length > 0,
   };
 }
@@ -578,7 +581,28 @@ export function parseCanvasGradesPage(doc, baseUrl) {
   const assignments = [];
 
   const table = doc.querySelector('#grades_summary') || contentRoot(doc);
-  const rows = table.querySelectorAll('tr.student_assignment, tr[id^="submission_"]');
+
+  /**
+   * Rows, chosen tolerantly.
+   *
+   * The first version required `tr.student_assignment` or `tr[id^=submission_]`,
+   * which is what Canvas's classic gradebook emits — and if an install renders
+   * anything else, the whole page silently produced nothing and fell back to
+   * the generic link harvester, whose statuses are all `unknown`. That is
+   * indistinguishable, from the student's side, from "LockIn cannot tell what
+   * is done".
+   *
+   * So: those rows if they exist, otherwise **any table row carrying a link to
+   * an assignment**. Identity still comes from the href, and a row with no
+   * score cell still cannot read as graded, so widening what counts as a row
+   * cannot manufacture a false pass.
+   */
+  let rows = table.querySelectorAll('tr.student_assignment, tr[id^="submission_"]');
+  if (rows.length === 0) {
+    rows = [...table.querySelectorAll('tr, li, [role="row"]')].filter((row) =>
+      row.querySelector('a[href*="/assignments/"], a[href*="/quizzes/"]'),
+    );
+  }
 
   for (const row of rows) {
     if (assignments.length >= LIMITS.MAX_ASSIGNMENTS_PER_MESSAGE) break;
@@ -590,9 +614,19 @@ export function parseCanvasGradesPage(doc, baseUrl) {
     const title = clean(anchor.getAttribute('aria-label') || anchor.textContent, LIMITS.MAX_TITLE_LENGTH);
     if (!title) continue;
 
-    const scoreCell = row.querySelector('.assignment_score, .score, td.grade');
+    const scoreCell =
+      row.querySelector('.assignment_score, .score_holder, .score, td.grade, [data-testid="grade-cell"]') ||
+      // Last resort: a cell that looks like "18/20" or "18 / 20".
+      [...row.querySelectorAll('td, [role="cell"]')].find((cell) =>
+        /\d+(\.\d+)?\s*\/\s*\d+/.test(clean(cell.textContent, 40)),
+      ) ||
+      null;
     const { score, text: scoreText, excused } = parseScoreCell(scoreCell);
-    const pointsPossible = parsePointsCell(row.querySelector('.points_possible'));
+    let pointsPossible = parsePointsCell(row.querySelector('.points_possible'));
+    if (pointsPossible === undefined && scoreCell) {
+      const outOf = clean(scoreCell.textContent, 60).match(/\/\s*(\d+(?:\.\d+)?)/);
+      if (outOf) pointsPossible = Number(outOf[1]);
+    }
 
     // Status: the row's own pills and status cell first, then the score.
     const statusCell = row.querySelector('td.status, .submission_status') || row;
@@ -628,7 +662,22 @@ export function parseCanvasGradesPage(doc, baseUrl) {
     });
   }
 
-  return { assignments, grades: parseCourseTotal(doc, baseUrl, courseId) };
+  return {
+    assignments,
+    grades: parseCourseTotal(doc, baseUrl, courseId),
+    // A small, privacy-safe fingerprint of why a page produced what it did.
+    // Counts and selector hits only — no titles, no scores, no URLs beyond the
+    // path. It exists so a page that reads as nothing can be diagnosed from
+    // the student's own machine instead of guessed at.
+    diagnostics: {
+      hadGradesSummary: !!doc.querySelector('#grades_summary'),
+      classicRows: doc.querySelectorAll('#grades_summary tr.student_assignment').length,
+      assignmentLinks: doc.querySelectorAll('a[href*="/assignments/"]').length,
+      scoreCells: doc.querySelectorAll('.assignment_score, .score_holder').length,
+      rowsConsidered: rows.length,
+      rowsRead: assignments.length,
+    },
+  };
 }
 
 /**

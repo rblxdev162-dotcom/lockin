@@ -404,6 +404,35 @@ async function main() {
     JSON.stringify(hidden.grades),
   );
 
+  const modern = await inPage(
+    browser,
+    `https://${CANVAS_HOST}/courses/303/grades`,
+    `({ parser }) => parser.parseCanvasPage(document, location.href)`,
+  );
+  const museum = modern.assignments.find((a) => a.title === 'Museum Project');
+  check(
+    'a gradebook with none of the classic markup is still read',
+    modern.assignments.length === 2,
+    JSON.stringify(modern.assignments.map((a) => a.title)),
+  );
+  check(
+    'a graded row reads as graded, with score and points, from "100/100"',
+    museum?.submissionStatus === 'graded' &&
+      museum?.score === 100 &&
+      museum?.pointsPossible === 100,
+    JSON.stringify(museum),
+  );
+  check(
+    'an unscored row on that page is still not graded',
+    modern.assignments.find((a) => a.title === 'Reading Response')?.submissionStatus === 'submitted',
+    JSON.stringify(modern.assignments.find((a) => a.title === 'Reading Response')),
+  );
+  check(
+    'and its course total is read',
+    modern.grades[0]?.currentScore === 97,
+    JSON.stringify(modern.grades),
+  );
+
   const all = await inPage(
     browser,
     `https://${CANVAS_HOST}/grades`,

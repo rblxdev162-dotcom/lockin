@@ -94,10 +94,50 @@ export function buildRules(state, now = Date.now()) {
 }
 
 /** Replaces every dynamic rule with the ones this state implies. */
+/**
+ * Serialises rule writes.
+ *
+ * `refresh()` is called from six places — cold start, onInstalled, onStartup,
+ * the heartbeat alarm, the expiry alarm, `storage.onChanged` and every
+ * SYNC_STATE from the app — and several of those fire within milliseconds of
+ * each other when Chrome starts. The read-then-write below is not atomic, so
+ * two overlapping runs both saw an empty rule set, both built rules numbered
+ * from 1, and the second one failed with:
+ *
+ *   Error: Rule with id 1 does not have a unique ID.
+ *
+ * The failure is caught upstream, so nothing crashed — it simply meant the
+ * blocking rules were not applied that time round, which is the one failure
+ * this extension exists to prevent. A chained promise makes overlapping calls
+ * queue instead of race.
+ */
+let ruleWriteQueue = Promise.resolve(0);
+
 export async function applyRules(state, now = Date.now()) {
+  const run = ruleWriteQueue.then(
+    () => writeRules(state, now),
+    () => writeRules(state, now),
+  );
+  // The queue must survive a failed write, or one error stalls every later one.
+  ruleWriteQueue = run.catch(() => 0);
+  return run;
+}
+
+async function writeRules(state, now) {
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
-  const removeRuleIds = existing.map((r) => r.id);
   const addRules = buildRules(state, now);
+
+  /**
+   * Remove what is there *and* every id about to be added.
+   *
+   * The union matters: if a previous write half-applied, or another context
+   * added rules between the read above and the write below, an id we are about
+   * to add may already exist without appearing in `existing`. Naming it in
+   * `removeRuleIds` is harmless when it is absent and decisive when it is not —
+   * Chrome processes removals before additions.
+   */
+  const removeRuleIds = [...new Set([...existing.map((r) => r.id), ...addRules.map((r) => r.id)])];
+
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds, addRules });
   return addRules.length;
 }

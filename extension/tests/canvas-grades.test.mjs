@@ -496,3 +496,82 @@ test('a matching id with a conflicting course id is left alone', () => {
   });
   assert.equal(next.assignments[0].status, 'Not Started');
 });
+
+/* ------------------------------------------------------------------ */
+/* 6. Blocking rules must survive two refreshes at once                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The failure this reproduces was visible in the service-worker console as:
+ *
+ *   [LockIn] failed to apply blocking rules
+ *   Error: Rule with id 1 does not have a unique ID.
+ *
+ * `refresh()` is called from cold start, two lifecycle hooks, two alarms,
+ * `storage.onChanged` and every SYNC_STATE — several of which fire together
+ * when Chrome starts. `applyRules` read the existing rules and then wrote, and
+ * two overlapping runs both read an empty set, both numbered from 1, and the
+ * second write was rejected. The error was caught upstream, so nothing
+ * crashed: blocking simply did not get applied, which is the one thing this
+ * extension exists to do.
+ *
+ * Chrome is stubbed exactly as far as the rule bookkeeping goes — enough to
+ * reject a duplicate id the way the real API does.
+ */
+function stubChromeDNR() {
+  let stored = [];
+  return {
+    api: {
+      declarativeNetRequest: {
+        async getDynamicRules() {
+          // A real async boundary, which is where the interleaving happens.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return stored.map((r) => ({ ...r }));
+        },
+        async updateDynamicRules({ removeRuleIds = [], addRules = [] }) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const remove = new Set(removeRuleIds);
+          const kept = stored.filter((r) => !remove.has(r.id));
+          for (const rule of addRules) {
+            if (kept.some((r) => r.id === rule.id)) {
+              throw new Error(`Rule with id ${rule.id} does not have a unique ID.`);
+            }
+            kept.push(rule);
+          }
+          stored = kept;
+        },
+      },
+    },
+    rules: () => stored,
+  };
+}
+
+test('two refreshes at once do not collide over rule ids', async () => {
+  const stub = stubChromeDNR();
+  globalThis.chrome = stub.api;
+
+  const { applyRules } = await import('../background/rules.js');
+
+  const state = {
+    focusModeActive: true,
+    blockingEnabled: true,
+    blockedDomains: ['distraction.test', 'another.test'],
+    allowedDomains: ['instructure.com'],
+    requiredRemaining: 1,
+    temporaryUnlockUntil: null,
+    isTest: false,
+    appUrl: 'http://localhost:5173',
+  };
+
+  // Six at once, which is what Chrome starting actually produces.
+  const results = await Promise.all(Array.from({ length: 6 }, () => applyRules(state)));
+
+  assert.ok(
+    results.every((count) => count > 0),
+    `every write should have applied rules, got ${JSON.stringify(results)}`,
+  );
+
+  const ids = stub.rules().map((r) => r.id);
+  assert.equal(new Set(ids).size, ids.length, 'no duplicate rule ids may be left behind');
+  assert.equal(ids.length, results[0], 'the final rule set is one clean copy, not six');
+});

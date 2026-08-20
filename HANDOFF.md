@@ -577,8 +577,36 @@ There is now a counts-only fingerprint of the last ten reads at
 `lockin_canvas_last_read` — booleans and numbers, no titles, no scores — so the
 next failure of this kind is read rather than guessed at.
 
+### The rule-id race (found in the user's service-worker console)
+
+    [LockIn] failed to apply blocking rules
+    Error: Rule with id 1 does not have a unique ID.
+
+`applyRules()` read the existing dynamic rules and then wrote, with no lock.
+`refresh()` is called from **seven** places — cold start, `onInstalled`,
+`onStartup`, the heartbeat alarm, the expiry alarm, `storage.onChanged`, and
+every `SYNC_STATE` — and several fire within milliseconds of each other when
+Chrome starts. Two overlapping runs both saw an empty rule set, both numbered
+their rules from 1, and the second write was rejected.
+
+The error was caught upstream, so nothing crashed and nothing was reported:
+**blocking simply was not applied that time round**, which is the one thing
+this half of the project exists to do. Silent, intermittent, and invisible
+outside the worker console.
+
+`applyRules` now chains onto a queue so overlapping calls serialise, and
+`removeRuleIds` is the union of the observed ids and the ids about to be added
+(Chrome processes removals first, so naming an id that is absent is free). The
+queue survives a failed write — one error must not stall every later one.
+
+Pinned by a test that stubs `declarativeNetRequest` faithfully enough to reject
+a duplicate id, fires six concurrent `applyRules`, and was checked to fail
+against the old implementation.
+
 ### Things that will bite you
 
+- **`refresh()` has seven callers and they overlap.** Anything it touches needs
+  to be safe under concurrency, not merely correct in isolation.
 - **A registered content script is not in tabs that were already open.** Inject,
   do not ask the student to reload.
 - **A feed assignment has an assignment id and nothing else.** Any new code

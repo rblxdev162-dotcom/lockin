@@ -93,13 +93,18 @@ controls / enforcement checks that are still meaningful, or retired. Verified
 pre-existing on `5264871`, before Phase 18. **The Parent Dashboard itself is
 fine** — this is dead test code, not a broken feature.
 
-**Known time-sensitive check:** `test:planner-e2e`'s "today holds both the
-assignment and exam study" fails when the suite runs late in the evening —
-by 11pm the seeded availability for *today* has no capacity left, so the
-scheduler correctly places only one item. The planner is pure and takes `now`
-as an input, so this is the test asserting a daytime shape, not a bug. Re-run
-before school-day hours, or treat a late-night failure of that one line as
-expected.
+**Known time-sensitive block:** `test:planner-e2e` fails **six** checks when
+run late in the evening — "today holds both the assignment and exam study",
+"today is filled to capacity but no further", and the four Focus Mode
+assertions that follow, which cascade from a today-plan holding one item
+instead of two. By 11pm the seeded availability for *today* has no capacity
+left, so the scheduler correctly places less; the planner is pure and takes
+`now` as an input, so the test is asserting a daytime shape.
+
+**Verified, not assumed:** the same six fail identically on `5264871` (the
+commit before Phase 18) run at the same hour. Re-run during the day before
+investigating — and if you do investigate, fix it by seeding a fixed `now`
+rather than by loosening the assertions.
 
 **Known flake:** `test:parent-e2e` and the Edgenuity suites drive real OCR over
 rendered fixtures. A capture occasionally needs its retry budget and, rarely,

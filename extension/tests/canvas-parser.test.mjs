@@ -452,6 +452,40 @@ async function main() {
     JSON.stringify(english),
   );
 
+  /* ---- The all-courses page in a modern, table-free layout ---- */
+  /**
+   * This is the shape that actually failed on the user's Canvas: div cards,
+   * no table, no `tr`, no `li`. The row-driven parser found nothing, the page
+   * was reported unreadable, and the whole read was discarded — which looked
+   * from the outside exactly like "LockIn cannot see my grades".
+   */
+  const modernAll = await inPage(
+    browser,
+    `https://${CANVAS_HOST}/grades-modern`,
+    `({ parser }) => parser.parseCanvasAllGradesPage(document, location.href)`,
+  );
+  const byId = (id) => modernAll.grades.find((g) => g.externalCourseId === id);
+  check(
+    'a table-free grades page still yields one entry per class',
+    modernAll.grades.length === 3,
+    JSON.stringify(modernAll.grades.map((g) => [g.externalCourseId, g.currentScore])),
+  );
+  check(
+    'each class keeps its own grade rather than the first one found',
+    byId('101')?.currentScore === 93.75 && byId('303')?.currentScore === 88.2,
+    JSON.stringify(modernAll.grades),
+  );
+  check(
+    'a class with no published grade is still hidden, not borrowed',
+    byId('202')?.totalsHidden === true && byId('202')?.currentScore === null,
+    JSON.stringify(byId('202')),
+  );
+  check(
+    'the course name comes from the link',
+    byId('303')?.courseName === 'Museum Studies',
+    JSON.stringify(byId('303')),
+  );
+
   browser.close();
 }
 

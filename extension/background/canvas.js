@@ -473,6 +473,17 @@ export async function getCanvasView() {
   };
 }
 
+/** Counts and booleans only — never page text. */
+function sanitizeDiagnostics(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === 'boolean') out[key.slice(0, 30)] = value;
+    else if (Number.isFinite(value)) out[key.slice(0, 30)] = Math.min(99999, Number(value));
+  }
+  return out;
+}
+
 /** Path only — never the query string, which is where Canvas puts tokens. */
 function pathOf(url) {
   try {
@@ -755,6 +766,21 @@ export async function handleCanvasContentMessage(message, sender) {
   if (!gate.allowed) return { ok: false, reason: gate.verdict };
 
   if (message.type === CANVAS_MSG.UNREADABLE) {
+    // Record it. A page that answers and yields nothing is the failure that
+    // hides best, so it is the one that most needs writing down.
+    try {
+      const previous = (await chrome.storage.local.get(LAST_READ_KEY))[LAST_READ_KEY];
+      const history = Array.isArray(previous) ? previous : [];
+      history.unshift({
+        at: Date.now(),
+        event: 'unreadable',
+        pageKind: typeof message.pageKind === 'string' ? message.pageKind.slice(0, 40) : 'unknown',
+        diagnostics: sanitizeDiagnostics(message.diagnostics),
+      });
+      await chrome.storage.local.set({ [LAST_READ_KEY]: history.slice(0, 10) });
+    } catch {
+      /* diagnostics must never break a read */
+    }
     await setCanvasConfig({ ...config, lastSeenAt: new Date().toISOString() });
     return { ok: true, readable: false };
   }

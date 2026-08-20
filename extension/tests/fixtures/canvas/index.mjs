@@ -422,6 +422,32 @@ const allGrades = canvasShell({
   </table>`,
 });
 
+/**
+ * The all-courses grades page as a modern layout: cards made of divs, no
+ * table, no `tr`, no `li`. The first parser iterated table rows and found
+ * literally nothing here — the page answered and the whole read was thrown
+ * away as unreadable, which is what the user actually hit.
+ */
+const allGradesModern = canvasShell({
+  title: 'Grades',
+  body: `
+  <h1>Grades</h1>
+  <div class="grades-list">
+    <div class="course-card">
+      <div class="course-card__title"><a href="/courses/${MATH.id}">${MATH.name}</a></div>
+      <div class="course-card__grade"><span>93.75%</span><span>A</span></div>
+    </div>
+    <div class="course-card">
+      <div class="course-card__title"><a href="/courses/303">Museum Studies</a></div>
+      <div class="course-card__grade"><span>88.2%</span><span>B+</span></div>
+    </div>
+    <div class="course-card">
+      <div class="course-card__title"><a href="/courses/${ENGLISH.id}">${ENGLISH.name}</a></div>
+      <div class="course-card__grade"><span>No grades</span></div>
+    </div>
+  </div>`,
+});
+
 /* A page that is NOT Canvas at all, for the rejection test. */
 const notCanvas = `<!doctype html>
 <html><head><title>News</title></head>
@@ -449,6 +475,7 @@ export const CANVAS_FIXTURES = {
   [`/courses/${ENGLISH.id}/grades`]: courseGradesHidden,
   '/courses/303/grades': courseGradesModern,
   '/grades': allGrades,
+  '/grades-modern': allGradesModern,
   '/courses/777/assignments': customDomain,
   '/news': notCanvas,
 };

@@ -468,6 +468,7 @@ export function parseCanvasPage(doc, baseUrl) {
     case 'grades_all': {
       const read = parseCanvasAllGradesPage(doc, baseUrl);
       grades = read.grades;
+      diagnostics = read.diagnostics;
       break;
     }
     case 'course':
@@ -726,39 +727,65 @@ function parseCourseTotal(doc, baseUrl, courseId) {
  */
 export function parseCanvasAllGradesPage(doc, baseUrl) {
   const grades = new Map();
-  const rows = doc.querySelectorAll('tr, li, [role="listitem"]');
 
-  for (const row of rows) {
+  /**
+   * Driven by the course links, not by row markup.
+   *
+   * The first version iterated `tr, li, [role=listitem]` and read the cells
+   * inside. On the user's real Canvas that produced **nothing at all** — the
+   * page answered, the parser found no rows it recognised, and the whole read
+   * was discarded as unreadable. Layouts change; `<div>` rows are not rows to
+   * a `tr` selector.
+   *
+   * So the anchor is the anchor. Every link to `/courses/<id>` is a class, and
+   * the grade is found by walking *up* from that link until a container holds
+   * something percentage-shaped. That survives any arrangement of elements
+   * around the link, which is the only part of this page Canvas cannot change
+   * without breaking its own navigation.
+   */
+  for (const anchor of doc.querySelectorAll('a[href]')) {
     if (grades.size >= LIMITS.MAX_COURSES_PER_MESSAGE) break;
 
-    let courseId = null;
-    let courseName = '';
-    for (const anchor of row.querySelectorAll('a[href]')) {
-      let absolute;
-      try {
-        absolute = new URL(anchor.getAttribute('href'), baseUrl);
-      } catch {
-        continue;
-      }
-      const match = absolute.pathname.match(/^\/courses\/(\d+)(\/grades)?\/?$/);
-      if (!match) continue;
-      if (match[1].length > LIMITS.MAX_ID_LENGTH) continue;
-      courseId = match[1];
-      const text = clean(anchor.getAttribute('aria-label') || anchor.textContent, LIMITS.MAX_COURSE_NAME_LENGTH);
-      if (text) courseName = text;
-      break;
+    let absolute;
+    try {
+      absolute = new URL(anchor.getAttribute('href'), baseUrl);
+    } catch {
+      continue;
     }
-    if (!courseId) continue;
+    const match = absolute.pathname.match(/^\/courses\/(\d+)(?:\/grades)?\/?$/);
+    if (!match) continue;
+    const courseId = match[1];
+    if (courseId.length > LIMITS.MAX_ID_LENGTH) continue;
 
-    // Only the cells that are not the course-name link, so a course called
-    // "Algebra 100%" cannot be read as a grade.
-    const cells = [...row.querySelectorAll('td, .percent, .grade, .course_grade')].filter(
-      (cell) => !cell.querySelector('a[href*="/courses/"]'),
+    const courseName = clean(
+      anchor.getAttribute('aria-label') || anchor.textContent,
+      LIMITS.MAX_COURSE_NAME_LENGTH,
     );
-    const cellText = cells.map((cell) => clean(cell.textContent, 60)).join(' ');
 
-    const percent = percentIn(cellText);
-    const letter = letterIn(cellText);
+    // Climb until a container carries a grade, or we reach the page. Four
+    // levels is deep enough for a card or a row, shallow enough that a
+    // neighbouring class's grade cannot be picked up by accident.
+    let percent = null;
+    let letter = null;
+    let scope = anchor.parentElement;
+    for (let depth = 0; depth < 4 && scope; depth += 1) {
+      /**
+       * Stop the moment the container also holds another class.
+       *
+       * Climbing without this check reaches an ancestor holding every class on
+       * the page, and the first percentage in it gets handed to whichever
+       * class we happened to be walking up from — so a class showing "No
+       * grades" borrows its neighbour's 93.75%. Inventing a grade is the worst
+       * thing this file can do, so the walk stops rather than guesses.
+       */
+      if (holdsAnotherCourse(scope, courseId, baseUrl)) break;
+
+      const text = clean(scope.textContent, 600);
+      percent = percentIn(text);
+      letter = letterIn(text);
+      if (percent !== null || letter !== null) break;
+      scope = scope.parentElement;
+    }
 
     const existing = grades.get(courseId);
     if (existing && existing.currentScore !== null && percent === null) continue;
@@ -774,5 +801,30 @@ export function parseCanvasAllGradesPage(doc, baseUrl) {
     });
   }
 
-  return { assignments: [], grades: [...grades.values()] };
+  return {
+    assignments: [],
+    grades: [...grades.values()],
+    diagnostics: {
+      courseLinks: doc.querySelectorAll('a[href*="/courses/"]').length,
+      rowsFound: grades.size,
+      withGrade: [...grades.values()].filter((g) => !g.totalsHidden).length,
+      tables: doc.querySelectorAll('table').length,
+      percentOnPage: percentIn(clean(contentRoot(doc).textContent, 8000)) !== null,
+    },
+  };
+}
+
+/** True when `scope` links to any course other than `courseId`. */
+function holdsAnotherCourse(scope, courseId, baseUrl) {
+  for (const link of scope.querySelectorAll('a[href]')) {
+    let path;
+    try {
+      path = new URL(link.getAttribute('href'), baseUrl).pathname;
+    } catch {
+      continue;
+    }
+    const other = path.match(/^\/courses\/(\d+)/);
+    if (other && other[1] !== courseId) return true;
+  }
+  return false;
 }

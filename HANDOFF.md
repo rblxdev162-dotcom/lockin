@@ -628,8 +628,43 @@ records `tabsSeen`: the **path** of every Canvas tab it found (never the query
 string, which is where Canvas puts tokens), whether each answered, whether it
 had to be injected, and any error. One press then answers the question as fact.
 
+### The actual cause: a page that answers and yields nothing
+
+Instrumenting `tabsSeen` settled it in one press:
+
+    tabsSeen: [{path:"/grades", kind:"grades_all", answered:true, injected:false},
+               {path:"/",       kind:"dashboard",  answered:true, injected:false}]
+
+The gradebook tab was open, answered, and needed no injection — yet there was
+no read record for it and no stored grades. One explanation fits: the parser
+recognised nothing on the real page, `readable` came back false, and
+`main.js` dropped it down the UNREADABLE branch, **which recorded nothing at
+all**. Invisible by construction.
+
+Two fixes:
+
+1. **`parseCanvasAllGradesPage` no longer looks for rows.** It iterated
+   `tr, li, [role=listitem]`; this Canvas builds its cards from `<div>`s, so it
+   found zero rows and gave up. It now works from the **course links** —
+   `/courses/<id>`, which Canvas cannot restructure without breaking its own
+   navigation — and walks *up* from each link until a container holds something
+   percentage-shaped.
+
+   That rewrite shipped a bug of its own, caught by the new fixture rather than
+   by the user: the walk reached an ancestor holding every class, so a class
+   showing "No grades" borrowed its neighbour's 93.75%. It now **stops the
+   moment a container holds a link to a different course** — inventing a grade
+   is the worst thing this file can do, so it stops rather than guesses.
+
+2. **UNREADABLE carries the fingerprint.** The branch that hid this for days
+   now records `pageKind` and counts, so a page that answers and yields nothing
+   is visible on disk. It is the failure mode that hides best and therefore the
+   one most worth writing down.
+
 ### Things that will bite you
 
+- **`readable === false` is a real outcome, not an error path.** Anything that
+  drops a page silently will hide the next layout change exactly as long.
 - **`refresh()` has seven callers and they overlap.** Anything it touches needs
   to be safe under concurrency, not merely correct in isolation.
 - **A registered content script is not in tabs that were already open.** Inject,

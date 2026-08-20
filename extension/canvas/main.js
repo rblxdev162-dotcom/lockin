@@ -61,9 +61,22 @@ export function startCanvasContentScript() {
     }
 
     if (!result.readable) {
-      // Recognisably Canvas, nothing usable on it. Reported so the UI can say
-      // so honestly rather than silently showing nothing.
-      send({ type: CANVAS_MSG.UNREADABLE, domain, pageKind: result.pageKind });
+      /**
+       * Recognisably Canvas, nothing usable on it.
+       *
+       * The fingerprint rides along, and that matters: this is the branch the
+       * user's grades page took for days. It answered, produced nothing the
+       * parser recognised, and was dropped here — leaving no record at all, so
+       * from the outside it was indistinguishable from the page never being
+       * read. An unreadable page is exactly the one worth describing.
+       */
+      send({
+        type: CANVAS_MSG.UNREADABLE,
+        domain,
+        pageKind: result.pageKind,
+        diagnostics: result.diagnostics,
+        trigger: reason === 'forced' ? 'manual' : 'passive',
+      });
       return;
     }
 

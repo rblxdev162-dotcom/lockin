@@ -93,6 +93,14 @@ controls / enforcement checks that are still meaningful, or retired. Verified
 pre-existing on `5264871`, before Phase 18. **The Parent Dashboard itself is
 fine** — this is dead test code, not a broken feature.
 
+**Known time-sensitive check:** `test:planner-e2e`'s "today holds both the
+assignment and exam study" fails when the suite runs late in the evening —
+by 11pm the seeded availability for *today* has no capacity left, so the
+scheduler correctly places only one item. The planner is pure and takes `now`
+as an input, so this is the test asserting a daytime shape, not a bug. Re-run
+before school-day hours, or treat a late-night failure of that one line as
+expected.
+
 **Known flake:** `test:parent-e2e` and the Edgenuity suites drive real OCR over
 rendered fixtures. A capture occasionally needs its retry budget and, rarely,
 exhausts it. Re-run once before investigating.

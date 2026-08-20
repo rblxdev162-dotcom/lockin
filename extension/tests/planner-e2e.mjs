@@ -833,6 +833,7 @@ async function main() {
     window: {
       mode: 'scheduled',
       schoolDays: [],
+      schoolDayFrom: 0,
       schoolDayStart: 0,
       dayEnd: 1440,
       freeDayStart: 0,

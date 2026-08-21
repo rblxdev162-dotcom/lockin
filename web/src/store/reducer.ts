@@ -45,10 +45,12 @@ export type Action =
   | { type: 'SET_PROFILE_NAME'; firstName: string }
   | { type: 'FINISH_ONBOARDING' }
   | { type: 'ADD_ASSIGNMENT'; assignment: Assignment }
+  | { type: 'RESTORE_ASSIGNMENT'; assignment: Assignment; requiredInFocus: boolean }
   | { type: 'UPDATE_ASSIGNMENT'; id: string; patch: Partial<Assignment> }
   | { type: 'DELETE_ASSIGNMENT'; id: string }
   | { type: 'COMPLETE_ASSIGNMENT'; id: string; method: CompletionMethod }
   | { type: 'UNCOMPLETE_ASSIGNMENT'; id: string }
+  | { type: 'RENAME_CLASS'; from: string; to: string; ids?: string[] }
   | { type: 'MARK_REMINDER_FIRED'; id: string; stage: string }
   | { type: 'ADD_EXAM'; exam: Exam }
   | { type: 'UPDATE_EXAM'; id: string; patch: Partial<Exam> }
@@ -110,6 +112,7 @@ export type Action =
   | { type: 'CANVAS_UNLINK'; assignmentId: string }
   | { type: 'CANVAS_SET_COURSE_NAME'; externalCourseId: string; displayName: string }
   | { type: 'CANVAS_GRADES'; grades: CourseGrade[]; readAt: string }
+  | { type: 'CANVAS_CHECK_RECORDED'; report: AppState['canvas']['lastCheckReport'] }
   /* ---- Canvas Calendar Feed (Phase 16) ---- */
   /**
    * Apply a reconciled feed diff.
@@ -501,6 +504,25 @@ export function reducer(state: AppState, action: Action): AppState {
         'assignment_added',
       );
 
+    case 'RESTORE_ASSIGNMENT': {
+      if (state.assignments.some((assignment) => assignment.id === action.assignment.id)) return state;
+      const restoreRequirement = action.requiredInFocus && state.focusMode.active;
+      return settle(
+        {
+          ...state,
+          assignments: [...state.assignments, action.assignment],
+          focusMode: restoreRequirement
+            ? {
+                ...state.focusMode,
+                requiredTaskIds: [...state.focusMode.requiredTaskIds, action.assignment.id],
+                requiredCompletionCount: state.focusMode.requiredCompletionCount + 1,
+              }
+            : state.focusMode,
+        },
+        'assignment_added',
+      );
+    }
+
     case 'UPDATE_ASSIGNMENT':
       return settle(
         {
@@ -513,6 +535,31 @@ export function reducer(state: AppState, action: Action): AppState {
         },
         'assignment_changed',
       );
+
+    case 'RENAME_CLASS': {
+      const to = action.to.trim();
+      if (!to || to === action.from) return state;
+      const ids = action.ids ? new Set(action.ids) : null;
+      const belongs = (assignment: Assignment) =>
+        assignment.subject === action.from && (!ids || ids.has(assignment.id));
+      const changed = state.assignments.filter(belongs).length;
+      if (changed === 0) return state;
+      return settle(
+        log(
+          {
+            ...state,
+            assignments: state.assignments.map((a) =>
+              belongs(a)
+                ? { ...a, subject: to, updatedAt: new Date().toISOString() }
+                : a,
+            ),
+          },
+          'class_renamed',
+          `Renamed class “${action.from}” to “${to}”`,
+        ),
+        'assignment_changed',
+      );
+    }
 
     case 'DELETE_ASSIGNMENT': {
       const target = state.assignments.find((a) => a.id === action.id);
@@ -1261,6 +1308,9 @@ export function reducer(state: AppState, action: Action): AppState {
           })
         : next;
     }
+
+    case 'CANVAS_CHECK_RECORDED':
+      return { ...state, canvas: { ...state.canvas, lastCheckReport: action.report } };
 
     case 'CANVAS_IMPORT': {
       const connection = state.canvas.connection;

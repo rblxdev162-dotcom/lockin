@@ -20,6 +20,7 @@ const ICONS: Record<ActivityType, IconName> = {
   assignment_completed: 'check',
   assignment_created: 'plus',
   assignment_deleted: 'trash',
+  class_renamed: 'edit',
   focus_session_completed: 'timer',
   blocking_test_started: 'bolt',
   allowlist_changed: 'shield',

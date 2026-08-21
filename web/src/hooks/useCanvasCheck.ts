@@ -90,7 +90,7 @@ export function useCanvasCheck() {
 
         // Due dates first — this half works with no extension at all.
         setPhase('dates');
-        await runFeedSync(state, dispatch);
+        const dates = await runFeedSync(state, dispatch, 'manual');
 
         // Then the page in front of them, which is the half that knows what is
         // graded. With no extension there is nothing to ask, and saying so is
@@ -114,6 +114,19 @@ export function useCanvasCheck() {
           message: summary.message,
           pageKind: view?.sync?.pageKind,
         };
+        dispatch({
+          type: 'CANVAS_CHECK_RECORDED',
+          report: {
+            checkedAt: new Date().toISOString(),
+            origin: 'manual',
+            ok: summary.ok,
+            message: summary.message,
+            newAssignments: dates.created,
+            updatedAssignments: dates.updated,
+            cancelledAssignments: dates.cancelled,
+            pageKind: view?.sync?.pageKind,
+          },
+        });
         setLastResult(result);
         return result;
       } finally {

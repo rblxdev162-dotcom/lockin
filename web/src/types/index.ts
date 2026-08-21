@@ -323,6 +323,7 @@ export const ACTIVITY_TYPES = [
   'assignment_completed',
   'assignment_created',
   'assignment_deleted',
+  'class_renamed',
   'focus_session_completed',
   'blocking_test_started',
   'allowlist_changed',

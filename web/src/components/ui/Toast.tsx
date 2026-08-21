@@ -11,6 +11,7 @@ interface ToastItem {
   id: number;
   message: string;
   tone: ToastTone;
+  action?: { label: string; run: () => void };
 }
 
 type Listener = (items: ToastItem[]) => void;
@@ -23,8 +24,12 @@ function emit() {
   listeners.forEach((l) => l(items));
 }
 
-export function toast(message: string, tone: ToastTone = 'info') {
-  const item = { id: nextId++, message, tone };
+export function toast(
+  message: string,
+  tone: ToastTone = 'info',
+  action?: { label: string; run: () => void },
+) {
+  const item = { id: nextId++, message, tone, action };
   items = [...items, item];
   emit();
   window.setTimeout(() => {
@@ -55,7 +60,20 @@ export function Toaster() {
             t.tone === 'info' && 'lk-border lk-raised lk-strong',
           )}
         >
-          {t.message}
+          <span>{t.message}</span>
+          {t.action && (
+            <button
+              type="button"
+              className="ml-3 rounded-lg border border-current/30 px-2 py-1 text-xs font-extrabold hover:bg-black/10"
+              onClick={() => {
+                t.action?.run();
+                items = items.filter((item) => item.id !== t.id);
+                emit();
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>

@@ -23,6 +23,7 @@ import { CanvasCallout } from '../components/features/CanvasCallout';
 import { CheckCanvasButton } from '../components/features/CheckCanvasButton';
 import { formatScore, hasPublishedTotal } from '../types/grades';
 import { classGradesUrl, classSwitchLabel } from '../lib/classNames';
+import { relativeTime } from '../lib/time';
 
 const ALL = 'All';
 
@@ -104,6 +105,8 @@ export function AssignmentsPage() {
   const [editing, setEditing] = useState<Assignment | null>(null);
   const [deleting, setDeleting] = useState<Assignment | null>(null);
   const [linking, setLinking] = useState<Assignment | null>(null);
+  const [renamingClass, setRenamingClass] = useState<string | null>(null);
+  const [classNameDraft, setClassNameDraft] = useState('');
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<string>(ALL);
   const [priority, setPriority] = useState<string>(ALL);
@@ -212,6 +215,18 @@ export function AssignmentsPage() {
   const selectedGradesUrl = selectedClassAssignments
     .map((a) => classGradesUrl(a.canvas?.url, state.canvas.connection?.domain ?? null))
     .find((url): url is string => url !== null) ?? null;
+  const selectedOpen = selectedClassAssignments.filter(
+    (a) => !isSettled(workStateOf(a, now)),
+  ).length;
+  const selectedNeedsReview = selectedClassAssignments.filter((a) => {
+    const status = workStateOf(a, now);
+    return status === 'needs_sync' || a.canvas?.submissionStatus === 'verification_unavailable';
+  }).length;
+  const reviewQueue = state.assignments.filter((a) => {
+    const status = workStateOf(a, now);
+    return status === 'needs_sync' || a.canvas?.submissionStatus === 'verification_unavailable';
+  });
+  const checkReport = state.canvas.lastCheckReport;
 
   /**
    * A class's current grade, matched by the Canvas course name LockIn stored
@@ -247,10 +262,17 @@ export function AssignmentsPage() {
       onToggleComplete={() => {
         if (isComplete(a)) {
           dispatch({ type: 'UNCOMPLETE_ASSIGNMENT', id: a.id });
+          toast(`“${a.title}” moved back to your list.`, 'info', {
+            label: 'Undo',
+            run: () => dispatch({ type: 'COMPLETE_ASSIGNMENT', id: a.id, method: 'manual' }),
+          });
           return;
         }
         dispatch({ type: 'COMPLETE_ASSIGNMENT', id: a.id, method: 'manual' });
-        toast(`“${a.title}” marked complete.`, 'success');
+        toast(`“${a.title}” marked complete.`, 'success', {
+          label: 'Undo',
+          run: () => dispatch({ type: 'UNCOMPLETE_ASSIGNMENT', id: a.id }),
+        });
       }}
       onEdit={() => setEditing(a)}
       onDelete={() => setDeleting(a)}
@@ -276,6 +298,52 @@ export function AssignmentsPage() {
       </header>
 
       <CanvasCallout />
+
+      {(checkReport || reviewQueue.length > 0) && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {checkReport && (
+            <Card className="p-4">
+              <div className="flex items-start gap-3">
+                <span className="rounded-xl bg-mint-500/15 p-2 text-mint-700 dark:text-mint-300">
+                  <Icon name="refresh" size={16} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-body font-extrabold lk-strong">Last Canvas check</p>
+                  <p className="mt-0.5 text-caption lk-muted">
+                    {checkReport.message} · {relativeTime(checkReport.checkedAt, new Date(now))}
+                    {checkReport.origin === 'automatic' ? ' · after-school refresh' : ''}
+                  </p>
+                  <p className="mt-2 text-caption font-semibold lk-strong">
+                    {checkReport.newAssignments} new · {checkReport.updatedAssignments} changed ·{' '}
+                    {checkReport.cancelledAssignments} cancelled
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+          {reviewQueue.length > 0 && (
+            <Card className="p-4">
+              <p className="text-body font-extrabold lk-strong">Accuracy review</p>
+              <p className="mt-0.5 text-caption lk-muted">
+                {reviewQueue.length} item{reviewQueue.length === 1 ? '' : 's'} need a fresh date or a
+                clearer Canvas status. LockIn will not guess.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {reviewQueue.slice(0, 3).map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => chooseClass(a.subject || 'No class')}
+                    className="rounded-full lk-sunken px-2.5 py-1 text-caption font-bold lk-strong"
+                  >
+                    {a.title}
+                  </button>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
 
       <Card>
         <QuickAdd onOpenFull={() => setCreating(true)} autoFocus={state.assignments.length === 0} />
@@ -359,10 +427,22 @@ export function AssignmentsPage() {
             <div className="min-w-0">
               <p className="truncate text-body font-bold lk-strong">{subject}</p>
               <p className="text-caption lk-muted">
-                Open this class’s Grades page, then Check Canvas to update scores and statuses.
+                {selectedOpen} open · {selectedNeedsReview} to review. Open Grades, then Check Canvas
+                to update scores and statuses.
               </p>
             </div>
-            {selectedGradesUrl && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setRenamingClass(subject);
+                  setClassNameDraft(classSwitchLabel(subject));
+                }}
+              >
+                Clean up name
+              </Button>
+              {selectedGradesUrl && (
               <Button
                 size="sm"
                 variant="secondary"
@@ -371,7 +451,8 @@ export function AssignmentsPage() {
               >
                 Open Grades
               </Button>
-            )}
+              )}
+            </div>
           </div>
         )}
 
@@ -540,6 +621,7 @@ export function AssignmentsPage() {
             submitLabel="Save changes"
             onCancel={() => setEditing(null)}
             onSubmit={(draft) => {
+              const before = editing;
               dispatch({
                 type: 'UPDATE_ASSIGNMENT',
                 id: editing.id,
@@ -562,7 +644,10 @@ export function AssignmentsPage() {
                 },
               });
               setEditing(null);
-              toast('Changes saved.', 'success');
+              toast('Changes saved.', 'success', {
+                label: 'Undo',
+                run: () => dispatch({ type: 'UPDATE_ASSIGNMENT', id: before.id, patch: before }),
+              });
             }}
           />
         )}
@@ -574,6 +659,37 @@ export function AssignmentsPage() {
         onClose={() => setLinking(null)}
       />
 
+      <Modal open={!!renamingClass} title="Clean up class name" onClose={() => setRenamingClass(null)}>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const next = classNameDraft.trim();
+            if (!renamingClass || !next) return;
+            const previous = renamingClass;
+            const movedIds = state.assignments
+              .filter((assignment) => assignment.subject === previous)
+              .map((assignment) => assignment.id);
+            dispatch({ type: 'RENAME_CLASS', from: previous, to: next, ids: movedIds });
+            setRenamingClass(null);
+            chooseClass(next);
+            toast(`Class renamed to “${next}”.`, 'success', {
+              label: 'Undo',
+              run: () => dispatch({ type: 'RENAME_CLASS', from: next, to: previous, ids: movedIds }),
+            });
+          }}
+        >
+          <p className="text-body lk-muted">
+            This changes the label in LockIn only. Using an existing class name merges the two lists.
+          </p>
+          <TextInput value={classNameDraft} onChange={(e) => setClassNameDraft(e.target.value)} autoFocus />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setRenamingClass(null)}>Cancel</Button>
+            <Button type="submit">Save name</Button>
+          </div>
+        </form>
+      </Modal>
+
       <ConfirmDialog
         open={!!deleting}
         danger
@@ -582,7 +698,7 @@ export function AssignmentsPage() {
         message={
           <>
             <strong className="lk-strong">{deleting?.title}</strong> will be removed from this
-            device. This can’t be undone.
+            device. You can undo right after deleting it.
             {state.focusMode.active && state.focusMode.requiredTaskIds.includes(deleting?.id ?? '') && (
               <span className="mt-2 block font-semibold text-flame-600 dark:text-flame-400">
                 It’s a required task for the active Focus Mode — the requirement will shrink by one.
@@ -592,9 +708,18 @@ export function AssignmentsPage() {
         }
         onCancel={() => setDeleting(null)}
         onConfirm={() => {
-          if (deleting) dispatch({ type: 'DELETE_ASSIGNMENT', id: deleting.id });
+          const removed = deleting;
+          const wasRequired = !!removed && state.focusMode.requiredTaskIds.includes(removed.id);
+          if (removed) dispatch({ type: 'DELETE_ASSIGNMENT', id: removed.id });
           setDeleting(null);
-          toast('Assignment deleted.', 'info');
+          toast('Assignment deleted.', 'info', removed ? {
+            label: 'Undo',
+            run: () => dispatch({
+              type: 'RESTORE_ASSIGNMENT',
+              assignment: removed,
+              requiredInFocus: wasRequired,
+            }),
+          } : undefined);
         }}
       />
     </div>

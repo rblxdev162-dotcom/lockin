@@ -40,6 +40,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 17 | **Canvas only** — Edgenuity scrapped, 30-minute auto-sync, graded-vs-undone, urgency ordering, class columns, and a large deletion pass | **Done** |
 | 18 | **The Grades page reader** — read the Canvas page the student opened, class grades, the school-hours gate, and the layout pass | **Done** |
 | 19 | **Class-first work hub** — Home course overview, class-first Assignments layout, freshness-aware overdue labels | **Done** |
+| 20 | **After-school accuracy pass** — exact gate-opening date refresh, persistent check receipts, review queue, class cleanup/details, expandable cards, Undo | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -176,7 +177,7 @@ one.
 7. **Local only.** No network calls in either half of the project. No analytics,
    no tracking, no browsing history — block stats are per-domain counts only.
 8. **Schema migrations, never wipes.** Bump `SCHEMA_VERSION` in
-   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v10**.
+   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v12**.
 9. **Only a machine-read measurement can verify Edgenuity progress** — a frame
    from a window the student shared with `getDisplayMedia` (Phase 12), or a DOM
    read from their own authenticated Edgenuity session (Phase 11, or Phase 14's
@@ -450,6 +451,34 @@ sheen, hover lift and staggered class entrances. The effects use the existing
 design tokens in light and dark mode, make no asset or font request, and the
 global `prefers-reduced-motion` rule collapses every animation. The release
 safety suite and the full accessibility/responsive audit pass after the change.
+
+---
+
+## Phase 20 — After-school accuracy and class controls (done)
+
+When scheduled checks are enabled and LockIn is open, the calendar refresh now
+sets a timer for the exact first allowed minute after school. The existing
+30-minute interval remains as recovery, but it no longer decides when the first
+after-school check happens. The central gate still runs inside the callback, so
+a sleeping computer, changed setting, or pause cannot turn a late timer into an
+out-of-window request. This path is calendar-feed only: it does not open or read
+a gradebook automatically.
+
+Every successful check stores a counts-only receipt (`canvas.lastCheckReport`):
+when, manual vs automatic, new/changed/cancelled counts, and a short result.
+Schema v12 migrates additively and coercion caps every field. No URL, score,
+page text, HTML, cookie, or credential is stored in the receipt.
+
+Assignments surfaces that receipt beside an **Accuracy review** queue for stale
+dates and `verification_unavailable` status. A selected class shows open/review
+counts, can be renamed locally, and merges naturally when renamed to an
+existing class. Home class cards expand in place to preview their next three
+assignments. Completion toggles, assignment edits/deletes, and class renames
+all offer a four-second Undo action.
+
+No Canvas API, new dependency, background Canvas tab, or third-party service
+was added. `npm test`, production build, parser (48), Canvas e2e (64), and the
+full accessibility/responsive audit all pass.
 
 ---
 

@@ -88,6 +88,19 @@ export function useCanvasAutoSync(): void {
     // `extension.status` is a dependency so a companion appearing mid-session
     // triggers an immediate catch-up sync.
   }, [extension.status, runSync]);
+
+  useEffect(() => {
+    const current = state.settings.canvasCheckWindow;
+    const decision = evaluateCheckWindow(current, 'automatic', Date.now());
+    if (decision.allowed || decision.nextAllowedAt === null) return;
+
+    // Wake at the exact first allowed minute instead of waiting for the next
+    // half-hour interval. This is what makes a teacher's moved deadline arrive
+    // as soon as LockIn's configured after-school window opens.
+    const delay = Math.min(decision.nextAllowedAt - Date.now() + 250, 2_147_000_000);
+    const timer = window.setTimeout(() => void runSync(), Math.max(0, delay));
+    return () => window.clearTimeout(timer);
+  }, [state.settings.canvasCheckWindow, runSync]);
 }
 
 /**
@@ -100,11 +113,14 @@ export function useCanvasAutoSync(): void {
 export async function runFeedSync(
   current: AppState,
   send: Dispatch<Action>,
-): Promise<{ ok: boolean; changed: boolean }> {
+  origin: 'manual' | 'automatic' = 'automatic',
+): Promise<{ ok: boolean; changed: boolean; created: number; updated: number; cancelled: number }> {
   const connected = current.integrations.records.find((r) => r.id === 'canvas_calendar');
   // Nothing configured, nothing to do. The common case for a new install, and
   // it must cost nothing.
-  if (!connected || connected.status === 'not_configured') return { ok: false, changed: false };
+  if (!connected || connected.status === 'not_configured') {
+    return { ok: false, changed: false, created: 0, updated: 0, cancelled: 0 };
+  }
 
   const now = Date.now();
   // `force: false` — this reads whatever was cached, so the same page open in
@@ -122,7 +138,7 @@ export async function runFeedSync(
         error: 'Canvas could not be reached. Your assignments are still here.',
       });
     }
-    return { ok: false, changed: false };
+    return { ok: false, changed: false, created: 0, updated: 0, cancelled: 0 };
   }
 
   const syncedAt = new Date(result.fetchedAt ?? now).toISOString();
@@ -139,6 +155,19 @@ export async function runFeedSync(
     status: 'connected',
     itemCount: diff.create.length,
   });
+  const updated = diff.update.filter((item) => item.changes.length > 0).length;
+  send({
+    type: 'CANVAS_CHECK_RECORDED',
+    report: {
+      checkedAt: syncedAt,
+      origin,
+      ok: true,
+      message: describeDiff(diff),
+      newAssignments: diff.create.length,
+      updatedAssignments: updated,
+      cancelledAssignments: diff.cancel.length,
+    },
+  });
 
   // Only speak when something actually changed, and only once.
   if (diffIsInteresting(diff)) {
@@ -149,5 +178,11 @@ export async function runFeedSync(
       diff.cancel.length > 0 ? 'info' : 'success',
     );
   }
-  return { ok: true, changed: diffIsInteresting(diff) };
+  return {
+    ok: true,
+    changed: diffIsInteresting(diff),
+    created: diff.create.length,
+    updated,
+    cancelled: diff.cancel.length,
+  };
 }

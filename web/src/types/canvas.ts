@@ -115,6 +115,19 @@ export interface CanvasState {
   lastSyncAt: string | null;
   /** Human-readable reason the last sync failed, or null. */
   lastError: string | null;
+  /** Counts-only receipt for the latest check. Never stores page HTML or URLs. */
+  lastCheckReport: CanvasCheckReport | null;
+}
+
+export interface CanvasCheckReport {
+  checkedAt: string;
+  origin: 'manual' | 'automatic';
+  ok: boolean;
+  message: string;
+  newAssignments: number;
+  updatedAssignments: number;
+  cancelledAssignments: number;
+  pageKind?: string;
 }
 
 export function defaultCanvasState(): CanvasState {
@@ -125,6 +138,7 @@ export function defaultCanvasState(): CanvasState {
     ignoredKeys: [],
     lastSyncAt: null,
     lastError: null,
+    lastCheckReport: null,
   };
 }
 

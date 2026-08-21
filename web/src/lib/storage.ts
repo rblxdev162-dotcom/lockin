@@ -71,7 +71,7 @@ import {
  */
 export const STORAGE_KEY = 'lockin.state.v1';
 export const CORRUPT_KEY = 'lockin.state.corrupt';
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export function defaultSettings(): Settings {
   return {
@@ -336,6 +336,15 @@ const MIGRATIONS: Record<number, Migration> = {
       ),
     },
     grades: defaultGradesState(),
+  }),
+  // 11 -> 12: a privacy-safe receipt of the last Canvas check.
+  11: (s) => ({
+    ...s,
+    schemaVersion: 12,
+    canvas: {
+      ...((s.canvas ?? {}) as Record<string, unknown>),
+      lastCheckReport: null,
+    },
   }),
 };
 
@@ -1162,6 +1171,30 @@ function coerceCanvas(raw: unknown): CanvasState {
           permissionGranted: c.connection.permissionGranted === true,
         }
       : null;
+  const reportRaw =
+    c.lastCheckReport && typeof c.lastCheckReport === 'object'
+      ? (c.lastCheckReport as unknown as Record<string, unknown>)
+      : null;
+  const count = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(0, Math.min(10_000, Math.round(value)))
+      : 0;
+  const lastCheckReport =
+    reportRaw &&
+    typeof reportRaw.checkedAt === 'string' &&
+    typeof reportRaw.message === 'string'
+      ? {
+          checkedAt: reportRaw.checkedAt.slice(0, 40),
+          origin: reportRaw.origin === 'automatic' ? ('automatic' as const) : ('manual' as const),
+          ok: reportRaw.ok === true,
+          message: reportRaw.message.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 240),
+          newAssignments: count(reportRaw.newAssignments),
+          updatedAssignments: count(reportRaw.updatedAssignments),
+          cancelledAssignments: count(reportRaw.cancelledAssignments),
+          pageKind:
+            typeof reportRaw.pageKind === 'string' ? reportRaw.pageKind.slice(0, 40) : undefined,
+        }
+      : null;
   return {
     connection,
     courses: asArray(c.courses),
@@ -1169,6 +1202,7 @@ function coerceCanvas(raw: unknown): CanvasState {
     ignoredKeys: asArray<string>(c.ignoredKeys).filter((k) => typeof k === 'string'),
     lastSyncAt: typeof c.lastSyncAt === 'string' ? c.lastSyncAt : null,
     lastError: typeof c.lastError === 'string' ? c.lastError : null,
+    lastCheckReport,
   };
 }
 

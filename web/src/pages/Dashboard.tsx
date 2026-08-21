@@ -14,7 +14,7 @@
  * and Canvas detections are all still reachable — they are just not competing
  * with the next action.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../store/context';
 import { usePace } from '../hooks/usePace';
@@ -196,6 +196,7 @@ export function Dashboard() {
 function ClassOverview({ assignments }: { assignments: Assignment[] }) {
   const { state, now } = useApp();
   const groups = useMemo(() => groupByClass(assignments, now), [assignments, now]);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   return (
     <div className="lk-stagger grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -214,13 +215,16 @@ function ClassOverview({ assignments }: { assignments: Assignment[] }) {
         );
 
         return (
-          <Link
+          <div
             key={group.subject}
-            to={`/assignments?class=${encodeURIComponent(group.subject)}`}
-            className="lk-card lk-class-card lk-interactive min-w-0 p-4"
-            aria-label={`Open ${group.subject} assignments`}
+            className="lk-card lk-class-card min-w-0 p-4"
           >
-            <div className="flex items-start justify-between gap-3">
+            <button
+              type="button"
+              className="flex w-full items-start justify-between gap-3 text-left"
+              aria-expanded={expanded === group.subject}
+              onClick={() => setExpanded((value) => value === group.subject ? null : group.subject)}
+            >
               <div className="min-w-0">
                 <h3 className="truncate text-heading font-extrabold lk-strong">{group.subject}</h3>
                 <p className="mt-0.5 text-caption lk-muted">
@@ -237,7 +241,7 @@ function ClassOverview({ assignments }: { assignments: Assignment[] }) {
                   {grade.currentScore !== null ? formatScore(grade.currentScore) : grade.currentGrade}
                 </span>
               )}
-            </div>
+            </button>
             <div className="mt-4 border-t lk-border pt-3">
               <p className="truncate text-body font-bold lk-strong">{next.title}</p>
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-caption lk-muted">
@@ -252,7 +256,23 @@ function ClassOverview({ assignments }: { assignments: Assignment[] }) {
                 <span>{duePhrase(next, now)}</span>
               </div>
             </div>
-          </Link>
+            {expanded === group.subject && (
+              <div className="animate-fade mt-3 space-y-2 border-t lk-border pt-3">
+                {group.assignments.slice(0, 3).map((assignment) => (
+                  <div key={assignment.id} className="flex items-center justify-between gap-3 text-caption">
+                    <span className="min-w-0 truncate font-semibold lk-strong">{assignment.title}</span>
+                    <span className="shrink-0 lk-muted">{duePhrase(assignment, now)}</span>
+                  </div>
+                ))}
+                <Link
+                  to={`/assignments?class=${encodeURIComponent(group.subject)}`}
+                  className="inline-block pt-1 text-caption font-extrabold text-brand-600 hover:underline dark:text-brand-300"
+                >
+                  Open class →
+                </Link>
+              </div>
+            )}
+          </div>
         );
       })}
     </div>

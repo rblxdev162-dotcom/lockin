@@ -442,6 +442,15 @@ and `AssignmentCard` now receives the store clock instead of consulting
 No Canvas transport, parser, permission, or request path changed. Phase 19 adds
 no API call and no dependency.
 
+### Visual polish pass
+
+The app shell now has local CSS-only ambient lighting, translucent navigation,
+deeper but restrained cards, active-nav motion, class-card accents, button
+sheen, hover lift and staggered class entrances. The effects use the existing
+design tokens in light and dark mode, make no asset or font request, and the
+global `prefers-reduced-motion` rule collapses every animation. The release
+safety suite and the full accessibility/responsive audit pass after the change.
+
 ---
 
 ## Phase 18 — The Grades page reader (done)

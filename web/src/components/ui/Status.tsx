@@ -150,7 +150,7 @@ export function SectionHeader({
   return (
     <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
       <div className="min-w-0">
-        <h2 id={id} className="text-heading font-bold lk-strong">
+        <h2 id={id} className="lk-section-heading text-heading font-bold lk-strong">
           {title}
         </h2>
         {hint && <p className="mt-0.5 text-caption lk-muted">{hint}</p>}

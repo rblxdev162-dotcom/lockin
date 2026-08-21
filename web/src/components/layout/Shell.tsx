@@ -51,14 +51,14 @@ const SECONDARY: NavItem[] = [
 export function Shell({ children }: { children: ReactNode }) {
   const location = useLocation();
   return (
-    <div className="min-h-dvh lk-surface">
+    <div className="lk-app-shell min-h-dvh lk-surface">
       <Sidebar />
       <div className="lg:pl-64">
         <FocusBanner />
         <ProtectionBanner />
         <main
           key={location.pathname}
-          className="animate-fade mx-auto w-full max-w-5xl px-4 pt-5 pb-28 sm:px-6 lg:pb-10"
+          className="lk-page relative z-10 mx-auto w-full max-w-5xl px-4 pt-5 pb-28 sm:px-6 lg:pb-10"
         >
           <RecoveryNotice />
           {children}
@@ -72,7 +72,7 @@ export function Shell({ children }: { children: ReactNode }) {
 function Wordmark({ compact }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow-sm shadow-brand-900/30">
+      <span className="lk-wordmark-mark grid h-9 w-9 place-items-center rounded-xl text-white">
         <Icon name="lock" size={18} />
       </span>
       {!compact && (
@@ -85,7 +85,7 @@ function Wordmark({ compact }: { compact?: boolean }) {
 function Sidebar() {
   const { state } = useApp();
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r lk-border lk-raised px-4 py-5 lg:flex">
+    <aside className="lk-sidebar fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r lk-border px-4 py-5 lg:flex">
       <div className="px-2">
         <Wordmark />
         <p className="mt-2 px-0.5 text-xs leading-snug lk-muted">
@@ -100,10 +100,10 @@ function Sidebar() {
             to={item.to}
             className={({ isActive }) =>
               cx(
-                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-body font-semibold',
+                'lk-nav-item flex items-center gap-3 rounded-xl px-3 py-2.5 text-body font-semibold',
                 'transition-colors duration-150',
                 isActive
-                  ? 'bg-brand-600 text-white shadow-sm shadow-brand-900/25'
+                  ? 'lk-nav-active bg-brand-600 text-white shadow-sm shadow-brand-900/25'
                   : 'lk-muted hover:lk-sunken hover:lk-strong',
               )
             }
@@ -220,7 +220,7 @@ function BottomNav() {
       )}
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t lk-border lk-raised pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="lk-bottom-nav fixed inset-x-0 bottom-0 z-40 border-t lk-border pb-[env(safe-area-inset-bottom)] lg:hidden"
         aria-label="Main"
       >
       <div className="mx-auto flex max-w-lg items-stretch justify-between px-1">

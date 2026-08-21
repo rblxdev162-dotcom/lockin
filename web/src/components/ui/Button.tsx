@@ -39,7 +39,7 @@ export function Button({
   return (
     <button
       className={cx(
-        'inline-flex items-center justify-center font-semibold transition-all duration-150',
+        'lk-button inline-flex items-center justify-center font-semibold transition-all duration-150',
         'active:scale-[0.98] disabled:opacity-45 disabled:pointer-events-none',
         VARIANTS[variant],
         SIZES[size],

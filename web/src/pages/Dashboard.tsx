@@ -198,7 +198,7 @@ function ClassOverview({ assignments }: { assignments: Assignment[] }) {
   const groups = useMemo(() => groupByClass(assignments, now), [assignments, now]);
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="lk-stagger grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {groups.map((group) => {
         const next = group.assignments[0];
         const nextState = workStateOf(next, now);
@@ -217,7 +217,7 @@ function ClassOverview({ assignments }: { assignments: Assignment[] }) {
           <Link
             key={group.subject}
             to={`/assignments?class=${encodeURIComponent(group.subject)}`}
-            className="lk-card lk-interactive min-w-0 p-4"
+            className="lk-card lk-class-card lk-interactive min-w-0 p-4"
             aria-label={`Open ${group.subject} assignments`}
           >
             <div className="flex items-start justify-between gap-3">

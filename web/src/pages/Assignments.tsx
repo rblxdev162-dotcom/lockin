@@ -332,7 +332,7 @@ export function AssignmentsPage() {
             <div
               role="tablist"
               aria-label="Classes"
-              className="flex gap-2 overflow-x-auto pb-1"
+              className="lk-class-switcher flex gap-2 overflow-x-auto pb-1"
             >
               <ClassTab
                 label="All classes"
@@ -484,11 +484,11 @@ export function AssignmentsPage() {
               One section per class. A full-width section keeps a class
               together without producing narrow newspaper columns.
             */
-            <div className="space-y-5">
+            <div className="lk-stagger space-y-5">
               {groupByClass(shown, now).map((group) => (
                 <div
                   key={group.subject}
-                  className="min-w-0 rounded-2xl border lk-border lk-sunken p-3 sm:p-4"
+                  className="lk-assignment-group min-w-0 rounded-2xl border lk-border p-3 sm:p-4"
                 >
                   <div className="mb-3 flex items-baseline justify-between gap-2 px-1">
                     <h3 className="truncate text-heading font-extrabold lk-strong">
@@ -622,7 +622,7 @@ function ClassTab({
       title={fullName && fullName !== label ? fullName : undefined}
       onClick={onClick}
       className={cx(
-        'inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-caption font-bold transition-colors',
+        'lk-class-tab inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-caption font-bold transition-all',
         selected
           ? 'border-brand-500 bg-brand-600 text-white shadow-sm'
           : 'lk-border lk-raised lk-strong hover:border-brand-400',

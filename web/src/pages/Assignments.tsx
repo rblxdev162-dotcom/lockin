@@ -281,6 +281,11 @@ export function AssignmentsPage() {
       onCheckCanvas={isComplete(a) ? undefined : checkStatus}
       canvasBusy={canvasBusy === 'check' || canvasBusy === 'sync'}
       onLinkCanvas={canvasConnected && !a.canvas && !isComplete(a) ? () => setLinking(a) : undefined}
+      onToggleStep={(stepId) => dispatch({
+        type: 'UPDATE_ASSIGNMENT',
+        id: a.id,
+        patch: { steps: a.steps.map((step) => step.id === stepId ? { ...step, done: !step.done } : step) },
+      })}
     />
   );
 
@@ -641,6 +646,10 @@ export function AssignmentsPage() {
                     focusWarningMinutes: draft.focusWarningMinutes ?? 30,
                     enabled: editing.reminders.enabled,
                   },
+                  steps: draft.steps?.map((text, index) => {
+                    const existing = editing.steps.find((step) => step.text === text);
+                    return existing ?? { id: `step-${Date.now()}-${index}`, text, done: false };
+                  }) ?? [],
                 },
               });
               setEditing(null);

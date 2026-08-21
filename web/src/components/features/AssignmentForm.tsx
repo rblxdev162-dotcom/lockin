@@ -39,6 +39,7 @@ export function AssignmentForm({
   const [first, setFirst] = useState(String(initial?.reminders.firstReminderMinutes ?? 120));
   const [escalate, setEscalate] = useState(String(initial?.reminders.escalationMinutes ?? 60));
   const [warn, setWarn] = useState(String(initial?.reminders.focusWarningMinutes ?? 30));
+  const [steps, setSteps] = useState(initial?.steps.map((step) => step.text).join('\n') ?? '');
   const [errors, setErrors] = useState<Errors>({});
 
   const submit = (e: React.FormEvent) => {
@@ -65,6 +66,7 @@ export function AssignmentForm({
       firstReminderMinutes: Number(first) || 120,
       escalationMinutes: Number(escalate) || 60,
       focusWarningMinutes: Number(warn) || 30,
+      steps: steps.split('\n').map((text) => text.trim()).filter(Boolean),
     });
   };
 
@@ -138,6 +140,15 @@ export function AssignmentForm({
       >
         {showReminders ? 'Hide reminder timing' : 'Reminder timing'}
       </button>
+
+      <Field label="Steps (one per line)">
+        <textarea
+          className="lk-input min-h-24 resize-y"
+          value={steps}
+          placeholder={'Research sources\nWrite first draft\nProofread and submit'}
+          onChange={(event) => setSteps(event.target.value)}
+        />
+      </Field>
 
       {showReminders && (
         <div className="lk-sunken grid gap-4 rounded-2xl border lk-border p-4 sm:grid-cols-3">

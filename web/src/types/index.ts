@@ -13,6 +13,7 @@ import type { FocusRun, ParentControls } from './parent';
 import type { PlannerState } from './planner';
 import type { IntegrationsState } from './integrations';
 import type { SourceRecord } from './source';
+import type { SchoolSchedule } from '../lib/schoolSchedule';
 
 export * from './canvas';
 export * from './parent';
@@ -136,6 +137,9 @@ export interface Assignment {
 
   /** Present only when this assignment is linked to a Canvas assignment. */
   canvas?: CanvasLink;
+
+  /** Small, student-authored milestones for work that is bigger than one sitting. */
+  steps: { id: string; text: string; done: boolean }[];
 
 }
 
@@ -306,6 +310,8 @@ export interface Settings {
    * student presses the button. See `lib/canvas/checkWindow.ts`.
    */
   canvasCheckWindow: CanvasCheckWindow;
+  /** The student's own timetable. Local planning data; never sent to Canvas. */
+  schoolSchedule: SchoolSchedule;
 }
 
 /* ------------------------------------------------------------------ */

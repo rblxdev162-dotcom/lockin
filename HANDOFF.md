@@ -41,6 +41,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 18 | **The Grades page reader** — read the Canvas page the student opened, class grades, the school-hours gate, and the layout pass | **Done** |
 | 19 | **Class-first work hub** — Home course overview, class-first Assignments layout, freshness-aware overdue labels | **Done** |
 | 20 | **After-school accuracy pass** — exact gate-opening date refresh, persistent check receipts, review queue, class cleanup/details, expandable cards, Undo | **Done** |
+| 21 | **Student schedule hub** — onboarding class days/breaks, Today timeline, weekly reset, teacher changes, conflicts, steps, quiet mode, command palette | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -177,7 +178,7 @@ one.
 7. **Local only.** No network calls in either half of the project. No analytics,
    no tracking, no browsing history — block stats are per-domain counts only.
 8. **Schema migrations, never wipes.** Bump `SCHEMA_VERSION` in
-   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v12**.
+   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v13**.
 9. **Only a machine-read measurement can verify Edgenuity progress** — a frame
    from a window the student shared with `getDisplayMedia` (Phase 12), or a DOM
    read from their own authenticated Edgenuity session (Phase 11, or Phase 14's
@@ -451,6 +452,39 @@ sheen, hover lift and staggered class entrances. The effects use the existing
 design tokens in light and dark mode, make no asset or font request, and the
 global `prefers-reduced-motion` rule collapses every animation. The release
 safety suite and the full accessibility/responsive audit pass after the change.
+
+---
+
+## Phase 21 — Student schedule hub (done)
+
+Fresh onboarding now asks for the school-day start/end, class names and meeting
+days, and named breaks immediately after the local first-name step. It is a
+separate schedule from homework availability: school time explains the day;
+Planner availability says when homework can actually happen. The configured
+school boundary also seeds the existing Canvas safety gate without changing
+its manual-by-default rule. Existing users edit the same data under Settings →
+School schedule.
+
+`settings.schoolSchedule` is schema v13, rebuilt field by field with caps for
+classes, breaks, labels, icons, colors, times and weekdays. The data stays in
+the existing local state and never crosses the Canvas bridge.
+
+Home now includes a school-and-study Today timeline, clear/busy class health,
+class colors and short icons, deadline conflict warnings with a real **Revise
+plan** action, a weekly reset summary, dismissible teacher-change history, and
+a data-confidence explanation. Quiet mode reduces Home back to the next action
+and class names. Classes with no assignments remain visible as clear rather
+than disappearing.
+
+Assignments support student-authored steps. Focus asks what “finished” means
+before a session begins. A global command palette opens with Command-K,
+Control-K, or `/` and jumps to common actions. Existing feed reconciliation
+already rebuilds the deterministic plan after a teacher moves a deadline; the
+teacher-change card now makes that input visible.
+
+No Canvas API, dependency, external service, background gradebook read, or
+request path was added. Production build, `npm test`, extension e2e,
+accessibility/responsive, parser (48), and Canvas e2e (64) pass.
 
 ---
 

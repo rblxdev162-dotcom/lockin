@@ -56,6 +56,7 @@ import { ACTIVITY_TYPES } from '../types';
 import { defaultGradesState } from '../types/grades';
 import type { CourseGrade, GradesState } from '../types/grades';
 import { defaultCheckWindow, normalizeCheckWindow } from './canvas/checkWindow';
+import { defaultSchoolSchedule, normalizeSchoolSchedule } from './schoolSchedule';
 import { DEFAULT_ALLOWLIST } from './domains';
 import {
   MAX_BLOCK_STATS,
@@ -71,7 +72,7 @@ import {
  */
 export const STORAGE_KEY = 'lockin.state.v1';
 export const CORRUPT_KEY = 'lockin.state.corrupt';
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export function defaultSettings(): Settings {
   return {
@@ -89,6 +90,7 @@ export function defaultSettings(): Settings {
     focusGuard: true,
     blockingAsked: false,
     canvasCheckWindow: defaultCheckWindow(),
+    schoolSchedule: defaultSchoolSchedule(),
   };
 }
 
@@ -346,6 +348,14 @@ const MIGRATIONS: Record<number, Migration> = {
       lastCheckReport: null,
     },
   }),
+  12: (s) => ({
+    ...s,
+    schemaVersion: 13,
+    settings: {
+      ...((s.settings ?? {}) as Record<string, unknown>),
+      schoolSchedule: defaultSchoolSchedule(),
+    },
+  }),
 };
 
 function migrate(raw: Record<string, unknown>): Record<string, unknown> {
@@ -406,6 +416,10 @@ function coerceAssignment(raw: unknown): Assignment | null {
     verificationStatus: a.verificationStatus ?? 'not_required',
     verificationRecords: trimVerificationRecords(asArray(a.verificationRecords)),
     canvas: coerceCanvasLink(a.canvas),
+    steps: asArray<Record<string, unknown>>(a.steps).flatMap((step, index) => {
+      const text = typeof step?.text === 'string' ? step.text.trim().slice(0, 160) : '';
+      return text ? [{ id: typeof step.id === 'string' ? step.id.slice(0, 80) : `step-${index}`, text, done: step.done === true }] : [];
+    }).slice(0, 20),
     // Rebuilt like everything else: a `source` added to the type but not
     // rebuilt here would be silently dropped on every reload, which is the
     // exact bug `lastVerifiedTrust` shipped with in Phase 5.
@@ -600,6 +614,7 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
   // widen the window LockIn is allowed to touch Canvas in, and an unreadable
   // one falls back to the conservative default rather than to "always".
   settings.canvasCheckWindow = normalizeCheckWindow(settings.canvasCheckWindow);
+  settings.schoolSchedule = normalizeSchoolSchedule(settings.schoolSchedule);
 
   const rawAssignments = asArray<unknown>(raw.assignments);
   const assignments = rawAssignments

@@ -28,6 +28,7 @@ export interface AssignmentDraft {
   escalationMinutes?: number;
   focusWarningMinutes?: number;
   remindersEnabled?: boolean;
+  steps?: string[];
 }
 
 export function createAssignment(draft: AssignmentDraft): Assignment {
@@ -55,6 +56,11 @@ export function createAssignment(draft: AssignmentDraft): Assignment {
     remindersFired: [],
     verificationStatus: 'not_required',
     verificationRecords: [],
+    steps: (draft.steps ?? []).filter((text) => text.trim()).slice(0, 20).map((text, index) => ({
+      id: `step-${Date.now()}-${index}`,
+      text: text.trim().slice(0, 160),
+      done: false,
+    })),
     // Everything built from a draft was typed by the student. Stamping it
     // MANUAL is not a demotion — it is what lets the Pace Engine treat a
     // hand-typed due date as the student's own claim rather than as school
@@ -154,6 +160,7 @@ export function createAssignmentFromCanvas(
           },
         ]
       : [],
+    steps: [],
     canvas: {
       domain,
       url: detected.url,

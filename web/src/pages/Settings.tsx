@@ -25,6 +25,7 @@ import { REMINDER_MODES } from '../types';
 import type { ReminderMode } from '../types';
 import { formatClock, formatTime } from '../lib/time';
 import { APP_VERSION } from '../version';
+import { CLASS_COLORS, SCHOOL_DAYS } from '../lib/schoolSchedule';
 
 const MODE_COPY: Record<ReminderMode, string> = {
   Normal: 'Gentle reminders. Nothing is blocked unless you start Focus Mode yourself.',
@@ -81,6 +82,10 @@ export function SettingsPage() {
   const shadowed = shadowedDomains(s.blockedDomains, s.allowedDomains);
   const fm = state.focusMode;
   const testRunning = fm.active && fm.isTest && fm.testExpiresAt !== null;
+  const updateSchedule = (patch: Partial<typeof s.schoolSchedule>) => dispatch({
+    type: 'UPDATE_SETTINGS',
+    patch: { schoolSchedule: { ...s.schoolSchedule, ...patch, configured: true } },
+  });
 
   /**
    * Parent protections only bite while a Strict session is actually running.
@@ -143,6 +148,33 @@ export function SettingsPage() {
             <p className="mb-1.5 text-sm font-semibold lk-strong">Appearance</p>
             <ThemeToggle />
           </div>
+        </div>
+      </Card>
+
+      <Card id="school-schedule">
+        <CardHeader title="School schedule" subtitle="Class days, breaks, and the boundary between school and study time." />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="School starts"><TextInput type="time" value={s.schoolSchedule.schoolStart} onChange={(e) => updateSchedule({ schoolStart: e.target.value })} /></Field>
+          <Field label="School ends"><TextInput type="time" value={s.schoolSchedule.schoolEnd} onChange={(e) => updateSchedule({ schoolEnd: e.target.value })} /></Field>
+        </div>
+        <div className="mt-4 space-y-3">
+          {s.schoolSchedule.classes.map((item) => (
+            <div key={item.id} className="rounded-2xl lk-sunken p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <TextInput className="min-w-40 flex-1" value={item.name} aria-label="Class name" onChange={(e) => updateSchedule({ classes: s.schoolSchedule.classes.map((entry) => entry.id === item.id ? { ...entry, name: e.target.value } : entry) })} />
+                <TextInput className="w-16" maxLength={3} value={item.icon} aria-label={`${item.name} icon`} onChange={(e) => updateSchedule({ classes: s.schoolSchedule.classes.map((entry) => entry.id === item.id ? { ...entry, icon: e.target.value.slice(0, 3) } : entry) })} />
+                <select className="lk-input w-auto" aria-label={`${item.name} color`} value={item.color} onChange={(e) => updateSchedule({ classes: s.schoolSchedule.classes.map((entry) => entry.id === item.id ? { ...entry, color: e.target.value as (typeof CLASS_COLORS)[number] } : entry) })}>{CLASS_COLORS.map((color) => <option key={color} value={color}>{color}</option>)}</select>
+                <Button size="sm" variant="ghost" onClick={() => updateSchedule({ classes: s.schoolSchedule.classes.filter((entry) => entry.id !== item.id) })}>Remove</Button>
+              </div>
+              <div className="mt-2 flex gap-1.5">{SCHOOL_DAYS.map((day) => <Chip key={day.id} active={item.days.includes(day.id)} aria-label={day.label} onClick={() => updateSchedule({ classes: s.schoolSchedule.classes.map((entry) => entry.id === item.id ? { ...entry, days: entry.days.includes(day.id) ? entry.days.filter((value) => value !== day.id) : [...entry.days, day.id].sort() } : entry) })}>{day.short}</Chip>)}</div>
+            </div>
+          ))}
+          <Button size="sm" variant="secondary" onClick={() => updateSchedule({ classes: [...s.schoolSchedule.classes, { id: `class-${Date.now()}`, name: 'New class', days: [1, 2, 3, 4, 5], color: CLASS_COLORS[s.schoolSchedule.classes.length % CLASS_COLORS.length], icon: 'N' }] })}>Add class</Button>
+        </div>
+        <div className="mt-5 space-y-2">
+          <p className="text-sm font-bold lk-strong">Breaks</p>
+          {s.schoolSchedule.breaks.map((item) => <div key={item.id} className="grid gap-2 sm:grid-cols-[1fr_8rem_8rem_auto]"><TextInput value={item.label} aria-label="Break name" onChange={(e) => updateSchedule({ breaks: s.schoolSchedule.breaks.map((entry) => entry.id === item.id ? { ...entry, label: e.target.value } : entry) })} /><TextInput type="time" value={item.start} aria-label={`${item.label} starts`} onChange={(e) => updateSchedule({ breaks: s.schoolSchedule.breaks.map((entry) => entry.id === item.id ? { ...entry, start: e.target.value } : entry) })} /><TextInput type="time" value={item.end} aria-label={`${item.label} ends`} onChange={(e) => updateSchedule({ breaks: s.schoolSchedule.breaks.map((entry) => entry.id === item.id ? { ...entry, end: e.target.value } : entry) })} /><Button size="sm" variant="ghost" onClick={() => updateSchedule({ breaks: s.schoolSchedule.breaks.filter((entry) => entry.id !== item.id) })}>Remove</Button></div>)}
+          <Button size="sm" variant="secondary" onClick={() => updateSchedule({ breaks: [...s.schoolSchedule.breaks, { id: `break-${Date.now()}`, label: 'Break', start: '12:00', end: '12:30', days: [1, 2, 3, 4, 5] }] })}>Add break</Button>
         </div>
       </Card>
 

@@ -17,6 +17,7 @@ export function AssignmentCard({
   onOpenCanvas,
   onCheckCanvas,
   onLinkCanvas,
+  onToggleStep,
   canvasBusy,
   now,
 }: {
@@ -30,6 +31,7 @@ export function AssignmentCard({
   onOpenCanvas?: (assignment: Assignment) => void;
   onCheckCanvas?: (assignment: Assignment) => void;
   onLinkCanvas?: () => void;
+  onToggleStep?: (stepId: string) => void;
   canvasBusy?: boolean;
 }) {
   const done = assignment.status === 'Completed';
@@ -173,6 +175,24 @@ export function AssignmentCard({
             <Icon name="link" size={13} />
             Link to Canvas Assignment
           </button>
+        )}
+
+        {assignment.steps.length > 0 && (
+          <div className="mt-3 space-y-1.5 border-t lk-border pt-2.5">
+            {assignment.steps.map((step) => (
+              <button
+                key={step.id}
+                type="button"
+                onClick={() => onToggleStep?.(step.id)}
+                className="flex w-full items-center gap-2 text-left text-caption lk-muted hover:lk-strong"
+              >
+                <span className={cx('grid h-4 w-4 shrink-0 place-items-center rounded border', step.done ? 'border-mint-500 bg-mint-500 text-white' : 'lk-border')}>
+                  {step.done && <Icon name="check" size={10} />}
+                </span>
+                <span className={cx(step.done && 'line-through opacity-60')}>{step.text}</span>
+              </button>
+            ))}
+          </div>
         )}
       </div>
 

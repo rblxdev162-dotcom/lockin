@@ -48,6 +48,7 @@ export function FocusPage() {
   const [selectedId, setSelectedId] = useState<string>('');
   const [minutes, setMinutes] = useState(state.settings.defaultFocusMinutes);
   const [customMinutes, setCustomMinutes] = useState('');
+  const [sessionGoal, setSessionGoal] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(false);
 
   useEffect(() => {
@@ -263,6 +264,15 @@ export function FocusPage() {
               </Field>
             )}
 
+            <Field label="What will finished look like for this session?">
+              <TextInput
+                value={sessionGoal}
+                maxLength={120}
+                placeholder="Example: finish five problems or write the introduction"
+                onChange={(event) => setSessionGoal(event.target.value)}
+              />
+            </Field>
+
             <Button
               size="lg"
               block
@@ -274,6 +284,7 @@ export function FocusPage() {
                   minutes: Math.min(240, Math.max(1, minutes)),
                 });
                 toast(`${minutes}-minute session started.`, 'success');
+                if (sessionGoal.trim()) toast(`Session goal: ${sessionGoal.trim()}`, 'info');
               }}
             >
               Start {minutes}-minute session

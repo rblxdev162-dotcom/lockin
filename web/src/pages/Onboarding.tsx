@@ -25,6 +25,8 @@ import type { WorkloadPreference } from '../types';
 import { BlockingConsent } from '../components/features/BlockingConsent';
 import { QuickAdd } from '../components/features/QuickAdd';
 import { formatDue } from '../lib/time';
+import { CLASS_COLORS, SCHOOL_DAYS } from '../lib/schoolSchedule';
+import type { ScheduledClass, SchoolBreak } from '../lib/schoolSchedule';
 
 const MODE_COPY: Record<ReminderMode, string> = {
   Normal: 'Gentle reminders. Nothing gets blocked unless you start Focus Mode yourself.',
@@ -42,6 +44,18 @@ export function Onboarding() {
   const [name, setName] = useState(state.profile?.firstName ?? '');
   const [preset, setPreset] = useState<PresetId>('typical');
   const [window_, setWindow] = useState<PresetWindow>(DEFAULT_WINDOW);
+  const [schoolStart, setSchoolStart] = useState(state.settings.schoolSchedule.schoolStart);
+  const [schoolEnd, setSchoolEnd] = useState(state.settings.schoolSchedule.schoolEnd);
+  const [classes, setClasses] = useState<ScheduledClass[]>(
+    state.settings.schoolSchedule.classes.length > 0
+      ? state.settings.schoolSchedule.classes
+      : [{ id: 'class-1', name: '', days: [1, 2, 3, 4, 5], color: 'brand', icon: 'C' }],
+  );
+  const [breaks, setBreaks] = useState<SchoolBreak[]>(
+    state.settings.schoolSchedule.breaks.length > 0
+      ? state.settings.schoolSchedule.breaks
+      : [{ id: 'break-lunch', label: 'Lunch', start: '12:00', end: '12:30', days: [1, 2, 3, 4, 5] }],
+  );
 
   /**
    * Four steps, down from seven (Phase 9).
@@ -52,7 +66,7 @@ export function Onboarding() {
    * used the app once. They live in Settings now. Onboarding asks only what
    * changes what LockIn *does* on day one.
    */
-  const steps = ['Name', 'Your work', 'Your time', 'How LockIn helps', 'Companion', 'Canvas checks'];
+  const steps = ['Name', 'School schedule', 'Your work', 'Your time', 'How LockIn helps', 'Companion', 'Canvas checks'];
   /**
    * Writes the availability a preset implies, and marks the planner as
    * configured so `/planner` opens with a real schedule instead of the
@@ -146,8 +160,79 @@ export function Onboarding() {
           </div>
         )}
 
-        {/* ---------- Step 2: work ---------- */}
+        {/* ---------- Step 2: school timetable ---------- */}
         {step === 1 && (
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
+              What does your school week look like?
+            </h1>
+            <p className="mt-1.5 text-sm lk-muted">
+              Add your classes, the days they meet, and real breaks. This stays on this device and
+              helps LockIn build a schedule around school instead of through it.
+            </p>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <Field label="School starts"><TextInput type="time" value={schoolStart} onChange={(e) => setSchoolStart(e.target.value)} /></Field>
+              <Field label="School ends"><TextInput type="time" value={schoolEnd} onChange={(e) => setSchoolEnd(e.target.value)} /></Field>
+            </div>
+
+            <div className="mt-6 space-y-3">
+              <p className="text-sm font-extrabold lk-strong">Classes and meeting days</p>
+              {classes.map((item, index) => (
+                <div key={item.id} className="rounded-2xl border lk-border p-3.5">
+                  <div className="flex gap-2">
+                    <TextInput
+                      value={item.name}
+                      placeholder="Biology or Emmett"
+                      aria-label={`Class ${index + 1} name`}
+                      onChange={(e) => setClasses((list) => list.map((entry) => entry.id === item.id ? { ...entry, name: e.target.value, icon: e.target.value.trim().slice(0, 1).toUpperCase() || 'C' } : entry))}
+                    />
+                    {classes.length > 1 && <Button size="sm" variant="ghost" onClick={() => setClasses((list) => list.filter((entry) => entry.id !== item.id))}>Remove</Button>}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`${item.name || `Class ${index + 1}`} meeting days`}>
+                    {SCHOOL_DAYS.map((day) => <Chip key={day.id} active={item.days.includes(day.id)} onClick={() => setClasses((list) => list.map((entry) => entry.id === item.id ? { ...entry, days: entry.days.includes(day.id) ? entry.days.filter((value) => value !== day.id) : [...entry.days, day.id].sort() } : entry))} aria-label={day.label}>{day.short}</Chip>)}
+                  </div>
+                </div>
+              ))}
+              <Button variant="secondary" size="sm" icon={<Icon name="plus" size={14} />} onClick={() => setClasses((list) => [...list, { id: `class-${Date.now()}`, name: '', days: [1, 2, 3, 4, 5], color: CLASS_COLORS[list.length % CLASS_COLORS.length], icon: 'C' }])}>Add class</Button>
+            </div>
+
+            <div className="mt-6 space-y-3">
+              <p className="text-sm font-extrabold lk-strong">Breaks</p>
+              {breaks.map((item, index) => (
+                <div key={item.id} className="grid gap-2 rounded-2xl border lk-border p-3.5 sm:grid-cols-[1fr_8rem_8rem_auto]">
+                  <TextInput value={item.label} aria-label={`Break ${index + 1} name`} onChange={(e) => setBreaks((list) => list.map((entry) => entry.id === item.id ? { ...entry, label: e.target.value } : entry))} />
+                  <TextInput type="time" value={item.start} aria-label={`${item.label} starts`} onChange={(e) => setBreaks((list) => list.map((entry) => entry.id === item.id ? { ...entry, start: e.target.value } : entry))} />
+                  <TextInput type="time" value={item.end} aria-label={`${item.label} ends`} onChange={(e) => setBreaks((list) => list.map((entry) => entry.id === item.id ? { ...entry, end: e.target.value } : entry))} />
+                  <Button size="sm" variant="ghost" onClick={() => setBreaks((list) => list.filter((entry) => entry.id !== item.id))}>Remove</Button>
+                </div>
+              ))}
+              <Button variant="secondary" size="sm" icon={<Icon name="plus" size={14} />} onClick={() => setBreaks((list) => [...list, { id: `break-${Date.now()}`, label: 'Break', start: '10:30', end: '10:45', days: [1, 2, 3, 4, 5] }])}>Add break</Button>
+            </div>
+
+            <div className="mt-7 flex gap-2">
+              <Button variant="secondary" onClick={back}>Back</Button>
+              <Button block onClick={() => {
+                const cleanClasses = classes.filter((item) => item.name.trim()).map((item) => ({ ...item, name: item.name.trim() }));
+                const cleanBreaks = breaks.filter((item) => item.label.trim() && item.start < item.end).map((item) => ({ ...item, label: item.label.trim() }));
+                const meetingDays = [...new Set(cleanClasses.flatMap((item) => item.days))].sort();
+                dispatch({ type: 'UPDATE_SETTINGS', patch: {
+                  schoolSchedule: { configured: true, schoolStart, schoolEnd, classes: cleanClasses, breaks: cleanBreaks, quietMode: false },
+                  canvasCheckWindow: {
+                    ...state.settings.canvasCheckWindow,
+                    schoolDays: meetingDays.length > 0 ? meetingDays : [1, 2, 3, 4, 5],
+                    schoolDayFrom: Number(schoolStart.slice(0, 2)) * 60 + Number(schoolStart.slice(3)),
+                    schoolDayStart: Number(schoolEnd.slice(0, 2)) * 60 + Number(schoolEnd.slice(3)),
+                  },
+                } });
+                next();
+              }}>Continue</Button>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- Step 3: work ---------- */}
+        {step === 2 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
               What do you need to finish?
@@ -198,7 +283,7 @@ export function Onboarding() {
         )}
 
         {/* ---------- Step 3: when you can study ---------- */}
-        {step === 2 && (
+        {step === 3 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
               When can you usually study?
@@ -256,7 +341,7 @@ export function Onboarding() {
         )}
 
         {/* ---------- Step 4: how LockIn helps ---------- */}
-        {step === 3 && (
+        {step === 4 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
               How should LockIn help?
@@ -357,7 +442,7 @@ export function Onboarding() {
             behaviour, not by a step counter — but the *existence* of the
             Companion has to be said once, because reminders and blocking both
             depend on it and neither failure is visible until it matters. */}
-        {step === 4 && (
+        {step === 5 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
               One last thing
@@ -416,7 +501,7 @@ export function Onboarding() {
             window is a decision they made on day one rather than a setting
             they never found — and so the promise LockIn makes is stated in
             exactly the words the code enforces, no stronger. */}
-        {step === 5 && (
+        {step === 6 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
               When LockIn may check Canvas

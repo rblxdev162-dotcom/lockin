@@ -1,5 +1,5 @@
 /** App chrome: sidebar on desktop, bottom nav on mobile, focus banner on top. */
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cx } from '../../lib/cx';
@@ -10,6 +10,8 @@ import { blockingActive, requiredRemaining } from '../../lib/selectors';
 import { formatClock } from '../../lib/time';
 import { ThemeToggle } from './ThemeToggle';
 import { RecoveryNotice } from './RecoveryNotice';
+import { Modal } from '../ui/Modal';
+import { TextInput } from '../ui/Field';
 
 interface NavItem {
   to: string;
@@ -65,7 +67,53 @@ export function Shell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <BottomNav />
+      <CommandPalette />
     </div>
+  );
+}
+
+function CommandPalette() {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const openPalette = () => setOpen(true);
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT';
+      if (((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') || (event.key === '/' && !typing)) {
+        event.preventDefault();
+        setOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('lockin:command', openPalette);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('lockin:command', openPalette);
+    };
+  }, []);
+  const commands = [
+    ['Add assignment', '/assignments?new=1'],
+    ['Check Canvas', '/assignments'],
+    ['Start Focus', '/focus'],
+    ['Open today’s plan', '/planner'],
+    ['View grades', '/grades'],
+    ['Review class schedule', '/settings#school-schedule'],
+    ['Canvas settings', '/settings#canvas-checks'],
+  ].filter(([label]) => label.toLowerCase().includes(query.trim().toLowerCase()));
+  return (
+    <Modal open={open} title="Jump anywhere" onClose={() => { setOpen(false); setQuery(''); }}>
+      <TextInput autoFocus value={query} placeholder="Search actions…" onChange={(event) => setQuery(event.target.value)} />
+      <div className="mt-3 space-y-1">
+        {commands.map(([label, to]) => (
+          <button key={label} type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-body font-bold lk-strong hover:lk-sunken" onClick={() => { navigate(to); setOpen(false); setQuery(''); }}>
+            {label}<span className="text-caption lk-muted">↵</span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-caption lk-muted">Open anytime with ⌘K, Ctrl+K, or /.</p>
+    </Modal>
   );
 }
 
@@ -112,6 +160,14 @@ function Sidebar() {
             {item.label === 'Work' ? 'Assignments' : item.label}
           </NavLink>
         ))}
+        <button
+          type="button"
+          className="mt-2 flex items-center justify-between rounded-xl px-3 py-2 text-caption font-bold lk-muted hover:lk-sunken hover:lk-strong"
+          onClick={() => window.dispatchEvent(new Event('lockin:command'))}
+        >
+          <span className="flex items-center gap-3"><Icon name="search" size={16} />Quick actions</span>
+          <span>⌘K</span>
+        </button>
       </nav>
 
       <div className="mt-4 space-y-3 border-t lk-border pt-4">

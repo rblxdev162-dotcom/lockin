@@ -32,12 +32,13 @@ import { paceHeadline } from '../lib/pace/engine';
 import { classify } from '../lib/sources/freshness';
 import { CheckCanvasButton } from '../components/features/CheckCanvasButton';
 import { formatScore, hasPublishedTotal } from '../types/grades';
-import { formatClock, greeting } from '../lib/time';
+import { formatClock, greeting, todayISO } from '../lib/time';
 import { cx } from '../lib/cx';
 import type { Assignment } from '../types';
+import { classStyle } from '../lib/schoolSchedule';
 
 export function Dashboard() {
-  const { state, now, extension } = useApp();
+  const { state, now, extension, dispatch } = useApp();
   const navigate = useNavigate();
   const { report } = usePace();
   const { feedback, dismiss } = useFeedback();
@@ -79,6 +80,15 @@ export function Dashboard() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => dispatch({ type: 'UPDATE_SETTINGS', patch: {
+              schoolSchedule: { ...state.settings.schoolSchedule, quietMode: !state.settings.schoolSchedule.quietMode },
+            } })}
+          >
+            {state.settings.schoolSchedule.quietMode ? 'Show details' : 'Quiet mode'}
+          </Button>
           <CheckCanvasButton showStatus={false} />
           <Button
             size="sm"
@@ -139,7 +149,7 @@ export function Dashboard() {
             </Link>
           }
         />
-        {soon.length === 0 ? (
+        {soon.length === 0 && state.settings.schoolSchedule.classes.length === 0 ? (
           <Card>
             <p className="text-body lk-muted">
               Nothing due right now.{' '}
@@ -150,12 +160,17 @@ export function Dashboard() {
             </p>
           </Card>
         ) : (
-          <ClassOverview assignments={soon} />
+          <>
+            {soon.length > 0 && <ClassOverview assignments={soon} />}
+            <ClearScheduledClasses assignments={soon} />
+          </>
         )}
       </section>
 
+      {!state.settings.schoolSchedule.quietMode && <DashboardInsights assignments={state.assignments} />}
+
       {/* ---- The plan, when there is one ---- */}
-      <TodayPlanCard />
+      {!state.settings.schoolSchedule.quietMode && <TodayPlanCard />}
 
       {/*
         ---- Connections ----
@@ -193,6 +208,15 @@ export function Dashboard() {
   );
 }
 
+function ClearScheduledClasses({ assignments }: { assignments: Assignment[] }) {
+  const { state } = useApp();
+  const clear = state.settings.schoolSchedule.classes.filter(
+    (item) => !assignments.some((assignment) => classStyle({ ...state.settings.schoolSchedule, classes: [item] }, assignment.subject)),
+  );
+  if (clear.length === 0) return null;
+  return <div className="lk-stagger mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{clear.map((item) => <div key={item.id} className="lk-card lk-class-card p-4"><div className="flex items-center gap-3"><span className={cx('grid h-8 w-8 place-items-center rounded-xl text-xs font-black text-white', classColor(item.color))}>{item.icon}</span><div><p className="font-extrabold lk-strong">{item.name}</p><p className="text-caption lk-muted">Clear · no open work</p></div></div></div>)}</div>;
+}
+
 function ClassOverview({ assignments }: { assignments: Assignment[] }) {
   const { state, now } = useApp();
   const groups = useMemo(() => groupByClass(assignments, now), [assignments, now]);
@@ -213,6 +237,15 @@ function ClassOverview({ assignments }: { assignments: Assignment[] }) {
         const grade = state.grades.courses.find(
           (item) => item.courseName?.toLowerCase() === group.subject.toLowerCase(),
         );
+        const style = classStyle(state.settings.schoolSchedule, group.subject);
+        const quiet = state.settings.schoolSchedule.quietMode;
+        const health = late > 0
+          ? `${late} need attention`
+          : needsSync > 0
+            ? `${needsSync} need a check`
+            : group.assignments.length > 2
+              ? 'Busy week'
+              : 'Clear path';
 
         return (
           <div
@@ -226,17 +259,15 @@ function ClassOverview({ assignments }: { assignments: Assignment[] }) {
               onClick={() => setExpanded((value) => value === group.subject ? null : group.subject)}
             >
               <div className="min-w-0">
-                <h3 className="truncate text-heading font-extrabold lk-strong">{group.subject}</h3>
+                <h3 className="flex items-center gap-2 truncate text-heading font-extrabold lk-strong">
+                  <span className={cx('grid h-6 w-6 shrink-0 place-items-center rounded-lg text-[0.65rem] font-black text-white', classColor(style?.color))}>{style?.icon ?? group.subject.slice(0, 1).toUpperCase()}</span>
+                  <span className="truncate">{group.subject}</span>
+                </h3>
                 <p className="mt-0.5 text-caption lk-muted">
-                  {group.assignments.length} open
-                  {late > 0
-                    ? ` · ${late} late`
-                    : needsSync > 0
-                      ? ` · ${needsSync} date${needsSync === 1 ? '' : 's'} to check`
-                      : ''}
+                  {group.assignments.length} open · {quiet ? 'Details hidden' : health}
                 </p>
               </div>
-              {grade && hasPublishedTotal(grade) && (
+              {!quiet && grade && hasPublishedTotal(grade) && (
                 <span className="shrink-0 text-heading font-extrabold tabular-nums lk-strong">
                   {grade.currentScore !== null ? formatScore(grade.currentScore) : grade.currentGrade}
                 </span>
@@ -277,6 +308,95 @@ function ClassOverview({ assignments }: { assignments: Assignment[] }) {
       })}
     </div>
   );
+}
+
+function DashboardInsights({ assignments }: { assignments: Assignment[] }) {
+  const { state, now, dispatch } = useApp();
+  const today = todayISO(new Date(now));
+  const day = new Date(now).getDay();
+  const schedule = state.settings.schoolSchedule;
+  const planDay = state.planner.plan?.days.find((entry) => entry.date === today);
+  const conflicts = Object.entries(
+    assignments.filter((assignment) => assignment.status !== 'Completed').reduce<Record<string, Assignment[]>>((out, assignment) => {
+      if (assignment.dueDate) (out[assignment.dueDate] ??= []).push(assignment);
+      return out;
+    }, {}),
+  ).filter(([, items]) => items.length >= 2).sort(([a], [b]) => a.localeCompare(b)).slice(0, 3);
+  const uncertain = assignments.filter((assignment) => workStateOf(assignment, now) === 'needs_sync' || assignment.canvas?.submissionStatus === 'verification_unavailable');
+  const completedThisWeek = assignments.filter((assignment) => assignment.completedAt && now - new Date(assignment.completedAt).getTime() <= 7 * 86_400_000).length;
+  const [dismissed, setDismissed] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('lockin.dismissed.teacherChanges') ?? '[]'); } catch { return []; }
+  });
+  const recentChanges = state.activity.filter((event) => (event.type === 'feed_assignment_updated' || event.type === 'feed_assignment_cancelled') && !dismissed.includes(event.id)).slice(0, 4);
+  const todaysClasses = schedule.classes.filter((item) => item.days.includes(day));
+  const dismissChange = (id: string) => {
+    const next = [...dismissed, id].slice(-100);
+    setDismissed(next);
+    try { localStorage.setItem('lockin.dismissed.teacherChanges', JSON.stringify(next)); } catch { /* presentation state may stay in memory */ }
+  };
+
+  return (
+    <section aria-label="Today and weekly overview" className="grid gap-3 lg:grid-cols-2">
+      <Card>
+        <SectionHeader title="Today timeline" hint={schedule.configured ? `School ends ${schedule.schoolEnd}` : 'Add your school schedule in Settings.'} />
+        <div className="space-y-2 text-body">
+          {schedule.configured && (
+            <div className="flex justify-between gap-3 rounded-xl border lk-border px-3 py-2">
+              <span className="font-semibold lk-strong">School · {todaysClasses.map((item) => item.name).join(', ') || 'No classes listed'}</span>
+              <span className="shrink-0 lk-muted">{schedule.schoolStart}–{schedule.schoolEnd}</span>
+            </div>
+          )}
+          {schedule.breaks.filter((item) => item.days.includes(day)).map((item) => (
+            <div key={item.id} className="flex justify-between gap-3 rounded-xl lk-sunken px-3 py-2">
+              <span className="font-semibold lk-strong">{item.label}</span><span className="lk-muted">{item.start}–{item.end}</span>
+            </div>
+          ))}
+          {(planDay?.items ?? []).slice(0, 5).map((item) => (
+            <div key={item.id} className="flex justify-between gap-3 rounded-xl border lk-border px-3 py-2">
+              <span className="min-w-0 truncate font-semibold lk-strong">{item.title}</span>
+              <span className="shrink-0 lk-muted">{item.startTime ?? 'After school'} · {item.plannedMinutes}m</span>
+            </div>
+          ))}
+          {!planDay?.items.length && <p className="text-body lk-muted">No study blocks planned for today.</p>}
+        </div>
+      </Card>
+
+      <Card>
+        <SectionHeader title="Weekly reset" hint={`${completedThisWeek} finished in the last 7 days`} />
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <Metric value={assignments.filter((a) => a.status !== 'Completed').length} label="Open" />
+          <Metric value={conflicts.length} label="Busy dates" />
+          <Metric value={uncertain.length} label="Check data" />
+        </div>
+        {conflicts.length > 0 && <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="text-caption font-semibold text-amber-700 dark:text-amber-300">Conflict warning: {conflicts.map(([date, items]) => `${items.length} due ${date}`).join(' · ')}.</p><Button size="sm" variant="secondary" onClick={() => dispatch({ type: 'PLANNER_REBUILD', reason: 'manual_rebuild' })}>Revise plan</Button></div>}
+      </Card>
+
+      {recentChanges.length > 0 && (
+        <Card>
+          <SectionHeader title="Teacher changes" hint="What changed in the Canvas calendar" />
+          <div className="space-y-2">
+            {recentChanges.map((event) => <div key={event.id} className="flex items-start gap-2 rounded-xl lk-sunken px-3 py-2 text-caption font-semibold lk-strong"><p className="min-w-0 flex-1">{event.message}</p><button type="button" className="shrink-0 lk-muted hover:lk-strong" aria-label="Dismiss change" onClick={() => dismissChange(event.id)}>Dismiss</button></div>)}
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <SectionHeader title="Data confidence" hint="LockIn shows uncertainty instead of guessing" />
+        <p className="text-body lk-muted">
+          {uncertain.length === 0 ? 'Every visible deadline has a usable source.' : `${uncertain.length} assignment${uncertain.length === 1 ? '' : 's'} need a fresh Canvas date or clearer gradebook status.`}
+        </p>
+        <Link to="/assignments" className="mt-3 inline-block text-caption font-extrabold text-brand-600 hover:underline dark:text-brand-300">Review accuracy →</Link>
+      </Card>
+    </section>
+  );
+}
+
+function Metric({ value, label }: { value: number; label: string }) {
+  return <div className="rounded-xl lk-sunken p-3"><p className="text-heading font-extrabold lk-strong">{value}</p><p className="text-caption lk-muted">{label}</p></div>;
+}
+
+function classColor(color?: string) {
+  return ({ brand: 'bg-brand-500', mint: 'bg-mint-500', sky: 'bg-sky-500', amber: 'bg-amber-500', violet: 'bg-violet-500', rose: 'bg-rose-500' } as Record<string, string>)[color ?? 'brand'] ?? 'bg-brand-500';
 }
 
 /* ------------------------------------------------------------------ */

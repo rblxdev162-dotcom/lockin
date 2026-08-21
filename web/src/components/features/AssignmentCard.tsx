@@ -18,8 +18,10 @@ export function AssignmentCard({
   onCheckCanvas,
   onLinkCanvas,
   canvasBusy,
+  now,
 }: {
   assignment: Assignment;
+  now: number;
   required?: boolean;
   onToggleComplete?: () => void;
   onEdit?: () => void;
@@ -37,10 +39,8 @@ export function AssignmentCard({
    * that Canvas provides the evidence. The checkbox is therefore hidden for
    * Canvas-linked assignments and replaced by Check Canvas Status.
    */
-  const canvasControlled = !!canvas && (assignment.completionMethod === 'canvas' || isSettled(workStateOf(assignment, Date.now())));
+  const canvasControlled = !!canvas && (assignment.completionMethod === 'canvas' || isSettled(workStateOf(assignment, now)));
   const verificationControlled = canvasControlled;
-  const due = parseDueDate(assignment.dueDate, assignment.dueTime);
-  const isOverdue = !done && !!due && due.getTime() < Date.now();
   /**
    * The state, in one word.
    *
@@ -48,7 +48,11 @@ export function AssignmentCard({
    * submitted-but-unmarked work, and work the student ticked off themselves
    * all looked identical. Canvas's own word wins where it has one.
    */
-  const state = workStateOf(assignment, Date.now());
+  const state = workStateOf(assignment, now);
+  const dueLabel =
+    state === 'needs_sync'
+      ? staleDueLabel(assignment)
+      : formatDue(assignment.dueDate, assignment.dueTime);
 
   return (
     <div
@@ -117,8 +121,13 @@ export function AssignmentCard({
           >
             {WORK_STATE_LABEL[state]}
           </span>
-          <span className={cx(isOverdue && 'lk-status-behind lk-status-text font-bold')}>
-            {formatDue(assignment.dueDate, assignment.dueTime)}
+          <span
+            className={cx(
+              (state === 'overdue' || state === 'missing') &&
+                'lk-status-behind lk-status-text font-bold',
+            )}
+          >
+            {dueLabel}
           </span>
           <span>~{assignment.estimatedMinutes} min</span>
           {assignment.loggedMinutes > 0 && (
@@ -201,4 +210,10 @@ export function AssignmentCard({
       </div>
     </div>
   );
+}
+
+function staleDueLabel(assignment: Assignment): string {
+  const due = parseDueDate(assignment.dueDate, assignment.dueTime);
+  if (!due) return 'Date needs checking';
+  return `Was due ${due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · sync to confirm`;
 }

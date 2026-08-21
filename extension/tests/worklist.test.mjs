@@ -78,7 +78,7 @@ test('graded, submitted and ticked-off are three different states', () => {
 
 test('all three mean there is nothing left to do', () => {
   for (const state of ['graded', 'submitted', 'done']) assert.equal(isSettled(state), true);
-  for (const state of ['missing', 'overdue', 'due_today', 'upcoming', 'undated']) {
+  for (const state of ['missing', 'overdue', 'needs_sync', 'due_today', 'upcoming', 'undated']) {
     assert.equal(isSettled(state), false);
   }
 });
@@ -94,6 +94,27 @@ test('graded work stays graded even if its due date has passed', () => {
   assert.equal(state, 'graded', 'LockIn must not contradict the source of truth');
 });
 
+test('a stale Canvas date is not called overdue until Canvas answers again', () => {
+  const staleCanvas = assignment({
+    dueIn: -DAY,
+    source: {
+      kind: 'CANVAS_CALENDAR',
+      sourceId: 'canvas_calendar',
+      lastSyncedAt: new Date(NOW - 3 * DAY).toISOString(),
+      confidence: 'high',
+      isLive: false,
+      rawDataRetained: false,
+    },
+  });
+  assert.equal(workStateOf(staleCanvas, NOW), 'needs_sync');
+
+  const currentCanvas = {
+    ...staleCanvas,
+    source: { ...staleCanvas.source, lastSyncedAt: new Date(NOW - HOUR).toISOString() },
+  };
+  assert.equal(workStateOf(currentCanvas, NOW), 'overdue');
+});
+
 test('undated work has its own state rather than being called overdue', () => {
   assert.equal(workStateOf(assignment({ dueIn: null }), NOW), 'undated');
 });
@@ -104,7 +125,7 @@ test('due today and upcoming are separated at the end of today', () => {
 });
 
 test('every state has a word, because none of them may be colour alone', () => {
-  for (const state of ['graded', 'submitted', 'done', 'missing', 'overdue', 'due_today', 'upcoming', 'undated']) {
+  for (const state of ['graded', 'submitted', 'done', 'missing', 'overdue', 'needs_sync', 'due_today', 'upcoming', 'undated']) {
     assert.ok(WORK_STATE_LABEL[state]?.length > 0, `${state} has no label`);
   }
 });
@@ -113,18 +134,30 @@ test('every state has a word, because none of them may be colour alone', () => {
 /* Ordering                                                            */
 /* ------------------------------------------------------------------ */
 
-test('the order is missing, overdue, today, upcoming, undated, then settled', () => {
+test('the order is missing, overdue, needs-sync, today, upcoming, undated, then settled', () => {
   const list = [
     assignment({ id: 'settled', canvasStatus: 'graded' }),
     assignment({ id: 'undated', dueIn: null }),
     assignment({ id: 'upcoming', dueIn: 3 * DAY }),
     assignment({ id: 'today', dueIn: 2 * HOUR }),
+    assignment({
+      id: 'needs-sync',
+      dueIn: -HOUR,
+      source: {
+        kind: 'CANVAS_CALENDAR',
+        sourceId: 'canvas_calendar',
+        lastSyncedAt: new Date(NOW - 3 * DAY).toISOString(),
+        confidence: 'high',
+        isLive: false,
+        rawDataRetained: false,
+      },
+    }),
     assignment({ id: 'overdue', dueIn: -DAY }),
     assignment({ id: 'missing', dueIn: -2 * DAY, canvasStatus: 'missing' }),
   ];
   assert.deepEqual(
     byUrgency(list, NOW).map((a) => a.id),
-    ['missing', 'overdue', 'today', 'upcoming', 'undated', 'settled'],
+    ['missing', 'overdue', 'needs-sync', 'today', 'upcoming', 'undated', 'settled'],
   );
 });
 

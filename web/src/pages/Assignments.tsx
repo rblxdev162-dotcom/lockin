@@ -105,6 +105,7 @@ export function AssignmentsPage() {
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<string>(ALL);
   const [priority, setPriority] = useState<string>(ALL);
+  const [subject, setSubject] = useState<string>(() => params.get('class')?.trim() || ALL);
   /**
    * Which view to land on.
    *
@@ -118,7 +119,7 @@ export function AssignmentsPage() {
    */
   const [view, setView] = useState<ViewId>(() => initialView(state.assignments, Date.now()));
   /**
-   * List or columns.
+   * List or class sections.
    *
    * Remembered across visits, because it is a preference about how somebody
    * reads rather than a filter they set for one question. It lives in its own
@@ -127,9 +128,9 @@ export function AssignmentsPage() {
    */
   const [layout, setLayout] = useState<'list' | 'class'>(() => {
     try {
-      return localStorage.getItem('lockin.assignments.layout') === 'class' ? 'class' : 'list';
+      return localStorage.getItem('lockin.assignments.layout') === 'list' ? 'list' : 'class';
     } catch {
-      return 'list';
+      return 'class';
     }
   });
   const [showFilters, setShowFilters] = useState(false);
@@ -151,12 +152,13 @@ export function AssignmentsPage() {
       state.assignments.filter((a) => {
         if (platform !== ALL && a.platform !== platform) return false;
         if (priority !== ALL && a.priority !== priority) return false;
+        if (subject !== ALL && (a.subject?.trim() || 'No class') !== subject) return false;
         if (q && !`${a.title} ${a.subject}`.toLowerCase().includes(q)) return false;
         return true;
       }),
       now,
     );
-  }, [state.assignments, query, platform, priority, now]);
+  }, [state.assignments, query, platform, priority, subject, now]);
 
   /** Counts for the tabs, computed once rather than per tab. */
   const buckets = useMemo(() => {
@@ -169,7 +171,11 @@ export function AssignmentsPage() {
   }, [matching, now]);
 
   const shown = buckets[view];
-  const filtersOn = platform !== ALL || priority !== ALL || query.trim() !== '';
+  const filtersOn = platform !== ALL || priority !== ALL || subject !== ALL || query.trim() !== '';
+  const subjects = useMemo(
+    () => [...new Set(state.assignments.map((a) => a.subject?.trim() || 'No class'))].sort(),
+    [state.assignments],
+  );
 
   /**
    * A class's current grade, matched by the Canvas course name LockIn stored
@@ -200,6 +206,7 @@ export function AssignmentsPage() {
     <AssignmentCard
       key={a.id}
       assignment={a}
+      now={now}
       required={state.focusMode.active && state.focusMode.requiredTaskIds.includes(a.id)}
       onToggleComplete={() => {
         if (isComplete(a)) {
@@ -297,8 +304,8 @@ export function AssignmentsPage() {
             />
           </div>
           {/*
-            List or columns. A phone gets the list whatever is chosen — three
-            columns on a 375px screen is three unreadable columns.
+            List or class sections. Class sections are the calm default; list
+            view remains for scanning one flat deadline queue.
           */}
           <Chip
             active={layout === 'class'}
@@ -327,6 +334,7 @@ export function AssignmentsPage() {
                 setQuery('');
                 setPlatform(ALL);
                 setPriority(ALL);
+                setSubject(ALL);
               }}
             >
               Clear
@@ -335,7 +343,13 @@ export function AssignmentsPage() {
         </div>
 
         {showFilters && (
-          <div className="animate-fade mt-2.5 grid gap-2.5 sm:grid-cols-2">
+          <div className="animate-fade mt-2.5 grid gap-2.5 sm:grid-cols-3">
+            <Select
+              value={subject}
+              options={[ALL, ...subjects]}
+              onChange={(e) => setSubject(e.target.value)}
+              aria-label="Filter by class"
+            />
             <Select
               value={platform}
               options={[ALL, ...PLATFORMS]}
@@ -387,16 +401,17 @@ export function AssignmentsPage() {
 
           {layout === 'class' ? (
             /*
-              One column per class.
-              `items-start` matters: without it every column stretches to the
-              tallest, and a class with one assignment gets a card floating in
-              a column of empty space.
+              One section per class. A full-width section keeps a class
+              together without producing narrow newspaper columns.
             */
-            <div className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="space-y-5">
               {groupByClass(shown, now).map((group) => (
-                <div key={group.subject} className="min-w-0">
-                  <div className="mb-2 flex items-baseline justify-between gap-2">
-                    <h3 className="truncate text-caption font-bold tracking-wide lk-muted uppercase">
+                <div
+                  key={group.subject}
+                  className="min-w-0 rounded-2xl border lk-border lk-sunken p-3 sm:p-4"
+                >
+                  <div className="mb-3 flex items-baseline justify-between gap-2 px-1">
+                    <h3 className="truncate text-heading font-extrabold lk-strong">
                       {group.subject}
                     </h3>
                     <span className="shrink-0 text-caption tabular-nums lk-muted">
@@ -408,7 +423,7 @@ export function AssignmentsPage() {
                       {group.assignments.length}
                     </span>
                   </div>
-                  <div className="space-y-2">
+                  <div className="grid items-start gap-2 lg:grid-cols-2">
                     {group.assignments.map((a) => renderCard(a))}
                   </div>
                 </div>

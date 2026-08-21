@@ -4,7 +4,7 @@
 and must not be rebuilt. `README.md` is the developer guide; this file is the
 architecture, the invariants, and the reasoning behind them.
 
-Project root: `/Users/arjun/lockin` (not a git repo — no remote, no commits)
+Project root: `/Users/arjun/lockin` (git branch `phase18-grades` at the start of Phase 19)
 
 ---
 
@@ -39,6 +39,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 11 | **Edgenuity browser reading** — read course progress off the Edgenuity page the student opens | **Removed in Phase 16** |
 | 17 | **Canvas only** — Edgenuity scrapped, 30-minute auto-sync, graded-vs-undone, urgency ordering, class columns, and a large deletion pass | **Done** |
 | 18 | **The Grades page reader** — read the Canvas page the student opened, class grades, the school-hours gate, and the layout pass | **Done** |
+| 19 | **Class-first work hub** — Home course overview, class-first Assignments layout, freshness-aware overdue labels | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -56,7 +57,7 @@ Tagline: *Finish what matters before distractions take over.*
 | Performance budgets on a 100-assignment dataset | 7 | `npm run test:perf` |
 | **Provenance + Pace Engine** | 20 | `npm run test:pace` |
 | **The Canvas gate, its 3 mirrors, grades** | 21 | `npm run test:canvas-grades` |
-| **Work states, urgency, class grouping** | 16 | `npm run test:worklist` |
+| **Work states, urgency, class grouping** | 17 | `npm run test:worklist` |
 | **Canvas ICS: parser, mapper, reconciler** | 36 | `npm run test:canvas-ics` |
 | **Companion: activity, cooldowns, calendar** | 28 | `npm run test:companion` |
 | **Phase 16 state, migration and feedback** | 14 | `npm run test:phase16` |
@@ -402,6 +403,32 @@ Since Phase 18 there is a third, and it is a safety rule:
 `web/src/lib/canvas/checkWindow.ts` ↔ `extension/canvas/checkWindow.js` ↔
 `autoFetchAllowed()` in `scripts/canvas-feed.mjs`. All three are run over the
 same matrix by `npm run test:canvas-grades`.
+
+---
+
+## Phase 19 — Class-first work hub (done)
+
+The mixed assignment rows on Home made six classes look like one undifferentiated
+inbox. Home now keeps the single next action, then shows one compact card per
+class: open count, genuinely late count, current Canvas grade when published,
+and the next item for that class. Opening a class carries that filter into the
+Assignments page.
+
+Assignments now defaults to **By class** and renders one full-width class
+section at a time rather than scattering classes across newspaper-style
+columns. List view remains available and the student's explicit choice is
+remembered.
+
+Accuracy changed with the layout: a passed date from a stale or unavailable
+external source is now **Check date**, not **Overdue**. The old date remains
+visible with “sync to confirm”; LockIn only restores the overdue claim after
+the source answers again. Manual dates and Canvas's explicit `missing` state
+keep their existing meaning. `workStateOf()` remains the one source of truth,
+and `AssignmentCard` now receives the store clock instead of consulting
+`Date.now()` independently.
+
+No Canvas transport, parser, permission, or request path changed. Phase 19 adds
+no API call and no dependency.
 
 ---
 

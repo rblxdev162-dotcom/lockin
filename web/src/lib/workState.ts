@@ -28,6 +28,7 @@
  */
 import type { Assignment } from '../types';
 import { dueTimestamp, isComplete } from './selectors';
+import { classify } from './sources/freshness';
 
 export const WORK_STATES = [
   'graded',
@@ -35,6 +36,7 @@ export const WORK_STATES = [
   'done',
   'missing',
   'overdue',
+  'needs_sync',
   'due_today',
   'upcoming',
   'undated',
@@ -48,6 +50,7 @@ export const WORK_STATE_LABEL: Record<WorkState, string> = {
   done: 'Done',
   missing: 'Missing',
   overdue: 'Overdue',
+  needs_sync: 'Check date',
   due_today: 'Due today',
   upcoming: 'Upcoming',
   undated: 'No due date',
@@ -60,6 +63,7 @@ export const WORK_STATE_TONE: Record<WorkState, string> = {
   done: 'lk-status-on_track',
   missing: 'lk-status-behind',
   overdue: 'lk-status-behind',
+  needs_sync: 'lk-status-unknown',
   due_today: 'lk-status-at_risk',
   upcoming: 'lk-status-unknown',
   undated: 'lk-status-unknown',
@@ -89,7 +93,20 @@ export function workStateOf(assignment: Assignment, now: number): WorkState {
 
   const due = dueTimestamp(assignment);
   if (!Number.isFinite(due) || due === Number.MAX_SAFE_INTEGER) return 'undated';
-  if (due < now) return 'overdue';
+  if (due < now) {
+    const freshness = classify(assignment.source, now).state;
+    // A manual date is the student's own current claim. An old Canvas feed is
+    // not: once it is stale or unavailable, the date stays visible but cannot
+    // be upgraded into the stronger claim that the work is overdue.
+    if (
+      assignment.source &&
+      assignment.source.kind !== 'MANUAL' &&
+      (freshness === 'STALE' || freshness === 'UNAVAILABLE')
+    ) {
+      return 'needs_sync';
+    }
+    return 'overdue';
+  }
 
   const endOfToday = new Date(now);
   endOfToday.setHours(23, 59, 59, 999);
@@ -105,10 +122,11 @@ export function workStateOf(assignment: Assignment, now: number): WorkState {
  *
  *   0  missing      Canvas says you did not hand it in
  *   1  overdue      the deadline has passed
- *   2  due today
- *   3  upcoming     by due date
- *   4  undated      real work, but nothing is forcing it
- *   5  settled      graded, submitted, or ticked off
+ *   2  needs sync   a passed external date LockIn can no longer trust
+ *   3  due today
+ *   4  upcoming     by due date
+ *   5  undated      real work, but nothing is forcing it
+ *   6  settled      graded, submitted, or ticked off
  */
 export function urgency(assignment: Assignment, now: number): number {
   const state = workStateOf(assignment, now);
@@ -116,12 +134,13 @@ export function urgency(assignment: Assignment, now: number): number {
   const band = {
     missing: 0,
     overdue: 1,
-    due_today: 2,
-    upcoming: 3,
-    undated: 4,
-    graded: 5,
-    submitted: 5,
-    done: 5,
+    needs_sync: 2,
+    due_today: 3,
+    upcoming: 4,
+    undated: 5,
+    graded: 6,
+    submitted: 6,
+    done: 6,
   }[state];
 
   // A band is 10^15 apart, which is comfortably wider than any real timestamp

@@ -91,8 +91,8 @@ To watch it work: add a site under **Blocked websites**, then press **Start
 | **Canvas calendar feed** | Assignments, courses and due dates from Canvas's own calendar feed — by LockIn's local service (no extension needed, keeps running with Chrome closed) or by the Companion. Refreshed on a timer only if you switch that on, and never during your school hours. |
 | **Canvas status and grades** | Graded, submitted, missing, excused, scores, and each class's current grade — read off the Canvas **Grades** page you opened yourself, when you press **Check Canvas**. LockIn makes no request to Canvas: no API call, no token, no polling, no background tab. |
 | **The check gate** | One rule in front of every Canvas path, in the app, the extension and the local service. Manual-only by default; automatic checks are disabled during your configured school hours; every decision, allowed or refused, is logged. |
-| **What to do next** | One ordering everywhere: missing, then overdue, then today, then upcoming — strictly by due time inside each. Priority never beats a deadline. |
-| **By class** | The same list as columns, one per class, most urgent class first. |
+| **What to do next** | One ordering everywhere: missing, then overdue, then dates that need a fresh sync, then today and upcoming — strictly by due time inside each. Priority never beats a deadline. |
+| **By class** | Home summarises each class in one compact card; Assignments opens grouped by class, with the most urgent class first. |
 | **Pace** | Ahead / on track / at risk / behind — with reasons, and "not enough data" as a real answer when a sync failed. |
 | **Parent View** | A PIN-gated local dashboard of work, verification and Focus Mode history. |
 | **Emergency exit** | Always available, no PIN, no progress required. |
@@ -143,8 +143,9 @@ Five rules explain most of the code:
    "not enough data" with the source named — never "behind". Nothing is called
    overdue on a due date LockIn cannot currently believe.
 8. **One comparator.** `lib/workState.ts` decides both what state a piece of
-   work is in and what order it comes in. Missing, overdue, today, upcoming —
-   then strictly by due time. Priority never beats a deadline.
+   work is in and what order it comes in. Missing, overdue, dates needing a
+   fresh sync, today, upcoming — then strictly by due time. Priority never
+   beats a deadline, and stale external dates are never called overdue.
 
 `HANDOFF.md` has the full list of invariants and the file-by-file map. Read it
 before changing anything structural.

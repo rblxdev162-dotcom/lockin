@@ -3,7 +3,7 @@
  *
  *   1. What should I do now?      → NEXT UP, the one primary card
  *   2. Am I ahead or behind?      → the line under the greeting
- *   3. What's due next?           → TODAY, a plain list
+ *   3. What does each class need? → CLASSES, one compact summary per course
  *   4. Is LockIn connected?       → the integrations strip at the bottom
  *
  * ## The rule this page is built around
@@ -23,16 +23,15 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Icon } from '../components/ui/Icon';
 import { Badge } from '../components/ui/Badge';
-import { AssignmentCard } from '../components/features/AssignmentCard';
 import { CanvasCallout } from '../components/features/CanvasCallout';
 import { PaceBadge, SectionHeader, SourceBadge, STATUS_CLASS } from '../components/ui/Status';
 import { TodayPlanCard } from '../components/features/planner/TodayPlanCard';
 import { requiredAssignments } from '../lib/selectors';
-import { whatToDoNext } from '../lib/workState';
+import { groupByClass, whatToDoNext, workStateOf, WORK_STATE_LABEL, WORK_STATE_TONE } from '../lib/workState';
 import { paceHeadline } from '../lib/pace/engine';
 import { classify } from '../lib/sources/freshness';
 import { CheckCanvasButton } from '../components/features/CheckCanvasButton';
-import { formatScore, hasPublishedTotal, sortGrades } from '../types/grades';
+import { formatScore, hasPublishedTotal } from '../types/grades';
 import { formatClock, greeting } from '../lib/time';
 import { cx } from '../lib/cx';
 import type { Assignment } from '../types';
@@ -121,15 +120,15 @@ export function Dashboard() {
         <NothingDueCard reason={report.suggestedAction} />
       )}
 
-      {/* ---- Today ---- */}
-      <section aria-labelledby="today-heading">
+      {/* ---- Classes ---- */}
+      <section aria-labelledby="classes-heading">
         <SectionHeader
-          id="today-heading"
-          title="Up next"
+          id="classes-heading"
+          title="Classes"
           hint={
             soon.length === 0
               ? 'Nothing outstanding.'
-              : `${soon.length} thing${soon.length === 1 ? '' : 's'} to do, most urgent first.`
+              : `${soon.length} open assignment${soon.length === 1 ? '' : 's'}, organised by class.`
           }
           action={
             <Link
@@ -151,16 +150,9 @@ export function Dashboard() {
             </p>
           </Card>
         ) : (
-          <div className="space-y-2">
-            {soon.slice(0, 5).map((assignment) => (
-              <AssignmentCard key={assignment.id} assignment={assignment} />
-            ))}
-          </div>
+          <ClassOverview assignments={soon} />
         )}
       </section>
-
-      {/* ---- Grades, when any have been read ---- */}
-      <GradesStrip />
 
       {/* ---- The plan, when there is one ---- */}
       <TodayPlanCard />
@@ -197,6 +189,72 @@ export function Dashboard() {
         </Link>
       </p>
 
+    </div>
+  );
+}
+
+function ClassOverview({ assignments }: { assignments: Assignment[] }) {
+  const { state, now } = useApp();
+  const groups = useMemo(() => groupByClass(assignments, now), [assignments, now]);
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {groups.map((group) => {
+        const next = group.assignments[0];
+        const nextState = workStateOf(next, now);
+        const late = group.assignments.filter((a) => {
+          const state = workStateOf(a, now);
+          return state === 'missing' || state === 'overdue';
+        }).length;
+        const needsSync = group.assignments.filter(
+          (a) => workStateOf(a, now) === 'needs_sync',
+        ).length;
+        const grade = state.grades.courses.find(
+          (item) => item.courseName?.toLowerCase() === group.subject.toLowerCase(),
+        );
+
+        return (
+          <Link
+            key={group.subject}
+            to={`/assignments?class=${encodeURIComponent(group.subject)}`}
+            className="lk-card lk-interactive min-w-0 p-4"
+            aria-label={`Open ${group.subject} assignments`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-heading font-extrabold lk-strong">{group.subject}</h3>
+                <p className="mt-0.5 text-caption lk-muted">
+                  {group.assignments.length} open
+                  {late > 0
+                    ? ` · ${late} late`
+                    : needsSync > 0
+                      ? ` · ${needsSync} date${needsSync === 1 ? '' : 's'} to check`
+                      : ''}
+                </p>
+              </div>
+              {grade && hasPublishedTotal(grade) && (
+                <span className="shrink-0 text-heading font-extrabold tabular-nums lk-strong">
+                  {grade.currentScore !== null ? formatScore(grade.currentScore) : grade.currentGrade}
+                </span>
+              )}
+            </div>
+            <div className="mt-4 border-t lk-border pt-3">
+              <p className="truncate text-body font-bold lk-strong">{next.title}</p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-caption lk-muted">
+                <span
+                  className={cx(
+                    WORK_STATE_TONE[nextState],
+                    'lk-status-chip rounded-full px-2 py-0.5 font-bold',
+                  )}
+                >
+                  {WORK_STATE_LABEL[nextState]}
+                </span>
+                <span>{duePhrase(next, now)}</span>
+              </div>
+            </div>
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -304,52 +362,6 @@ function NothingDueCard({ reason }: { reason: { kind: string; text: string } }) 
   );
 }
 
-/**
- * A single row of class grades, and nothing more.
- *
- * It appears only once a Grades page has actually been read: an empty
- * placeholder promising a feature is clutter, and this page is allowed exactly
- * one primary thing. Numbers are shown exactly as Canvas published them — the
- * full explanation lives on `/grades`.
- */
-function GradesStrip() {
-  const { state } = useApp();
-  const grades = useMemo(
-    () => sortGrades(state.grades.courses).filter(hasPublishedTotal),
-    [state.grades.courses],
-  );
-  if (grades.length === 0) return null;
-
-  return (
-    <section aria-labelledby="grades-heading">
-      <SectionHeader
-        id="grades-heading"
-        title="Grades"
-        action={
-          <Link
-            to="/grades"
-            className="text-caption font-bold lk-muted underline-offset-2 hover:underline"
-          >
-            All grades
-          </Link>
-        }
-      />
-      <Card className="flex flex-wrap gap-x-6 gap-y-3">
-        {grades.slice(0, 6).map((grade) => (
-          <div key={grade.externalCourseId} className="min-w-0">
-            <p className="truncate text-caption font-bold lk-muted">
-              {grade.courseName || `Course ${grade.externalCourseId}`}
-            </p>
-            <p className="text-heading font-extrabold tabular-nums lk-strong">
-              {grade.currentScore !== null ? formatScore(grade.currentScore) : grade.currentGrade}
-            </p>
-          </div>
-        ))}
-      </Card>
-    </section>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /* Small pieces                                                        */
 /* ------------------------------------------------------------------ */
@@ -375,7 +387,11 @@ function duePhrase(assignment: Assignment, now: number): string {
   const days = Math.round(startOfDay(due) - startOfDay(now)) / 86_400_000;
   if (days === 0) return `Due today, ${time}`;
   if (days === 1) return `Due tomorrow, ${time}`;
-  if (days < 0) return `Overdue since ${new Date(due).toLocaleDateString()}`;
+  if (days < 0) {
+    return workStateOf(assignment, now) === 'needs_sync'
+      ? `Date passed · sync to confirm`
+      : `Overdue since ${new Date(due).toLocaleDateString()}`;
+  }
   return `Due ${new Date(due).toLocaleDateString(undefined, { weekday: 'long' })}, ${time}`;
 }
 
@@ -392,4 +408,3 @@ function canvasDetail(state: ReturnType<typeof useApp>['state'], now: number): s
   const source = state.assignments.find((a) => a.source?.kind === 'CANVAS_CALENDAR')?.source;
   return classify(source, now).label;
 }
-

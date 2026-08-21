@@ -185,7 +185,7 @@ export function Modal({ open, title, subtitle, onClose, children, footer, wide }
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      className="lk-modal-backdrop fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -198,7 +198,7 @@ export function Modal({ open, title, subtitle, onClose, children, footer, wide }
         aria-labelledby={titleId}
         aria-describedby={subtitle ? subtitleId : undefined}
         className={cx(
-          'lk-raised animate-rise max-h-[92vh] w-full overflow-y-auto rounded-t-3xl border lk-border p-6 shadow-2xl outline-none sm:rounded-3xl',
+          'lk-modal-panel lk-raised animate-rise max-h-[92vh] w-full overflow-y-auto rounded-t-3xl border lk-border p-6 shadow-2xl outline-none sm:rounded-3xl',
           wide ? 'sm:max-w-2xl' : 'sm:max-w-md',
         )}
       >

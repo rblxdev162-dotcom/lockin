@@ -54,6 +54,12 @@ export function Shell({ children }: { children: ReactNode }) {
   const location = useLocation();
   return (
     <div className="lk-app-shell min-h-dvh lk-surface">
+      <div className="lk-atmosphere" aria-hidden="true">
+        <span className="lk-orb lk-orb-one" />
+        <span className="lk-orb lk-orb-two" />
+        <span className="lk-orb lk-orb-three" />
+        <span className="lk-light-beam" />
+      </div>
       <Sidebar />
       <div className="lg:pl-64">
         <FocusBanner />

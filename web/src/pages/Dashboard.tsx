@@ -69,7 +69,7 @@ export function Dashboard() {
       <CanvasCallout />
 
       {/* ---- Greeting and verdict ---- */}
-      <header className="flex flex-wrap items-end justify-between gap-3">
+      <header className="lk-hero-header flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-title font-extrabold lk-strong">
             {greeting()}, {state.profile?.firstName}
@@ -337,22 +337,22 @@ function DashboardInsights({ assignments }: { assignments: Assignment[] }) {
 
   return (
     <section aria-label="Today and weekly overview" className="grid gap-3 lg:grid-cols-2">
-      <Card>
+      <Card className="lk-timeline-card">
         <SectionHeader title="Today timeline" hint={schedule.configured ? `School ends ${schedule.schoolEnd}` : 'Add your school schedule in Settings.'} />
         <div className="space-y-2 text-body">
           {schedule.configured && (
-            <div className="flex justify-between gap-3 rounded-xl border lk-border px-3 py-2">
+            <div className="lk-timeline-row flex justify-between gap-3 rounded-xl border lk-border px-3 py-2">
               <span className="font-semibold lk-strong">School · {todaysClasses.map((item) => item.name).join(', ') || 'No classes listed'}</span>
               <span className="shrink-0 lk-muted">{schedule.schoolStart}–{schedule.schoolEnd}</span>
             </div>
           )}
           {schedule.breaks.filter((item) => item.days.includes(day)).map((item) => (
-            <div key={item.id} className="flex justify-between gap-3 rounded-xl lk-sunken px-3 py-2">
+            <div key={item.id} className="lk-timeline-row flex justify-between gap-3 rounded-xl lk-sunken px-3 py-2">
               <span className="font-semibold lk-strong">{item.label}</span><span className="lk-muted">{item.start}–{item.end}</span>
             </div>
           ))}
           {(planDay?.items ?? []).slice(0, 5).map((item) => (
-            <div key={item.id} className="flex justify-between gap-3 rounded-xl border lk-border px-3 py-2">
+            <div key={item.id} className="lk-timeline-row flex justify-between gap-3 rounded-xl border lk-border px-3 py-2">
               <span className="min-w-0 truncate font-semibold lk-strong">{item.title}</span>
               <span className="shrink-0 lk-muted">{item.startTime ?? 'After school'} · {item.plannedMinutes}m</span>
             </div>
@@ -392,7 +392,7 @@ function DashboardInsights({ assignments }: { assignments: Assignment[] }) {
 }
 
 function Metric({ value, label }: { value: number; label: string }) {
-  return <div className="rounded-xl lk-sunken p-3"><p className="text-heading font-extrabold lk-strong">{value}</p><p className="text-caption lk-muted">{label}</p></div>;
+  return <div className="lk-metric rounded-xl lk-sunken p-3"><p className="text-heading font-extrabold lk-strong">{value}</p><p className="text-caption lk-muted">{label}</p></div>;
 }
 
 function classColor(color?: string) {

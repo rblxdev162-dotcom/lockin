@@ -59,7 +59,7 @@ export function AssignmentCard({
   return (
     <div
       className={cx(
-        'lk-card lk-interactive group flex gap-3.5 p-4',
+        'lk-assignment-card lk-card lk-interactive group flex gap-3.5 p-4',
         // Completed work fades rather than vanishing: it is still evidence of
         // a finished day, and a list that empties itself gives no credit.
         done && 'opacity-55',
@@ -159,7 +159,7 @@ export function AssignmentCard({
                 disabled={canvasBusy}
                 className="inline-flex items-center gap-1 text-xs font-bold lk-muted transition-colors hover:lk-strong disabled:opacity-50"
               >
-                <Icon name="refresh" size={13} />
+                <Icon name="refresh" size={13} className={canvasBusy ? 'animate-spin' : undefined} />
                 {canvasBusy ? 'Checking…' : 'Check Canvas Status'}
               </button>
             )}

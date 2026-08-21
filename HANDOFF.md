@@ -42,6 +42,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 19 | **Class-first work hub** — Home course overview, class-first Assignments layout, freshness-aware overdue labels | **Done** |
 | 20 | **After-school accuracy pass** — exact gate-opening date refresh, persistent check receipts, review queue, class cleanup/details, expandable cards, Undo | **Done** |
 | 21 | **Student schedule hub** — onboarding class days/breaks, Today timeline, weekly reset, teacher changes, conflicts, steps, quiet mode, command palette | **Done** |
+| 22 | **Kinetic visual system** — aurora atmosphere, luminous depth, richer card/navigation/timeline/modal motion, accessibility fallbacks | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -452,6 +453,30 @@ sheen, hover lift and staggered class entrances. The effects use the existing
 design tokens in light and dark mode, make no asset or font request, and the
 global `prefers-reduced-motion` rule collapses every animation. The release
 safety suite and the full accessibility/responsive audit pass after the change.
+
+---
+
+## Phase 22 — Kinetic visual system (done)
+
+The shell now has a CSS-only aurora atmosphere: three slow blurred color fields,
+a faint perspective-like grid, and an occasional light beam behind the UI.
+Sidebar scanning light, floating logo motion, animated heading glints, active
+navigation depth, and the mobile-nav pop give the chrome a distinct identity.
+
+Cards gained restrained luminous borders and depth; the one primary card has a
+rotating ambient halo. Class cards have an animated gradient signature,
+assignment cards reveal a vertical accent and tactile completion control,
+timeline rows have a connected glowing rail, metrics lift independently, input
+focus has depth, and dialogs use a gradient border and layered shadow. Buttons,
+selected class tabs, Canvas refresh, and scrollbars use the same motion/color
+language rather than separate effects.
+
+Everything is local CSS and existing SVG icons. There is no asset request,
+external font, dependency, analytics, image service, or Canvas behavior change.
+The global `prefers-reduced-motion` rule collapses every new animation, and a
+forced-colors fallback removes atmospheric decoration and restores plain heading
+text. Production build, release/no-network checks, keyboard/focus audit, 200%
+zoom, and 320/375/430/768px layout checks pass.
 
 ---
 

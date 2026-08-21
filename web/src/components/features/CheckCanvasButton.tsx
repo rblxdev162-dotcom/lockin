@@ -29,7 +29,7 @@ export function CheckCanvasButton({
   showStatus?: boolean;
 }) {
   const { state, now } = useApp();
-  const { check, busy, lastRefusal, preview, explain } = useCanvasCheck();
+  const { check, busy, phase, lastResult, lastRefusal, preview, explain } = useCanvasCheck();
   const [offeringOverride, setOfferingOverride] = useState(false);
 
   const connected = state.canvas.connection !== null;
@@ -50,7 +50,11 @@ export function CheckCanvasButton({
           disabled={busy || !connected}
           onClick={() => void run(false)}
         >
-          {busy ? 'Reading…' : 'Check Canvas'}
+          {phase === 'dates'
+            ? 'Updating dates…'
+            : phase === 'gradebook'
+              ? 'Reading Grades…'
+              : 'Check Canvas'}
         </Button>
 
         {offeringOverride && lastRefusal?.overridable && (
@@ -62,7 +66,12 @@ export function CheckCanvasButton({
 
       {showStatus && (
         <p className="mt-1.5 text-caption lk-muted">
-          {!connected ? (
+          {lastResult ? (
+            <span className={lastResult.ok ? 'lk-status-ahead lk-status-text' : 'lk-strong'}>
+              <strong>{lastResult.ok ? 'Checked:' : 'Needs attention:'}</strong>{' '}
+              {lastResult.message}
+            </span>
+          ) : !connected ? (
             'Connect Canvas in Settings to check what is graded.'
           ) : lastRefusal ? (
             explain(lastRefusal)

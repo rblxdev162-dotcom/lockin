@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../store/context';
 import { Card, EmptyState } from '../components/ui/Card';
 import { Chip, Select, TextInput } from '../components/ui/Field';
+import { Button } from '../components/ui/Button';
 import { Icon } from '../components/ui/Icon';
 import { Modal, ConfirmDialog } from '../components/ui/Modal';
 import { AssignmentCard } from '../components/features/AssignmentCard';
@@ -21,6 +22,7 @@ import { QuickAdd } from '../components/features/QuickAdd';
 import { CanvasCallout } from '../components/features/CanvasCallout';
 import { CheckCanvasButton } from '../components/features/CheckCanvasButton';
 import { formatScore, hasPublishedTotal } from '../types/grades';
+import { classGradesUrl, classSwitchLabel } from '../lib/classNames';
 
 const ALL = 'All';
 
@@ -105,7 +107,8 @@ export function AssignmentsPage() {
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<string>(ALL);
   const [priority, setPriority] = useState<string>(ALL);
-  const [subject, setSubject] = useState<string>(() => params.get('class')?.trim() || ALL);
+  const requestedClass = params.get('class')?.trim() || ALL;
+  const [subject, setSubject] = useState<string>(requestedClass);
   /**
    * Which view to land on.
    *
@@ -117,7 +120,14 @@ export function AssignmentsPage() {
    * Chosen once, on mount. Re-deriving it as data changes would move the page
    * out from under somebody who deliberately opened an empty tab.
    */
-  const [view, setView] = useState<ViewId>(() => initialView(state.assignments, Date.now()));
+  const [view, setView] = useState<ViewId>(() =>
+    initialView(
+      requestedClass === ALL
+        ? state.assignments
+        : state.assignments.filter((a) => (a.subject?.trim() || 'No class') === requestedClass),
+      Date.now(),
+    ),
+  );
   /**
    * List or class sections.
    *
@@ -171,11 +181,37 @@ export function AssignmentsPage() {
   }, [matching, now]);
 
   const shown = buckets[view];
-  const filtersOn = platform !== ALL || priority !== ALL || subject !== ALL || query.trim() !== '';
-  const subjects = useMemo(
-    () => [...new Set(state.assignments.map((a) => a.subject?.trim() || 'No class'))].sort(),
-    [state.assignments],
+  const filtersOn = platform !== ALL || priority !== ALL || query.trim() !== '';
+  const classTabs = useMemo(
+    () =>
+      groupByClass(state.assignments, now).map((group) => ({
+        subject: group.subject,
+        label: classSwitchLabel(group.subject),
+        open: group.assignments.filter((a) => !isSettled(workStateOf(a, now))).length,
+      })),
+    [state.assignments, now],
   );
+
+  const chooseClass = (next: string) => {
+    setSubject(next);
+    const classAssignments =
+      next === ALL
+        ? state.assignments
+        : state.assignments.filter((a) => (a.subject?.trim() || 'No class') === next);
+    setView(initialView(classAssignments, now));
+    const nextParams = new URLSearchParams(params);
+    if (next === ALL) nextParams.delete('class');
+    else nextParams.set('class', next);
+    setParams(nextParams, { replace: true });
+  };
+
+  const selectedClassAssignments =
+    subject === ALL
+      ? []
+      : state.assignments.filter((a) => (a.subject?.trim() || 'No class') === subject);
+  const selectedGradesUrl = selectedClassAssignments
+    .map((a) => classGradesUrl(a.canvas?.url, state.canvas.connection?.domain ?? null))
+    .find((url): url is string => url !== null) ?? null;
 
   /**
    * A class's current grade, matched by the Canvas course name LockIn stored
@@ -288,6 +324,57 @@ export function AssignmentsPage() {
           })}
         </div>
 
+        {classTabs.length > 0 && (
+          <div className="mt-3">
+            <p className="mb-1.5 text-caption font-bold tracking-wide lk-muted uppercase">
+              Switch class
+            </p>
+            <div
+              role="tablist"
+              aria-label="Classes"
+              className="flex gap-2 overflow-x-auto pb-1"
+            >
+              <ClassTab
+                label="All classes"
+                count={classTabs.reduce((sum, item) => sum + item.open, 0)}
+                selected={subject === ALL}
+                onClick={() => chooseClass(ALL)}
+              />
+              {classTabs.map((item) => (
+                <ClassTab
+                  key={item.subject}
+                  label={item.label}
+                  fullName={item.subject}
+                  count={item.open}
+                  selected={subject === item.subject}
+                  onClick={() => chooseClass(item.subject)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {subject !== ALL && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border lk-border lk-sunken px-4 py-3">
+            <div className="min-w-0">
+              <p className="truncate text-body font-bold lk-strong">{subject}</p>
+              <p className="text-caption lk-muted">
+                Open this class’s Grades page, then Check Canvas to update scores and statuses.
+              </p>
+            </div>
+            {selectedGradesUrl && (
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<Icon name="external" size={14} />}
+                onClick={() => void openInCanvas(selectedGradesUrl)}
+              >
+                Open Grades
+              </Button>
+            )}
+          </div>
+        )}
+
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Icon
@@ -334,7 +421,6 @@ export function AssignmentsPage() {
                 setQuery('');
                 setPlatform(ALL);
                 setPriority(ALL);
-                setSubject(ALL);
               }}
             >
               Clear
@@ -343,13 +429,7 @@ export function AssignmentsPage() {
         </div>
 
         {showFilters && (
-          <div className="animate-fade mt-2.5 grid gap-2.5 sm:grid-cols-3">
-            <Select
-              value={subject}
-              options={[ALL, ...subjects]}
-              onChange={(e) => setSubject(e.target.value)}
-              aria-label="Filter by class"
-            />
+          <div className="animate-fade mt-2.5 grid gap-2.5 sm:grid-cols-2">
             <Select
               value={platform}
               options={[ALL, ...PLATFORMS]}
@@ -518,5 +598,45 @@ export function AssignmentsPage() {
         }}
       />
     </div>
+  );
+}
+
+function ClassTab({
+  label,
+  fullName,
+  count,
+  selected,
+  onClick,
+}: {
+  label: string;
+  fullName?: string;
+  count: number;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      title={fullName && fullName !== label ? fullName : undefined}
+      onClick={onClick}
+      className={cx(
+        'inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-caption font-bold transition-colors',
+        selected
+          ? 'border-brand-500 bg-brand-600 text-white shadow-sm'
+          : 'lk-border lk-raised lk-strong hover:border-brand-400',
+      )}
+    >
+      <span>{label}</span>
+      <span
+        className={cx(
+          'rounded-full px-1.5 py-0.5 text-[0.65rem] tabular-nums',
+          selected ? 'bg-white/20 text-white' : 'lk-sunken lk-muted',
+        )}
+      >
+        {count}
+      </span>
+    </button>
   );
 }

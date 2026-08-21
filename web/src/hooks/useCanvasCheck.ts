@@ -35,6 +35,8 @@ import {
 
 export interface CanvasCheckResult {
   ok: boolean;
+  message: string;
+  pageKind?: string;
   /** Set when the gate refused, so the caller can offer the override. */
   refusal?: GateDecision;
 }
@@ -42,6 +44,8 @@ export interface CanvasCheckResult {
 export function useCanvasCheck() {
   const { state, dispatch, extension } = useApp();
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'dates' | 'gradebook'>('idle');
+  const [lastResult, setLastResult] = useState<CanvasCheckResult | null>(null);
   const [lastRefusal, setLastRefusal] = useState<GateDecision | null>(null);
 
   const window = state.settings.canvasCheckWindow;
@@ -56,15 +60,18 @@ export function useCanvasCheck() {
       );
 
       if (!decision.allowed) {
+        const message = gateExplanation(decision, window);
         setLastRefusal(decision);
         dispatch({
           type: 'LOG',
           eventType: 'canvas_check_refused',
-          message: gateExplanation(decision, window),
+          message,
           meta: { verdict: decision.verdict },
         });
-        toast(gateExplanation(decision, window), 'info');
-        return { ok: false, refusal: decision };
+        toast(message, 'info');
+        const result = { ok: false, message, refusal: decision };
+        setLastResult(result);
+        return result;
       }
 
       setLastRefusal(null);
@@ -82,26 +89,36 @@ export function useCanvasCheck() {
         }
 
         // Due dates first — this half works with no extension at all.
+        setPhase('dates');
         await runFeedSync(state, dispatch);
 
         // Then the page in front of them, which is the half that knows what is
         // graded. With no extension there is nothing to ask, and saying so is
         // more useful than a silent no-op.
         if (extension.status !== 'connected') {
-          toast(
-            'Due dates updated. Install the LockIn extension to read what is graded.',
-            'info',
-          );
-          return { ok: true };
+          const message =
+            'Due dates updated. Open LockIn in Chrome with the Companion enabled to read grades.';
+          toast(message, 'info');
+          const result = { ok: true, message };
+          setLastResult(result);
+          return result;
         }
 
+        setPhase('gradebook');
         const view = await canvasProvider.sync(options.override === true);
         applyCanvasView(dispatch, view, { markSynced: true });
         const summary = describeSync(view);
         toast(summary.message, summary.ok ? 'success' : 'info');
-        return { ok: summary.ok };
+        const result = {
+          ok: summary.ok,
+          message: summary.message,
+          pageKind: view?.sync?.pageKind,
+        };
+        setLastResult(result);
+        return result;
       } finally {
         setBusy(false);
+        setPhase('idle');
       }
     },
     [dispatch, extension.status, state, window],
@@ -110,6 +127,8 @@ export function useCanvasCheck() {
   return {
     check,
     busy,
+    phase,
+    lastResult,
     /** The last refusal, so the UI can offer "check anyway" beside the reason. */
     lastRefusal,
     /** What the gate would say right now, without doing anything. */

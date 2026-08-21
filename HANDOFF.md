@@ -419,6 +419,18 @@ section at a time rather than scattering classes across newspaper-style
 columns. List view remains available and the student's explicit choice is
 remembered.
 
+The class names also drive a horizontal switcher. Administrative section names
+stay as the stable identity, while `classSwitchLabel()` surfaces the useful
+part for the control (`Per 2 — Emmett` → `Emmett`, `El/B/O — Chopra` →
+`Chopra`). Selecting a class keeps the full course name visible and offers an
+**Open Grades** action when LockIn has a trusted assignment link for that
+course. `classGradesUrl()` only converts that same-host rendered-page link to
+`/courses/<id>/grades`; it rejects other hosts and API-shaped URLs.
+
+Check Canvas now exposes its two real stages — updating calendar dates, then
+reading the open gradebook — and keeps the exact result under the button rather
+than making a disappearing toast the only record of what happened.
+
 Accuracy changed with the layout: a passed date from a stale or unavailable
 external source is now **Check date**, not **Overdue**. The old date remains
 visible with “sync to confirm”; LockIn only restores the overdue claim after

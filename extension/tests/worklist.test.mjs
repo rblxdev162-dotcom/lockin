@@ -20,6 +20,7 @@ const {
   whatToDoNext,
   workStateOf,
 } = await import('../../web/src/lib/workState.ts');
+const { classGradesUrl, classSwitchLabel } = await import('../../web/src/lib/classNames.ts');
 
 const NOW = Date.parse('2026-03-10T18:00:00Z');
 const HOUR = 3_600_000;
@@ -257,4 +258,26 @@ test('grouping is stable when two classes are equally urgent', () => {
     ['Algebra', 'Zoology'],
     'a tie falls back to the name so columns do not shuffle between renders',
   );
+});
+
+test('class switch labels surface the teacher or useful course name', () => {
+  assert.equal(classSwitchLabel('Per 2 — Emmett'), 'Emmett');
+  assert.equal(classSwitchLabel('El/B/O — Chopra'), 'Chopra');
+  assert.equal(classSwitchLabel('Period 1 & 4: ACC Math'), 'ACC Math');
+  assert.equal(classSwitchLabel('AP US History'), 'AP US History');
+});
+
+test('the class Grades link is navigation on the configured Canvas host, never an API URL', () => {
+  assert.equal(
+    classGradesUrl(
+      'https://school.instructure.com/courses/123/assignments/456',
+      'school.instructure.com',
+    ),
+    'https://school.instructure.com/courses/123/grades',
+  );
+  assert.equal(
+    classGradesUrl('https://other.instructure.com/courses/123/assignments/456', 'school.instructure.com'),
+    null,
+  );
+  assert.equal(classGradesUrl('https://school.instructure.com/api/v1/courses/123', 'school.instructure.com'), null);
 });

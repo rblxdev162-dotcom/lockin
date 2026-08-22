@@ -128,7 +128,15 @@ export function createAssignmentFromCanvas(
     dueDate: due?.date ?? todayISO(),
     dueTime: due?.time ?? '23:59',
     estimatedMinutes: 30,
-    priority: detected.submissionStatus === 'missing' ? 'Urgent' : 'Normal',
+    // "Missing" is urgent for work Canvas could have received. For paper
+    // homework it only means the teacher has not marked it yet, so importing
+    // one would otherwise arrive pre-panicked.
+    priority:
+      detected.submissionStatus === 'missing' &&
+      detected.submissionType !== 'on_paper' &&
+      detected.submissionType !== 'none'
+        ? 'Urgent'
+        : 'Normal',
     status: verified ? 'Completed' : 'Not Started',
     completionMethod: 'canvas',
     verificationMethod: 'canvas',
@@ -169,6 +177,7 @@ export function createAssignmentFromCanvas(
       lastStatusChangeAt: detected.detectedAt,
       courseName: detected.courseName,
       kind: detected.kind,
+      submissionType: detected.submissionType,
     },
   };
 }

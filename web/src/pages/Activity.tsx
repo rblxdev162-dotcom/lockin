@@ -32,6 +32,8 @@ const ICONS: Record<ActivityType, IconName> = {
   canvas_assignment_linked: 'link',
   canvas_submission_verified: 'check',
   canvas_assignment_missing: 'alert',
+  canvas_grade_confirmed: 'check',
+  canvas_completion_contested: 'alert',
   parent_controls_changed: 'shield',
   parent_requirement_changed: 'shield',
   plan_generated: 'calendar',
@@ -65,6 +67,8 @@ const TONES: Partial<Record<ActivityType, 'brand' | 'mint' | 'flame' | 'amber'>>
   canvas_assignment_linked: 'brand',
   canvas_submission_verified: 'mint',
   canvas_assignment_missing: 'flame',
+  canvas_grade_confirmed: 'mint',
+  canvas_completion_contested: 'amber',
   parent_controls_changed: 'brand',
   parent_requirement_changed: 'brand',
 };
@@ -95,6 +99,8 @@ const GROUPS = {
     'canvas_assignment_linked',
     'canvas_submission_verified',
     'canvas_assignment_missing',
+    'canvas_grade_confirmed',
+    'canvas_completion_contested',
   ],
   Edgenuity: [
     'edgenuity_verification_started',

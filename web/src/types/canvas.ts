@@ -58,6 +58,27 @@ export interface CanvasCourse {
   url?: string;
 }
 
+/**
+ * How Canvas says the work is handed in.
+ *
+ * `online`   — a file, a text box, a URL. LockIn can read a submission state.
+ * `on_paper` — handed to the teacher in class; there is nothing to submit on
+ *              Canvas, so no Submitted pill will ever appear.
+ * `none`     — Canvas expects no submission at all.
+ * `external` — an outside tool owns it, so Canvas does not know either.
+ *
+ * `undefined` means the page did not say, and must never be read as `online`:
+ * that mistake is what left finished paper homework looking un-handed-in.
+ */
+export const CANVAS_SUBMISSION_TYPES = ['online', 'on_paper', 'none', 'external'] as const;
+export type CanvasSubmissionType = (typeof CANVAS_SUBMISSION_TYPES)[number];
+
+/** Types where Canvas can never show a submission, however done the work is. */
+export const CANVAS_OFFLINE_SUBMISSION_TYPES: readonly CanvasSubmissionType[] = [
+  'on_paper',
+  'none',
+];
+
 /** A Canvas assignment seen on a page — not yet necessarily imported. */
 export interface CanvasDetectedAssignment {
   externalAssignmentId: string;
@@ -68,6 +89,8 @@ export interface CanvasDetectedAssignment {
   url: string;
   pointsPossible?: number;
   submissionStatus: CanvasSubmissionStatus;
+  /** How Canvas says it is handed in; absent when the page did not say. */
+  submissionType?: CanvasSubmissionType;
   /**
    * The mark itself, when the Grades page showed one (Phase 18).
    *
@@ -93,6 +116,11 @@ export interface CanvasLink {
   domain: string;
   url: string;
   submissionStatus: CanvasSubmissionStatus;
+  /**
+   * How Canvas says it is handed in. Sticky once read: a later list page that
+   * does not mention it must not erase the fact that this is paper homework.
+   */
+  submissionType?: CanvasSubmissionType;
   /** Last time LockIn read a Canvas page for this assignment. */
   lastCheckedAt: string | null;
   /** Last time the status actually changed (drives "Verified 2 min ago"). */

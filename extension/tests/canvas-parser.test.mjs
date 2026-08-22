@@ -267,6 +267,39 @@ async function main() {
     );
   }
 
+  /* ---- How the work is handed in at all ---- */
+  console.log('\nSubmission types');
+  const typeOf = async (path) =>
+    inPage(
+      browser,
+      `https://${CANVAS_HOST}${path}`,
+      `({ parser }) => {
+         const parsed = parser.parseCanvasAssignmentPage(document, location.href);
+         return { type: parsed[0]?.submissionType, status: parsed[0]?.submissionStatus };
+       }`,
+    );
+
+  const paper = await typeOf('/courses/101/assignments/5006');
+  check('reads "Submitting: on paper" as paper homework', paper.type === 'on_paper', paper.type);
+  check(
+    'and still reports what Canvas said about the submission, unchanged',
+    paper.status === 'missing',
+    paper.status,
+  );
+
+  const none = await typeOf('/courses/101/assignments/5007');
+  check('reads "no submission" as nothing to hand in', none.type === 'none', none.type);
+
+  const online = await typeOf('/courses/202/assignments/6003');
+  check('reads a file upload as online work', online.type === 'online', online.type);
+
+  const silent = await typeOf('/courses/101/assignments/5001');
+  check(
+    'a page that never says stays undefined, never a guess',
+    silent.type === undefined,
+    String(silent.type),
+  );
+
   /* ---- Quizzes ---- */
   console.log('\nQuizzes and external tools');
   const quizOk = await inPage(

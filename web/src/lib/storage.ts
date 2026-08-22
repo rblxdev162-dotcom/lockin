@@ -40,7 +40,11 @@ import type {
 } from '../types';
 import { INTEGRATION_IDS, INTEGRATION_STATUSES } from '../types/integrations';
 import { CONFIDENCES, SOURCE_KINDS } from '../types/source';
-import { CANVAS_SUBMISSION_STATUSES, defaultCanvasState } from '../types/canvas';
+import {
+  CANVAS_SUBMISSION_STATUSES,
+  CANVAS_SUBMISSION_TYPES,
+  defaultCanvasState,
+} from '../types/canvas';
 import { FOCUS_RUN_OUTCOMES, MAX_FOCUS_RUNS, defaultParentControls } from '../types/parent';
 import {
   MAX_PLAN_HISTORY,
@@ -494,6 +498,21 @@ function coerceCanvasLink(raw: unknown): CanvasLink | undefined {
     lastStatusChangeAt: typeof c.lastStatusChangeAt === 'string' ? c.lastStatusChangeAt : null,
     courseName: typeof c.courseName === 'string' ? c.courseName : undefined,
     kind: typeof c.kind === 'string' ? c.kind : undefined,
+    submissionType: (CANVAS_SUBMISSION_TYPES as readonly string[]).includes(
+      c.submissionType as string,
+    )
+      ? (c.submissionType as CanvasLink['submissionType'])
+      : undefined,
+    // Rebuilt here on purpose: the Phase 18 score fields were added to the
+    // type but never to this function, so every reload silently dropped the
+    // mark the Grades page had read — the exact failure this file warns about
+    // two functions above.
+    score: typeof c.score === 'number' && Number.isFinite(c.score) ? c.score : undefined,
+    scoreText: typeof c.scoreText === 'string' ? c.scoreText.slice(0, 40) : undefined,
+    pointsPossible:
+      typeof c.pointsPossible === 'number' && Number.isFinite(c.pointsPossible)
+        ? c.pointsPossible
+        : undefined,
   };
 }
 

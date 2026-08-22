@@ -19,6 +19,7 @@ import type {
   CanvasDetectedAssignment,
   CanvasSubmissionStatus,
 } from '../../types/canvas';
+import { CANVAS_SUBMISSION_TYPES } from '../../types/canvas';
 import type { CanvasProvider } from './provider';
 import { coerceStatus } from './verification';
 import type { CourseGrade } from '../../types/grades';
@@ -141,6 +142,11 @@ export function sanitizeDetected(raw: unknown): CanvasDetectedAssignment | null 
     externalAssignmentId: assignmentId,
     title,
     url,
+    submissionType: (CANVAS_SUBMISSION_TYPES as readonly string[]).includes(
+      d.submissionType as string,
+    )
+      ? (d.submissionType as CanvasDetectedAssignment['submissionType'])
+      : undefined,
     dueAt: typeof d.dueAt === 'string' && !Number.isNaN(Date.parse(d.dueAt)) ? d.dueAt : undefined,
     pointsPossible: Number.isFinite(points) && points >= 0 ? points : undefined,
     submissionStatus: coerceStatus(d.submissionStatus),

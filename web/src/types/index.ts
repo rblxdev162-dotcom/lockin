@@ -391,6 +391,9 @@ export const ACTIVITY_TYPES = [
   'canvas_grades_read',
   'canvas_check_refused',
   'canvas_check_override',
+  /* --- Hand-in work and later grading (Phase 35) --- */
+  'canvas_grade_confirmed',
+  'canvas_completion_contested',
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 

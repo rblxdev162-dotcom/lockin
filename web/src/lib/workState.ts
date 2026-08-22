@@ -27,8 +27,41 @@
  * ordering that says otherwise is wrong on the only axis that matters.
  */
 import type { Assignment } from '../types';
+import { CANVAS_OFFLINE_SUBMISSION_TYPES } from '../types/canvas';
 import { dueTimestamp, isComplete } from './selectors';
 import { classify } from './sources/freshness';
+
+/**
+ * Work Canvas can never show a submission for: handed to the teacher on paper,
+ * or expecting no submission at all.
+ *
+ * This matters because absence of evidence was being read as evidence of
+ * absence. Canvas marks on-paper homework "Missing" until the teacher enters a
+ * grade, and LockIn repeated that as fact — so work the student had physically
+ * handed in sat at the top of the list, in the worst-trouble band, for days.
+ * Only Canvas' own statement of the submission type gets us out of that; when
+ * the page never said, this is false and nothing changes.
+ */
+export function isHandInWork(assignment: Assignment): boolean {
+  const type = assignment.canvas?.submissionType;
+  return type !== undefined && CANVAS_OFFLINE_SUBMISSION_TYPES.includes(type);
+}
+
+/**
+ * The student says done; Canvas says nothing arrived.
+ *
+ * Deliberately not a `WorkState`: the work stays settled, because a lagging
+ * gradebook is not allowed to quietly un-complete work and re-block a browser.
+ * It is a disagreement to surface, not a verdict to enforce — and never true
+ * of hand-in work, where "Missing" only means "not marked yet".
+ */
+export function isContested(assignment: Assignment): boolean {
+  return (
+    assignment.status === 'Completed' &&
+    assignment.canvas?.submissionStatus === 'missing' &&
+    !isHandInWork(assignment)
+  );
+}
 
 export const WORK_STATES = [
   'graded',
@@ -88,8 +121,12 @@ export function workStateOf(assignment: Assignment, now: number): WorkState {
   if (canvasStatus === 'submitted' || canvasStatus === 'late_submitted') return 'submitted';
   if (isComplete(assignment)) return 'done';
   // `missing` is Canvas asserting the deadline passed unhanded-in. It outranks
-  // the generic overdue below because it is a fact rather than an inference.
-  if (canvasStatus === 'missing') return 'missing';
+  // the generic overdue below because it is a fact rather than an inference —
+  // but only for work Canvas could have received. For paper homework the same
+  // word means "not marked yet", so it falls through to the due date below and
+  // is treated exactly like any other unfinished work: honestly overdue if it
+  // is overdue, and nothing worse.
+  if (canvasStatus === 'missing' && !isHandInWork(assignment)) return 'missing';
 
   const due = dueTimestamp(assignment);
   if (!Number.isFinite(due) || due === Number.MAX_SAFE_INTEGER) return 'undated';

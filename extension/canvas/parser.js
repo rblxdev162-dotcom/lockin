@@ -112,6 +112,100 @@ function parsePoints(scope) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Submission type — how the work is handed in at all                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where Canvas states how an assignment is submitted. Student pages label it
+ * "Submitting"; other layouts say "Submission Types".
+ */
+const SUBMISSION_TYPE_SELECTORS = [
+  '[data-submission-types]',
+  '[data-testid="submission-types"]',
+  '.submission_type',
+  '.submission-types',
+  '.student-assignment-overview',
+  '.assignment-submission-type',
+];
+
+/** Canvas' own machine value, when the markup carries one. */
+function mapSubmissionTypeToken(raw) {
+  const value = String(raw || '').toLowerCase();
+  if (!value) return null;
+  if (/\bon_paper\b/.test(value)) return 'on_paper';
+  if (/\bexternal_tool\b/.test(value)) return 'external';
+  if (/\bnot_graded\b/.test(value)) return 'none';
+  if (/\bnone\b/.test(value)) return 'none';
+  if (/\bonline_|discussion_topic|online_quiz|media_recording/.test(value)) return 'online';
+  return null;
+}
+
+/**
+ * How this assignment is handed in, or undefined when the page does not say.
+ *
+ * Undefined is a real answer and the common one on list pages. It must stay
+ * distinct from `online`: "Canvas did not say" cannot be allowed to become
+ * "Canvas said this is submitted online", or an on-paper assignment would go
+ * back to looking like work that was never handed in.
+ */
+export function parseSubmissionType(scope) {
+  if (!scope || typeof scope.querySelectorAll !== 'function') return undefined;
+
+  const attributed = firstMatch(scope, ['[data-submission-types]']);
+  if (attributed) {
+    const mapped = mapSubmissionTypeToken(attributed.getAttribute('data-submission-types'));
+    if (mapped) return mapped;
+  }
+
+  for (const selector of SUBMISSION_TYPE_SELECTORS) {
+    let nodes;
+    try {
+      nodes = scope.querySelectorAll(selector);
+    } catch {
+      continue;
+    }
+    for (const node of nodes) {
+      /**
+       * The container's own text *and* each child's, because Canvas renders
+       * this as a label/value pair of sibling elements. Concatenated,
+       * "Submitting" and "on paper" become "Submittingon paper" whenever the
+       * markup has no whitespace between the two — and a word-boundary match
+       * then misses the very phrase this function exists to find.
+       */
+      const texts = [clean(node.textContent, 300)];
+      let children;
+      try {
+        children = node.querySelectorAll('*');
+      } catch {
+        children = [];
+      }
+      let seen = 0;
+      for (const child of children) {
+        if (seen >= 40) break;
+        seen += 1;
+        const text = clean(child.textContent, 120);
+        if (text) texts.push(text);
+      }
+
+      for (const text of texts) {
+        // Only wording that is *about* how the work is handed in.
+        if (/\bon paper\b/i.test(text)) return 'on_paper';
+        if (/\b(no submission|nothing to submit|not graded)\b/i.test(text)) return 'none';
+        if (/\bexternal tool\b/i.test(text)) return 'external';
+        if (
+          /\b(a text entry box|a website url|a file upload|a media recording|a student annotation|an? online quiz)\b/i.test(
+            text,
+          )
+        ) {
+          return 'online';
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+/* ------------------------------------------------------------------ */
 /* Submission state                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -372,6 +466,7 @@ function buildDetected(entry, doc, baseUrl, statusOverride) {
   const status =
     statusOverride ?? parseCanvasSubmissionState(entry.row).status;
   return {
+    submissionType: parseSubmissionType(entry.row),
     externalAssignmentId: entry.externalAssignmentId,
     externalCourseId: entry.externalCourseId,
     title: entry.title,
@@ -455,6 +550,7 @@ export function parseCanvasAssignmentPage(doc, baseUrl) {
       url: String(baseUrl).slice(0, LIMITS.MAX_URL_LENGTH),
       pointsPossible: parsePoints(root),
       submissionStatus: status,
+      submissionType: parseSubmissionType(root),
       detectedAt: new Date().toISOString(),
       courseName: courseNameFrom(doc, null) || undefined,
       kind: info.kind === 'quiz' ? 'quiz' : 'assignment',

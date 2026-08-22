@@ -1,0 +1,1175 @@
+diff --git a/HANDOFF.md b/HANDOFF.md
+index 7a46e10..e0b7c91 100644
+--- a/HANDOFF.md
++++ b/HANDOFF.md
+@@ -48,7 +48,7 @@ Tagline: *Finish what matters before distractions take over.*
+ 
+ | Suite | Checks | Command |
+ | --- | --- | --- |
+-| Blocking, reminders, bridge, Canvas, Edgenuity, parent, planner | (see `npm test`) | (the suites `npm test` chains) |
++| Blocking, reminders, bridge, Canvas, parent, planner | (see `npm test`) | (the suites `npm test` chains) |
+ | Storage recovery: corruption, migration, retention, quota | 18 | `npm run test:storage` |
+ | Security: the ten bypass paths | 22 | `npm run test:security` |
+ | Date/time boundaries and clock changes | 19 | `npm run test:time` |
+@@ -68,8 +68,8 @@ dev server on `:5173`:
+ | --- | --- | --- |
+ | Canvas parser + Grades pages (real DOM) | 40 | `npm run test:parser` |
+ | Phase 2 blocking e2e | 26 | `npm run test:e2e` |
+-| Canvas e2e | 57 | `npm run test:canvas-e2e` |
+-| Parent Dashboard e2e (PIN, controls, enforcement) | **BROKEN** | `npm run test:parent-e2e` |
++| Canvas e2e | 58 | `npm run test:canvas-e2e` |
++| Parent Dashboard e2e (PIN, controls, enforcement) | 73 | `npm run test:parent-e2e` |
+ | Planner e2e (plan → start → partial → recalculate) | 54 | `npm run test:planner-e2e` |
+ | **Release e2e** (production build + packaged zip) | 22 | `npm run test:release-e2e` |
+ | **Accessibility e2e** (names, focus, keyboard, 320–768px, 200% zoom) | 40 | `npm run test:a11y-e2e` |
+@@ -84,18 +84,45 @@ the extensionless imports. They therefore test the shipping modules, not copies.
+ 
+ If a suite says the debug port is in use: `pkill -f "Chrome for Testing"`.
+ 
+-**`test:parent-e2e` does not run at all, and has not since Phase 17.** It
+-imports `extension/tests/edgenuity-fixtures.mjs`, which that phase deleted, and
+-about a third of its checks exercise features that no longer exist (the camera
+-proof flow, Enhanced trust, the `edgenuity` slice). It fails at import, so
+-`npm run test:all` cannot be green until it is either rewritten around the PIN /
+-controls / enforcement checks that are still meaningful, or retired. Verified
+-pre-existing on `5264871`, before Phase 18. **The Parent Dashboard itself is
+-fine** — this is dead test code, not a broken feature.
+-
+-**Known flake:** `test:parent-e2e` and the Edgenuity suites drive real OCR over
+-rendered fixtures. A capture occasionally needs its retry budget and, rarely,
+-exhausts it. Re-run once before investigating.
++**The app pushes the Canvas window to the extension on every load**
++(`AppStore.tsx` → `canvasProvider.setCheckWindow`), so any browser suite that
++seeds app state and then expects a Canvas read to happen must seed
++`settings.canvasCheckWindow` too. Without one the shipped default goes across —
++manual mode, passive reading off — and the background refuses everything, which
++is exactly what silently broke `test:canvas-e2e` in Phase 18: writing
++`lockin_canvas_window` straight into extension storage is not enough, because
++the next LockIn tab overwrites it. `lockinState({ gateOpen })` in that suite is
++the pattern.
++
++**`test:planner-e2e` is clock-sensitive and fails late in the evening.** Its
++seeds make the day available 00:00–23:59 and then assert exact minute totals
++("today is filled to capacity", 100 min), but the planner can only schedule the
++part of today that has not happened yet — so a run starting at 22:30 gets 89
++minutes and three checks fail. Pre-existing, nothing to do with the Parent
++suite, and the fix is a decision about what those checks should assert rather
++than a typo: either freeze the seed's day boundaries relative to `now`, or
++assert against remaining capacity instead of a constant.
++
++**`test:parent-e2e` was rewritten in Phase 19.** It had not run since Phase 17:
++it imported `extension/tests/edgenuity-fixtures.mjs`, which that phase deleted,
++and about a third of its checks drove features that no longer exist (the camera
++proof flow, Enhanced trust, the `edgenuity` slice). Those sections were deleted
++rather than kept alive, and the suite now pins invariants 14–17 — what the
++dashboard may show, prospective-only requirement changes, the in-memory-only
++session, and protected settings being refused by the *reducer* — plus real
++blocking enforcement end to end. It is deterministic: with the OCR gone there
++is nothing left in it to flake.
++
++Two things it does that are worth knowing before editing it:
++
++- **It sets the PIN through the real Settings dialog** rather than seeding a
++  hash, because that is the only way to prove the hashing rather than assume
++  it. It then checks the digits are nowhere in the record.
++- **`parentControls.lockVerificationSettings` is seeded `true`, because no UI
++  writes it.** Since Phase 17 the flag guards `blockingEnabled`
++  (`PROTECTED_SETTING_KEYS`), and `ParentControlsPanel` never offers a toggle
++  for it — so the reducer's refusal is reachable from a save file but not from
++  the dashboard. The suite pins the refusal; the missing toggle is a real gap.
+ 
+ ---
+ 
+diff --git a/extension/tests/canvas-e2e.mjs b/extension/tests/canvas-e2e.mjs
+index 72c0e43..d16ab53 100644
+--- a/extension/tests/canvas-e2e.mjs
++++ b/extension/tests/canvas-e2e.mjs
+@@ -131,7 +131,7 @@ function prepareExtension(dir) {
+ 
+ /* ---------------- state seeding ---------------- */
+ 
+-function lockinState({ focusActive, requiredIds, linkedCanvas }) {
++function lockinState({ focusActive, requiredIds, linkedCanvas, gateOpen = true }) {
+   const now = new Date().toISOString();
+   const mk = (id, title, subject, canvas) => ({
+     id,
+@@ -190,6 +190,26 @@ function lockinState({ focusActive, requiredIds, linkedCanvas }) {
+       allowedDomains: ['instructure.com'],
+       notificationsAsked: true,
+       theme: 'system',
++      /**
++       * Phase 18's gate. The app pushes this window to the extension on every
++       * load (AppStore -> canvasProvider.setCheckWindow), so a seed without one
++       * pushes the shipped default — manual mode, no passive reads — and the
++       * background refuses every read these tests are about. Opened here
++       * because this suite is about the parser and the verification chain, not
++       * about when they are allowed to run; `npm run test:canvas-grades` owns
++       * the window rule itself.
++       */
++      canvasCheckWindow: gateOpen
++        ? {
++            mode: 'scheduled',
++            schoolDays: [],
++            schoolDayStart: 0,
++            dayEnd: 1440,
++            freeDayStart: 0,
++            pausedUntil: null,
++            readAsIBrowse: true,
++          }
++        : undefined,
+     },
+     focusMode: {
+       active: !!focusActive,
+@@ -519,7 +539,9 @@ async function main() {
+    * unless I press the button" has to be true of the running extension, not
+    * just of a unit test.
+    */
+-  const gateApp = await openLockIn(lockinState({ linkedCanvas: true }));
++  // Seeded with no window of its own, so what reaches the extension is the
++  // shipped default — which is the thing being asserted.
++  const gateApp = await openLockIn(lockinState({ linkedCanvas: true, gateOpen: false }));
+   await bridgeRequest(gateApp.sessionId, 'CANVAS_CONFIGURE', { domain: CANVAS_HOST });
+   await swEval(`chrome.storage.local.remove('lockin_canvas_window').then(() => 1)`);
+   await swEval(`chrome.storage.local.set({ lockin_canvas_cache: {} }).then(() => 1)`);
+diff --git a/extension/tests/parent-e2e.mjs b/extension/tests/parent-e2e.mjs
+index 035cd69..d908d09 100644
+--- a/extension/tests/parent-e2e.mjs
++++ b/extension/tests/parent-e2e.mjs
+@@ -3,30 +3,42 @@
+  *
+  * The flow this exists to prove:
+  *
+- *   /parent → wrong PIN → rejected → correct PIN → dashboard opens
+- *     → the Enhanced verification from earlier is visible
+- *     → parent raises one assignment to require Enhanced Proof
+- *     → Exit Parent View → the dashboard re-locks
+- *     → the student's verification flow now demands a one-time code
+- *     → a Standard capture does not satisfy it
+- *     → an Enhanced capture does → Focus Mode ends → YouTube unblocks
+- *     → reopening the dashboard shows the new Enhanced verification
++ *   no PIN → the dashboard refuses to open at all
++ *     → the student sets a PIN in Settings → only a salted hash is stored
++ *     → /parent → wrong PIN → rejected → five wrong → locked out for 30s
++ *     → the correct PIN opens the dashboard, and a reload re-locks it
++ *     → the parent reviews work, approves a temporary unlock, and blocking
++ *       really does pause and really does come back
++ *     → parent controls change the settings the *reducer* enforces, not just
++ *       what a settings page displays
++ *     → nothing the parent changed re-opens work already completed
++ *     → Exit Parent View re-locks by construction
++ *     → the student finishes the required work → recompute() ends Focus Mode
++ *       → the DNR rules go → YouTube unblocks
++ *     → the dashboard, reopened behind the PIN, shows what actually happened
+  *
+- * That last chain is the point: a switch in the Parent Dashboard has to change
+- * what the *existing* Phase 4/5 verification engine accepts, not just what a
+- * settings page displays. It also covers the second flow — a parent-approved
+- * temporary unlock pausing blocking while Focus Mode stays on.
++ * The point is the last few links of that chain: a switch in the Parent
++ * Dashboard has to change what the *existing* engines do. A dashboard that
++ * only redraws itself is a settings page with a lock icon.
++ *
++ * Invariants pinned here (HANDOFF.md): 14 (accountability, not surveillance),
++ * 15 (requirement changes are prospective), 16 (the parent session is never
++ * persisted), 17 (protected settings are refused by the reducer), plus 1 and 2
++ * — one completion engine, one unblock path.
++ *
++ * Rewritten in Phase 19. The camera proof flow, Enhanced trust and the
++ * `edgenuity` slice this suite used to drive were deleted in Phases 15–17;
++ * those sections went with them rather than being kept on life support.
+  *
+  * Needs: the dev server on :5173, and Chrome for Testing.
+  * Run: npm run test:parent-e2e
+  */
+-import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
++import { mkdtempSync, rmSync } from 'node:fs';
+ import { createServer } from 'node:http';
+ import { tmpdir } from 'node:os';
+ import { dirname, join, resolve } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { findChrome, killChrome, launchChrome, requirePortFree } from './chrome-harness.mjs';
+-import { HEIGHT, RENDERER_SOURCE, WIDTH, y4mFromI420 } from './edgenuity-fixtures.mjs';
+ 
+ const HERE = dirname(fileURLToPath(import.meta.url));
+ const EXT_DIR = resolve(HERE, '..');
+@@ -36,7 +48,7 @@ const CDP_PORT = 9337;
+ const HEADFUL = process.argv.includes('--headful');
+ const VERBOSE = process.argv.includes('--verbose');
+ 
+-/** The PIN the seeded state is built with. */
++/** The PIN the student sets through the real Settings dialog. */
+ const PIN = '4821';
+ 
+ let failures = 0;
+@@ -120,7 +132,6 @@ async function fetchJSON(path, tries = 60) {
+ 
+ let browser = null;
+ let appSession = null;
+-let painterSession = null;
+ 
+ async function evalIn(sessionId, expression) {
+   const { result } = await browser.send(
+@@ -150,6 +161,12 @@ async function openTab(url) {
+   return { targetId, sessionId };
+ }
+ 
++/** Navigates the app tab and waits for React to settle. */
++async function goto(path, settleMs = 2000) {
++  await browser.send('Page.navigate', { url: `${APP_ORIGIN}${path}` }, appSession);
++  await sleep(settleMs);
++}
++
+ /* ---------------- UI helpers ---------------- */
+ 
+ function clickByTextExpression(text, selector = 'button') {
+@@ -165,6 +182,16 @@ function clickByTextExpression(text, selector = 'button') {
+   })()`;
+ }
+ 
++/** Clicks by exact accessible name — for icon-only controls and checkboxes. */
++function clickByLabelExpression(label) {
++  return `(() => {
++    const hit = document.querySelector('[aria-label=' + JSON.stringify(${JSON.stringify(label)}) + ']');
++    if (!hit || hit.disabled) return false;
++    hit.click();
++    return true;
++  })()`;
++}
++
+ const DIALOG_BUTTON = '[role="dialog"] button';
+ const DIALOG_EXPR = `(() => {
+   const d = document.querySelector('[role="dialog"]');
+@@ -175,7 +202,7 @@ const BUTTONS_EXPR = `[...document.querySelectorAll('button')]
+   .map((b) => (b.textContent || '').trim() + (b.disabled ? ' [disabled]' : ''))
+   .filter(Boolean).join(' | ')`;
+ 
+-async function waitFor(expression, { timeout = 90_000, label = 'condition' } = {}) {
++async function waitFor(expression, { timeout = 60_000, label = 'condition' } = {}) {
+   const deadline = Date.now() + timeout;
+   while (Date.now() < deadline) {
+     if (await app(expression)) return true;
+@@ -188,100 +215,52 @@ async function waitFor(expression, { timeout = 90_000, label = 'condition' } = {
+   );
+ }
+ 
+-/** Types a PIN into whichever password field is on screen and submits. */
+-async function enterPin(pin) {
+-  await app(`(() => {
+-    const input = document.querySelector('input[type="password"]');
+-    if (!input) return false;
++/**
++ * Fills every password field inside `scope`, in order.
++ *
++ * React controls these inputs, so the value has to go through the native
++ * setter and be announced with a real input event — assigning `.value`
++ * directly is silently discarded on the next render.
++ */
++async function fillPasswords(values, scope = 'document') {
++  return app(`(() => {
++    const root = ${scope};
++    if (!root) return false;
++    const inputs = [...root.querySelectorAll('input[type="password"]')];
++    if (inputs.length < ${values.length}) return false;
+     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+-    setter.call(input, ${JSON.stringify(pin)});
+-    input.dispatchEvent(new Event('input', { bubbles: true }));
++    ${JSON.stringify(values)}.forEach((value, i) => {
++      setter.call(inputs[i], value);
++      inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
++    });
+     return true;
+   })()`);
+-  await sleep(300);
+-  return app(`(() => {
+-    const form = document.querySelector('form');
+-    if (form) { form.requestSubmit(); return true; }
+-    return false;
+-  })()`);
+ }
+ 
+-const readState = async () =>
+-  JSON.parse((await app(`localStorage.getItem('lockin.state.v1')`)) ?? 'null');
+-
+-const pageText = () => app('document.body.innerText');
+-
+-/* ---------------- Camera frames ---------------- */
+-
+-let cameraFile = null;
+-
+-async function showToCamera({ percent, code, variant = 0 }) {
+-  const spec = `custom:${percent}:${code ?? ''}:Physical Science Semester A:${variant}`;
+-  const payload = await evalIn(
+-    painterSession,
+-    `JSON.stringify(window.__exportFixture(${JSON.stringify(spec)}, ${WIDTH}, ${HEIGHT}))`,
+-  );
+-  const { i420 } = JSON.parse(payload);
+-  const staging = `${cameraFile}.next`;
+-  writeFileSync(staging, y4mFromI420(i420));
+-  renameSync(staging, cameraFile);
+-
+-  // Chrome reads the file when the stream starts, so an open camera must be
+-  // closed before it will pick up a new frame.
+-  if (appSession && (await app(`!!document.querySelector('[role="dialog"] video')`))) {
+-    await app(clickByTextExpression('cancel', DIALOG_BUTTON));
+-    await sleep(500);
+-  }
+-  await sleep(900);
++async function submitForm(scope = 'document') {
++  return app(`(() => {
++    const root = ${scope};
++    const form = root && root.querySelector('form');
++    if (!form) return false;
++    form.requestSubmit();
++    return true;
++  })()`);
+ }
+ 
+-async function currentCode(phase) {
+-  const state = await readState();
+-  return state.edgenuity.challenges.find((c) => c.status === 'pending' && c.phase === phase)?.value;
++/** Types a PIN into the parent gate and submits it. */
++async function enterPin(pin) {
++  await fillPasswords([pin]);
++  await sleep(250);
++  await submitForm();
++  await sleep(700);
+ }
+ 
+-async function captureThroughUi(confirmLabel) {
+-  const onCameraStep = async () =>
+-    (await app(`!!document.querySelector('[role="dialog"] video')`)) === true;
++const DIALOG_SCOPE = `document.querySelector('[role="dialog"]')`;
+ 
+-  if (!(await onCameraStep())) {
+-    await waitFor(clickByTextExpression('open camera', DIALOG_BUTTON), {
+-      label: 'the Open camera button',
+-    });
+-    await sleep(1200);
+-  }
+-  await waitFor(clickByTextExpression('capture', DIALOG_BUTTON), {
+-    label: 'a live camera preview',
+-    timeout: 40_000,
+-  });
+-  // Scoped to the dialog: the panel behind it now says "Enhanced Proof
+-  // required", which matched an earlier, looser body-text wait and let the
+-  // check read the screen while OCR was still running.
+-  await waitFor(
+-    `${DIALOG_EXPR}.match(/Detected|couldn.t (read|confidently)|wasn.t detected/i) !== null`,
+-    { label: 'the OCR result', timeout: 150_000 },
+-  );
+-  const dialog = await app(DIALOG_EXPR);
+-  if (VERBOSE) console.log(`    · review: ${summarise(dialog, 200)}`);
+-  const clicked = await app(clickByTextExpression(confirmLabel, DIALOG_BUTTON));
+-  await sleep(900);
+-  return { dialog, clicked };
+-}
++const readState = async () =>
++  JSON.parse((await app(`localStorage.getItem('lockin.state.v1')`)) ?? 'null');
+ 
+-/** A capture that should succeed, with re-framed retakes. */
+-async function captureUntilAccepted({ percent, code, confirmLabel, attempts = 3 }) {
+-  let last = { dialog: '', clicked: false };
+-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+-    await showToCamera({ percent, code, variant: attempt - 1 });
+-    last = await captureThroughUi(confirmLabel);
+-    if (last.clicked && /verified\s*✓|verified ✓/i.test(last.dialog)) {
+-      return { ...last, attempts: attempt };
+-    }
+-    await app(clickByTextExpression('retake', DIALOG_BUTTON));
+-    await sleep(700);
+-  }
+-  return { ...last, attempts };
+-}
++const pageText = () => app('document.body.innerText');
+ 
+ async function isBlocked(url) {
+   const tab = await openTab(url);
+@@ -296,98 +275,113 @@ function summarise(text, limit = 160) {
+ 
+ /* ---------------- Seed ---------------- */
+ 
+-const ASSIGNMENT_ID = 'asg_parent_e2e';
++const REQUIRED_A = 'asg_required_a';
++const REQUIRED_B = 'asg_required_b';
++const CANVAS_DONE = 'asg_canvas_done';
++const CANVAS_URL = 'https://school.instructure.com/courses/77/assignments/912';
++
++const REMINDERS = {
++  firstReminderMinutes: 120,
++  escalationMinutes: 60,
++  focusWarningMinutes: 30,
++  enabled: false,
++};
+ 
+ /**
+- * A device mid-week: one Enhanced verification already on the books, one
+- * Standard-requirement Edgenuity assignment still to do, Strict Focus Mode
+- * running, and a parent PIN set.
++ * A device mid-week, at the current schema (v11).
++ *
++ * One Canvas-verified completion already on the books, two required
++ * assignments still to do, a Strict Focus Mode run in progress, and — the one
++ * thing that cannot be reached from any UI — `lockVerificationSettings` on, so
++ * the reducer's protected-settings refusal has something to refuse.
++ *
++ * No parent PIN: the suite sets one through the real Settings dialog, which is
++ * the only way to prove the hashing rather than assume it.
+  */
+-function seedState(pinRecord) {
++function seedState() {
+   const now = new Date().toISOString();
+   const earlier = new Date(Date.now() - 3 * 3600_000).toISOString();
+ 
+   return {
+-    schemaVersion: 5,
++    schemaVersion: 11,
+     profile: { firstName: 'Sam', onboarded: true, createdAt: earlier },
+     assignments: [
+       {
+-        id: 'asg_done',
+-        title: 'Physics module',
++        id: CANVAS_DONE,
++        title: 'Biology lab report',
+         subject: 'Science',
+-        platform: 'Edgenuity',
++        platform: 'Canvas',
+         dueDate: '2026-12-01',
+         dueTime: '23:59',
+-        estimatedMinutes: 30,
++        estimatedMinutes: 45,
+         priority: 'Normal',
+         status: 'Completed',
+-        completionMethod: 'edgenuity',
+-        verificationMethod: 'edgenuity',
++        completionMethod: 'canvas',
++        verificationMethod: 'canvas',
+         createdAt: earlier,
+         updatedAt: earlier,
+         completedAt: earlier,
+-        loggedMinutes: 25,
+-        reminders: { firstReminderMinutes: 120, escalationMinutes: 60, focusWarningMinutes: 30, enabled: false },
++        loggedMinutes: 40,
++        reminders: REMINDERS,
+         remindersFired: [],
+         verificationStatus: 'verified',
+         verificationRecords: [
+           {
+-            id: 'ver_seed',
+-            type: 'edgenuity_photo',
++            id: 'ver_seed_canvas',
++            type: 'canvas_submission',
+             timestamp: earlier,
+             status: 'verified',
+-            progressBefore: 40,
+-            progressAfter: 45,
+-            evidence: {
+-              trust: 'enhanced',
+-              verificationType: 'live_camera_ocr_enhanced',
+-              progressDelta: 5,
+-              challengeBeforeVerified: true,
+-              challengeAfterVerified: true,
+-              screenConfidence: 'high',
+-              courseName: 'Physical Science Semester A',
+-            },
++            sourceDomain: 'school.instructure.com',
++            externalCourseId: '77',
++            externalAssignmentId: '912',
++            evidence: { canvasStatus: 'submitted' },
+           },
+         ],
+-        edgenuity: {
+-          config: { courseName: 'Physical Science Semester A', targetType: 'progress_percent', requiredProgressDelta: 5, requiredVerificationTrust: 'enhanced' },
+-          verifiedProgressDelta: 5,
+-          lastVerifiedProgress: 45,
+-          verifiedActivities: 0,
+-          lastVerifiedTrust: 'enhanced',
++        canvas: {
++          domain: 'school.instructure.com',
++          url: CANVAS_URL,
++          submissionStatus: 'submitted',
++          courseId: '77',
++          assignmentId: '912',
+         },
+       },
+       {
+-        id: ASSIGNMENT_ID,
+-        title: 'Science module',
+-        subject: 'Science',
+-        platform: 'Edgenuity',
++        id: REQUIRED_A,
++        title: 'Algebra problem set',
++        subject: 'Math',
++        platform: 'Other',
+         dueDate: '2026-12-01',
+         dueTime: '23:59',
+         estimatedMinutes: 30,
+         priority: 'Important',
+         status: 'Not Started',
+-        completionMethod: 'edgenuity',
+-        verificationMethod: 'edgenuity',
++        completionMethod: 'manual',
+         createdAt: now,
+         updatedAt: now,
+         loggedMinutes: 0,
+-        reminders: { firstReminderMinutes: 120, escalationMinutes: 60, focusWarningMinutes: 30, enabled: false },
++        reminders: REMINDERS,
+         remindersFired: [],
+-        verificationStatus: 'pending',
++        verificationStatus: 'not_required',
++        verificationRecords: [],
++      },
++      {
++        id: REQUIRED_B,
++        title: 'History reading',
++        subject: 'History',
++        platform: 'Other',
++        dueDate: '2026-12-01',
++        dueTime: '23:59',
++        estimatedMinutes: 25,
++        priority: 'Normal',
++        status: 'Not Started',
++        completionMethod: 'manual',
++        createdAt: now,
++        updatedAt: now,
++        loggedMinutes: 0,
++        reminders: REMINDERS,
++        remindersFired: [],
++        verificationStatus: 'not_required',
+         verificationRecords: [],
+-        edgenuity: {
+-          config: {
+-            courseName: 'Physical Science Semester A',
+-            targetType: 'progress_percent',
+-            requiredProgressDelta: 3,
+-            // Standard to begin with — the parent raises this during the test.
+-            requiredVerificationTrust: 'standard',
+-          },
+-          verifiedProgressDelta: 0,
+-          lastVerifiedProgress: null,
+-          verifiedActivities: 0,
+-        },
+       },
+     ],
+     exams: [],
+@@ -400,13 +394,26 @@ function seedState(pinRecord) {
+       allowedDomains: ['clever.com'],
+       notificationsAsked: true,
+       theme: 'light',
+-      edgenuityProofMode: 'standard',
++      extensionSeen: true,
++      focusGuard: false,
++      // Otherwise Settings offers the consent card instead of the blocking
++      // controls this suite drives.
++      blockingAsked: true,
++      canvasCheckWindow: {
++        mode: 'manual',
++        schoolDays: [1, 2, 3, 4, 5],
++        schoolDayStart: 15 * 60 + 30,
++        dayEnd: 21 * 60 + 30,
++        freeDayStart: 9 * 60,
++        pausedUntil: null,
++        readAsIBrowse: false,
++      },
+     },
+     focusMode: {
+       active: true,
+       startedAt: now,
+-      requiredTaskIds: [ASSIGNMENT_ID],
+-      requiredCompletionCount: 1,
++      requiredTaskIds: [REQUIRED_A, REQUIRED_B],
++      requiredCompletionCount: 2,
+       completedCount: 0,
+       temporaryUnlockUntil: null,
+       overrideUsed: false,
+@@ -416,17 +423,39 @@ function seedState(pinRecord) {
+     },
+     activeSession: null,
+     completedSessions: [
+-      { id: 'ses_1', assignmentId: 'asg_done', assignmentTitle: 'Physics module', plannedMinutes: 25, actualMinutes: 25, startedAt: earlier, endedAt: earlier },
++      {
++        id: 'ses_1',
++        assignmentId: CANVAS_DONE,
++        assignmentTitle: 'Biology lab report',
++        plannedMinutes: 40,
++        actualMinutes: 40,
++        startedAt: earlier,
++        endedAt: earlier,
++      },
+     ],
+     activity: [
+-      { id: 'evt_1', type: 'focus_mode_started', timestamp: now, message: 'Focus Mode started — 1 required task' },
++      {
++        id: 'evt_1',
++        type: 'focus_mode_started',
++        timestamp: now,
++        message: 'Focus Mode started — 2 required tasks',
++      },
+     ],
+-    parentPin: pinRecord,
++    parentPin: null,
+     blockStats: [],
+-    canvas: { connection: null, courses: [], detected: [], ignoredKeys: [], lastSyncAt: null, lastError: null },
+-    edgenuity: { sessions: [], challenges: [], developerMode: false, cameraPermission: 'unknown', ocrEverLoaded: false },
++    canvas: {
++      connection: null,
++      courses: [],
++      detected: [],
++      ignoredKeys: [],
++      lastSyncAt: null,
++      lastError: null,
++    },
++    grades: { courses: [], lastReadAt: null },
+     parentControls: {
+-      lockVerificationSettings: false,
++      // No UI writes this one; the reducer reads it to refuse a protected
++      // setting, which is invariant 17 and is checked below.
++      lockVerificationSettings: true,
+       protectBlocklistInStrictMode: false,
+       protectAllowlistInStrictMode: false,
+     },
+@@ -434,8 +463,8 @@ function seedState(pinRecord) {
+       {
+         id: 'run_seed',
+         startedAt: now,
+-        requiredTaskIds: [ASSIGNMENT_ID],
+-        requiredCount: 1,
++        requiredTaskIds: [REQUIRED_A, REQUIRED_B],
++        requiredCount: 2,
+         completedCount: 0,
+         outcome: 'active',
+         isTest: false,
+@@ -471,8 +500,6 @@ async function main() {
+ 
+   const workDir = mkdtempSync(join(tmpdir(), 'lockin-parent-e2e-'));
+   const profile = join(workDir, 'profile');
+-  cameraFile = join(workDir, 'camera.y4m');
+-  writeFileSync(cameraFile, Buffer.alloc(0));
+ 
+   await requirePortFree(CDP_PORT, 'debug port');
+   site.listen(SITE_PORT, '127.0.0.1');
+@@ -483,8 +510,6 @@ async function main() {
+     `--disable-extensions-except=${EXT_DIR}`,
+     `--remote-debugging-port=${CDP_PORT}`,
+     `--host-resolver-rules=MAP youtube.com 127.0.0.1:${SITE_PORT},MAP www.youtube.com 127.0.0.1:${SITE_PORT}`,
+-    '--use-fake-device-for-media-stream',
+-    `--use-file-for-fake-video-capture=${cameraFile}`,
+     '--no-first-run',
+     '--no-default-browser-check',
+     '--disable-background-timer-throttling',
+@@ -498,86 +523,141 @@ async function main() {
+     const version = await fetchJSON('/json/version');
+     browser = new CDP(version.webSocketDebuggerUrl);
+ 
+-    console.log('\nPhase 6 E2E — Parent Dashboard, controls, and real enforcement\n');
+-
+-    const painter = await openTab('about:blank');
+-    painterSession = painter.sessionId;
+-    await evalIn(painterSession, RENDERER_SOURCE);
++    console.log('\nParent Dashboard E2E — PIN, controls, and real enforcement\n');
+ 
+     const tab = await openTab(`${APP_ORIGIN}/`);
+     appSession = tab.sessionId;
+-    await browser.send('Browser.setPermission', {
+-      origin: APP_ORIGIN,
+-      permission: { name: 'camera' },
+-      setting: 'granted',
+-    });
+ 
+-    /* ---- 0. Seed a device with a real PIN hash ---- */
++    /* ---- 0. Seed a device with no PIN yet ---- */
+     step('seed the device');
+-    // Hashed with the app's own lib/pin.ts, so the PIN is genuinely verified.
+-    const pinRecord = await app(`(async () => {
+-      const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+-      const data = new TextEncoder().encode(salt + ${JSON.stringify(PIN)});
+-      const digest = await crypto.subtle.digest('SHA-256', data);
+-      const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+-      return JSON.stringify({ hash, salt, createdAt: new Date().toISOString() });
+-    })()`);
+-
+     await app(
+       `localStorage.setItem('lockin.state.v1', ${JSON.stringify(
+-        JSON.stringify(seedState(JSON.parse(pinRecord))),
++        JSON.stringify(seedState()),
+       )}); 1`,
+     );
+-    await browser.send('Page.navigate', { url: `${APP_ORIGIN}/parent` }, appSession);
+-    await sleep(2500);
++    await goto('/parent', 2500);
+ 
+-    /* ---- 1. The gate ---- */
+-    step('parent gate');
++    /* ---- 1. No PIN, no dashboard ---- */
++    step('the dashboard with no PIN set');
+     let text = await pageText();
++    check('a device with no PIN cannot open the dashboard at all', /No parent PIN is set/i.test(text));
++    check(
++      'and it explains where to set one rather than offering a way in',
++      /Settings/i.test(text) && !/This week|Assignments completed/i.test(text),
++      summarise(text, 90),
++    );
++
++    /* ---- 2. Setting the PIN, hashed ---- */
++    step('set the parent PIN through Settings');
++    await goto('/settings', 2500);
++    await waitFor(clickByTextExpression('set parent pin'), { label: 'the Set parent PIN button' });
++    await sleep(900);
++    check('the PIN dialog asks for it twice', await fillPasswords([PIN, PIN], DIALOG_SCOPE));
++    await sleep(300);
++    await submitForm(DIALOG_SCOPE);
++    await sleep(1200);
++
++    let state = await readState();
++    const pinRecord = state.parentPin;
++    check('a PIN record is stored', !!pinRecord && typeof pinRecord.hash === 'string');
++    check(
++      'as a SHA-256 hash with a random salt',
++      /^[0-9a-f]{64}$/.test(pinRecord?.hash ?? '') && /^[0-9a-f]{32}$/.test(pinRecord?.salt ?? ''),
++      `hash ${pinRecord?.hash?.length ?? 0} chars, salt ${pinRecord?.salt?.length ?? 0} chars`,
++    );
++    check(
++      'and the digits themselves are never stored',
++      !Object.values(pinRecord ?? {}).includes(PIN),
++    );
++
++    /* ---- 3. The gate ---- */
++    step('the parent gate');
++    await goto('/parent', 2500);
++    text = await pageText();
+     check('the dashboard asks for the PIN', /Enter parent PIN/i.test(text));
+     check(
+       'and shows nothing about the week before it is entered',
+-      !/Assignments completed|Verified completions|Recent work/i.test(text),
++      !/This week|Assignments completed|Verified completions|Recent work/i.test(text),
+       summarise(text, 90),
+     );
+ 
+     await enterPin('0000');
+-    await sleep(900);
+     text = await pageText();
+     check('a wrong PIN is rejected', /Incorrect PIN/i.test(text), summarise(text, 80));
++    check('it says how many attempts are left', /4 attempts left/i.test(text));
+     check('and the dashboard stays locked', /Enter parent PIN/i.test(text));
+ 
++    step('the lockout');
++    for (let i = 0; i < 4; i += 1) await enterPin('0000');
++    text = await pageText();
++    check('five wrong attempts trigger a lockout', /Too many wrong attempts/i.test(text), summarise(text, 80));
++    check(
++      'and the field itself is disabled while it lasts',
++      (await app(`document.querySelector('input[type="password"]').disabled`)) === true,
++    );
++
++    // The lockout lives in component state, like the session itself — a reload
++    // offers a fresh prompt rather than persisting a penalty. That is the
++    // honest reading of invariant 16, and worth pinning so nobody "fixes" it
++    // by writing an attempt counter to storage.
++    await goto('/parent', 2500);
++    check(
++      'a reload offers a fresh prompt — nothing about the attempt is persisted',
++      (await app(`document.querySelector('input[type="password"]').disabled`)) === false,
++    );
++
+     await enterPin(PIN);
+-    await sleep(1500);
++    await sleep(900);
+     text = await pageText();
+     check('the correct PIN opens the dashboard', /Parent View/i.test(text));
+     check('the weekly summary is visible', /This week|Assignments completed/i.test(text));
+ 
+-    /* ---- 2. Reviewing verification ---- */
+-    step('review verification evidence');
++    /* ---- 4. The session is in memory only ---- */
++    step('the parent session is never persisted');
++    const keys = JSON.parse(
++      await app(`JSON.stringify({
++        local: Object.keys(localStorage),
++        session: Object.keys(sessionStorage),
++      })`),
++    );
++    check('sessionStorage holds nothing at all', keys.session.length === 0, keys.session.join(', '));
++    check(
++      'and no stored key belongs to the parent session',
++      !keys.local.some((key) => /parent|session|unlock/i.test(key)),
++      keys.local.join(', '),
++    );
++    state = await readState();
++    check('and the stored state has no session field of its own', state.parentSession === undefined);
++
++    await goto('/parent', 2500);
++    check('a reload re-locks the dashboard', /Enter parent PIN/i.test(await pageText()));
++    await enterPin(PIN);
++    await sleep(900);
++    check('and the PIN opens it again', /Parent View/i.test(await pageText()));
++
++    /* ---- 5. Reviewing work ---- */
++    step('review the work');
+     await app(clickByTextExpression('Work'));
+     await sleep(900);
+     text = await pageText();
+-    check('the earlier Enhanced verification is listed', /Edgenuity Enhanced/i.test(text));
+-    check('Physics module appears in recent work', /Physics module/i.test(text));
++    check('the Canvas-verified completion is listed', /Biology lab report/i.test(text));
++    check('labelled as Canvas verified', /Canvas verified/i.test(text));
+ 
+-    await app(clickByTextExpression('Physics module'));
++    await app(clickByTextExpression('Biology lab report'));
+     await sleep(800);
+     let dialog = await app(DIALOG_EXPR);
+     check('its details open', /Verification details/i.test(dialog), summarise(dialog, 90));
+-    check('showing the before → after reading', /40% → 45%/.test(dialog));
+-    check('and both challenge halves', /Before challenge[\s\S]*Verified/i.test(dialog));
+-    check('with photos confirmed as not stored', /Photos stored\s*No/i.test(dialog));
++    check('showing the status Canvas itself reported', /Status detected[\s\S]*submitted/i.test(dialog));
++    check('and stating plainly that browsing history is not stored', /Browsing history stored\s*No/i.test(dialog));
+     check(
+-      'and no raw OCR text anywhere in it',
+-      !/rawText|Course Progress 4/i.test(dialog),
+-      summarise(dialog, 90),
++      'the dashboard never shows the assignment URL — invariant 14',
++      !(await pageText()).includes(CANVAS_URL),
+     );
+     await app(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); 1`);
+     await sleep(600);
+ 
+-    /* ---- 3. A parent-approved temporary unlock (second critical flow) ---- */
+-    step('parent-approved temporary unlock');
++    /* ---- 6. Blocking is real while the session runs ---- */
++    step('real enforcement');
+     check('youtube.com is blocked during the session', await isBlocked('http://youtube.com/'));
+ 
+     await app(clickByTextExpression('Controls'));
+@@ -586,12 +666,15 @@ async function main() {
+       'the dashboard shows Focus Mode as active',
+       /Focus Mode[\s\S]*ACTIVE/i.test(await pageText()),
+     );
++
++    /* ---- 7. A parent-approved temporary unlock ---- */
++    step('parent-approved temporary unlock');
+     await app(clickByTextExpression('15 minutes'));
+     await sleep(300);
+     check('the unlock is approved', await app(clickByTextExpression('Approve unlock')));
+     await sleep(2500);
+ 
+-    let state = await readState();
++    state = await readState();
+     check('Focus Mode stays active through the unlock', state.focusMode.active === true);
+     check('blocking is paused', state.focusMode.temporaryUnlockUntil !== null);
+     check('youtube.com now loads', (await isBlocked('http://youtube.com/')) === false);
+@@ -610,172 +693,194 @@ async function main() {
+       state.focusRuns.some((run) => run.unlocks.some((u) => u.endedAt)),
+     );
+ 
+-    /* ---- 4. Raising the requirement ---- */
+-    step('raise the requirement to Enhanced');
++    /* ---- 8. Parent controls ---- */
++    step('parent controls');
++    const beforeControls = (await readState()).activity.filter(
++      (e) => e.type === 'parent_controls_changed',
++    ).length;
++
+     check(
+-      'the Science module is listed with its current requirement',
+-      /Science module/i.test(await pageText()),
+-    );
+-    // The per-assignment toggle for the still-Standard assignment.
+-    const toggled = await app(`(() => {
+-      const rows = [...document.querySelectorAll('div')].filter((d) =>
+-        (d.textContent || '').includes('Science module') && d.querySelector('button[role="switch"], input[type="checkbox"], button'),
+-      );
+-      const row = rows[rows.length - 1];
+-      if (!row) return false;
+-      const control = row.querySelector('input[type="checkbox"]') || row.querySelector('button');
+-      if (!control) return false;
+-      control.click();
+-      return true;
+-    })()`);
+-    check('the parent raises it to Enhanced', toggled === true);
++      'the parent protects the blocklist during Strict sessions',
++      await app(clickByLabelExpression('Protect blocked sites during Strict Mode')),
++    );
+     await sleep(1200);
+-
+     state = await readState();
+-    const target = state.assignments.find((a) => a.id === ASSIGNMENT_ID);
+     check(
+-      'the requirement is stored on the assignment',
+-      target.edgenuity.config.requiredVerificationTrust === 'enhanced',
+-      target.edgenuity.config.requiredVerificationTrust,
++      'and it is stored on the real controls object',
++      state.parentControls.protectBlocklistInStrictMode === true,
+     );
+     check(
+-      'and it is recorded in the activity log exactly once',
+-      state.activity.filter((e) => e.type === 'parent_requirement_changed').length === 1,
++      'the change is logged exactly once',
++      state.activity.filter((e) => e.type === 'parent_controls_changed').length ===
++        beforeControls + 1,
+     );
++
++    /* ---- 9. Prospective only (invariant 15) ---- */
++    step('nothing retroactive');
++    const done = state.assignments.find((a) => a.id === CANVAS_DONE);
++    check('tightening the rules did not re-open completed work', done.status === 'Completed');
+     check(
+-      'the completed assignment was not re-opened',
+-      state.assignments.find((a) => a.id === 'asg_done').status === 'Completed',
++      'and left its evidence exactly as it was',
++      done.verificationRecords.length === 1 &&
++        done.verificationRecords[0].id === 'ver_seed_canvas' &&
++        done.verificationRecords[0].status === 'verified',
++    );
++    check(
++      'the required count the student is working to is unchanged',
++      state.focusMode.requiredCompletionCount === 2 && state.focusMode.completedCount === 0,
+     );
+ 
+-    /* ---- 5. Exit Parent View ---- */
++    /* ---- 10. Exit Parent View ---- */
+     step('exit parent view');
+     await app(clickByTextExpression('Exit Parent View'));
+     await sleep(1500);
+     check('the student view returns', /Focus|Home|Work/i.test(await pageText()));
+ 
+-    await browser.send('Page.navigate', { url: `${APP_ORIGIN}/parent` }, appSession);
+-    await sleep(2000);
++    await goto('/parent', 2000);
++    check('and the dashboard is locked again immediately', /Enter parent PIN/i.test(await pageText()));
++
++    /* ---- 11. Protected settings are refused by the reducer ---- */
++    step('protected settings');
++    await goto('/settings', 2500);
+     check(
+-      'and the dashboard is locked again immediately',
+-      /Enter parent PIN/i.test(await pageText()),
++      'Settings offers the blocking master switch',
++      /Enable blocking/i.test(await pageText()),
+     );
+-
+-    /* ---- 6. The requirement is actually enforced ---- */
+-    step('student verification now demands a code');
+-    await browser.send('Page.navigate', { url: `${APP_ORIGIN}/focus` }, appSession);
+-    await sleep(2500);
+-
+-    await waitFor(clickByTextExpression('start work'), { label: 'the Start work button' });
+-    await sleep(1000);
+-    dialog = await app(DIALOG_EXPR);
++    check('the student can reach it', await app(clickByLabelExpression('Enable blocking')));
++    await sleep(1500);
++    state = await readState();
+     check(
+-      'the flow now asks for a one-time code',
+-      /verification code/i.test(dialog),
+-      summarise(dialog, 90),
++      'turning blocking off is refused while the parent lock is on — invariant 17',
++      state.settings.blockingEnabled === true,
+     );
++    check('so youtube.com is still blocked', await isBlocked('http://youtube.com/'));
+ 
+-    const beforeCode = await currentCode('before');
+-    check('a code was issued because the parent required Enhanced', !!beforeCode, beforeCode);
+-
+-    // A Standard capture — the right screen, no code — must not satisfy it.
+-    await showToCamera({ percent: 43, code: undefined });
+-    const standard = await captureThroughUi('retake');
++    /* ---- 12. The blocklist is protected during a Strict session ---- */
++    step('the protected blocklist');
++    await goto('/settings', 2500);
+     check(
+-      'a capture without the code is refused',
+-      /wasn’t detected|wasn't detected/i.test(standard.dialog),
+-      summarise(standard.dialog, 90),
++      'Settings says the blocklist is managed by Parent Controls',
++      /Managed by Parent Controls/i.test(await pageText()),
+     );
++    check('removing a blocked site is offered', await app(clickByLabelExpression('Remove youtube.com')));
++    await sleep(900);
++    dialog = await app(DIALOG_EXPR);
++    check('but it asks for the parent PIN first', /Parent PIN required/i.test(dialog), summarise(dialog, 90));
++    await app(clickByTextExpression('cancel', DIALOG_BUTTON));
++    await sleep(700);
+     state = await readState();
+     check(
+-      'and no session opened from it',
+-      state.edgenuity.sessions.filter((s) => s.status === 'in_progress').length === 0,
++      'and cancelling leaves the site blocked',
++      state.settings.blockedDomains.includes('youtube.com'),
+     );
+-    check('youtube.com is still blocked', await isBlocked('http://youtube.com/'));
+ 
+-    /* ---- 7. Enhanced proof succeeds ---- */
+-    step('enhanced proof succeeds');
+-    const before = await captureUntilAccepted({
+-      percent: 43,
+-      code: beforeCode,
+-      confirmLabel: 'confirm & start',
+-    });
+-    check('the starting capture with the code is accepted', before.clicked === true, `attempt ${before.attempts}`);
++    // Tightening your own restrictions is always allowed, PIN or no PIN.
++    await app(`(() => {
++      const input = document.querySelector('input[aria-label*="youtube.com or"]');
++      if (!input) return false;
++      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
++      setter.call(input, 'reddit.com');
++      input.dispatchEvent(new Event('input', { bubbles: true }));
++      input.form.requestSubmit();
++      return true;
++    })()`);
++    await sleep(1200);
++    state = await readState();
++    check(
++      'adding a site never needs the PIN',
++      state.settings.blockedDomains.includes('reddit.com'),
++      state.settings.blockedDomains.join(', '),
++    );
+ 
+-    await waitFor(clickByTextExpression('verify progress'), { label: 'Verify progress' });
+-    await sleep(900);
+-    const afterCode = await currentCode('after');
+-    check('a different code is issued for the final capture', !!afterCode && afterCode !== beforeCode);
++    /* ---- 13. Focus Mode ends through the one engine ---- */
++    step('finish the required work');
++    await goto('/focus', 2500);
++    check(
++      'the focus screen lists the required work',
++      /Required work: 0 \/ 2/i.test(await pageText()),
++      summarise(await pageText(), 120),
++    );
+ 
+-    let final = await captureUntilAccepted({
+-      percent: 47,
+-      code: afterCode,
+-      confirmLabel: 'use this',
+-    });
+-    check('the final capture is accepted', final.clicked === true, `attempt ${final.attempts}`);
++    check(
++      'the first required task is ticked off',
++      await app(clickByLabelExpression('Mark Algebra problem set complete')),
++    );
+     await sleep(1500);
+-
+-    // The Phase 4 "too fast" guard fires on a run this quick; confirm it.
+     state = await readState();
+-    let pending = state.edgenuity.sessions.find((s) => s.status === 'in_progress')?.pendingConfirmation;
+-    if (pending) {
+-      check('a near-instant claim asks to confirm', true, pending.reason);
+-      await waitFor(clickByTextExpression('verify progress'), { label: 'Verify progress again' });
+-      await sleep(900);
+-      const confirmCode = await currentCode('after');
+-      final = await captureUntilAccepted({
+-        percent: 47,
+-        code: confirmCode,
+-        confirmLabel: 'use this',
+-      });
+-      check('the confirming capture is accepted', final.clicked === true);
+-      await sleep(1500);
+-      state = await readState();
+-    }
+-
+-    const verified = state.assignments.find((a) => a.id === ASSIGNMENT_ID);
+-    check('the assignment completes', verified.status === 'Completed');
+-    check('at enhanced trust', verified.edgenuity.lastVerifiedTrust === 'enhanced');
+-    check('Focus Mode ended through the existing engine', state.focusMode.active === false);
++    check('one of two done does not end Focus Mode', state.focusMode.active === true);
++    check('and youtube.com is still blocked with work outstanding', await isBlocked('http://youtube.com/'));
+ 
++    check(
++      'the last required task is ticked off',
++      await app(clickByLabelExpression('Mark History reading complete')),
++    );
++    await sleep(2000);
++    state = await readState();
++    check('Focus Mode ends through the existing engine', state.focusMode.active === false);
++    check(
++      'the run is closed as completed, not overridden',
++      state.focusRuns.some((run) => run.id === 'run_seed' && run.outcome === 'completed'),
++      state.focusRuns.map((r) => r.outcome).join(', '),
++    );
+     await sleep(2500);
+-    check('youtube.com unblocks', (await isBlocked('http://youtube.com/')) === false);
++    check('and youtube.com unblocks', (await isBlocked('http://youtube.com/')) === false);
+ 
+-    /* ---- 8. The new verification is visible to the parent ---- */
++    /* ---- 14. The dashboard shows what actually happened ---- */
+     step('reopen the dashboard');
+-    await browser.send('Page.navigate', { url: `${APP_ORIGIN}/parent` }, appSession);
+-    await sleep(2000);
++    await goto('/parent', 2000);
+     check('the dashboard requires the PIN again', /Enter parent PIN/i.test(await pageText()));
+     await enterPin(PIN);
+-    await sleep(1500);
++    await sleep(1200);
+ 
+     await app(clickByTextExpression('Work'));
+     await sleep(1000);
+     text = await pageText();
+-    check('the new Enhanced verification is listed', /Science module/i.test(text));
++    check('the new completions are listed', /Algebra problem set/i.test(text) && /History reading/i.test(text));
+     check(
+-      'and it is shown as Enhanced',
+-      (text.match(/Edgenuity Enhanced/gi) ?? []).length >= 2,
+-      'both the seeded and the new one',
++      'and honestly labelled Manual rather than verified',
++      /Manual/i.test(text),
++      summarise(text, 120),
+     );
+ 
+     await app(clickByTextExpression('Focus'));
+     await sleep(900);
+     text = await pageText();
+     check('the focus history shows the completed run', /Completed normally/i.test(text));
+-    check('and the parent-approved unlock', /temporary unlock/i.test(text));
++    check('and the parent-approved unlock, counted separately', /temporary unlock/i.test(text));
++    check(
++      'blocked attempts are per-domain counts, never pages',
++      !text.includes('http://youtube.com/'),
++    );
+ 
+-    /* ---- 9. Nothing sensitive leaked into the dashboard ---- */
+-    step('privacy check');
++    /* ---- 15. Data, privacy, and clearing history ---- */
++    step('the data panel');
+     await app(clickByTextExpression('Data'));
+     await sleep(900);
+     text = await pageText();
+-    check('the privacy statement is shown', /Edgenuity photos are never retained/i.test(text));
+-    const fullState = await readState();
++    check('the privacy statement is shown', /Everything is stored locally on this device/i.test(text));
++    check(
++      'and it is honest about what the PIN is not',
++      /not a security boundary/i.test(text),
++      summarise(text, 90),
++    );
++
++    check(
++      'clearing verification history is offered',
++      await app(clickByTextExpression('Clear verification history')),
++    );
++    await sleep(700);
++    await app(clickByTextExpression('delete', DIALOG_BUTTON));
++    await sleep(1500);
++    state = await readState();
++    check(
++      'the evidence records go',
++      state.assignments.every((a) => a.verificationRecords.length === 0),
++    );
+     check(
+-      'no challenge value survives anywhere in storage',
+-      fullState.edgenuity.challenges.every((c) => c.value === undefined || c.status === 'pending'),
++      'but the schoolwork stays completed — invariant 38',
++      state.assignments.filter((a) => a.status === 'Completed').length === 3,
+     );
+-    check('no image data is stored', !JSON.stringify(fullState).includes('data:image'));
++    check('and the parent PIN is untouched', !!state.parentPin?.hash);
+   } finally {
+     clearInterval(watchdog);
+     browser?.close();
+@@ -785,7 +890,7 @@ async function main() {
+   }
+ 
+   console.log(
+-    `\n${failures === 0 ? 'All Phase 6 E2E checks passed' : `${failures} check(s) failed`}\n`,
++    `\n${failures === 0 ? 'All Parent Dashboard E2E checks passed' : `${failures} check(s) failed`}\n`,
+   );
+   process.exit(failures === 0 ? 0 : 1);
+ }

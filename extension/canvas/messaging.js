@@ -7,7 +7,7 @@
  * Nothing reaches storage or the LockIn UI without passing through here, where
  * it is rebuilt field by field — unknown keys are dropped rather than copied.
  */
-import { LIMITS } from './types.js';
+import { CANVAS_SUBMISSION_TYPES, LIMITS } from './types.js';
 import { coerceStatus } from './status.js';
 import { normalizeCanvasDomain } from './urls.js';
 
@@ -92,6 +92,11 @@ export function validateDetectedAssignment(raw, expectedDomain) {
     scoreText: str(raw.scoreText, 40) || undefined,
     excused: raw.excused === true ? true : undefined,
     submissionStatus: coerceStatus(raw.submissionStatus),
+    // How the work is handed in, when Canvas said. An unrecognised value
+    // becomes undefined — "Canvas did not say" — never a guess at `online`.
+    submissionType: CANVAS_SUBMISSION_TYPES.includes(raw.submissionType)
+      ? raw.submissionType
+      : undefined,
     detectedAt: validIso(raw.detectedAt) || new Date().toISOString(),
     courseName: str(raw.courseName, LIMITS.MAX_COURSE_NAME_LENGTH) || undefined,
     kind: ['assignment', 'quiz', 'external_tool', 'discussion'].includes(raw.kind)

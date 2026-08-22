@@ -20,6 +20,32 @@ export function CanvasStatusBadge({
   const verifiedAt =
     tone === 'mint' && link.lastStatusChangeAt ? relativeTime(link.lastStatusChangeAt) : null;
 
+  /**
+   * Work Canvas can never show a submission for.
+   *
+   * Until it is graded, Canvas says "Missing" or shows nothing at all — which
+   * is a statement about Canvas, not about whether the student handed the
+   * paper to their teacher. Repeating it as a status was the app calling
+   * finished work undone, so the badge says what is actually true instead: no
+   * online submission exists, and none is expected.
+   */
+  const handIn = link.submissionType === 'on_paper' || link.submissionType === 'none';
+  if (handIn && link.submissionStatus !== 'graded') {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <Badge tone="neutral">
+          <Icon name="canvas" size={12} />
+          {link.submissionType === 'on_paper' ? 'Handed in on paper' : 'No submission needed'}
+        </Badge>
+        <span className="text-xs lk-muted">
+          {link.submissionType === 'on_paper'
+            ? 'Canvas has nothing to show until your teacher grades it.'
+            : 'Canvas expects nothing to be handed in for this one.'}
+        </span>
+      </span>
+    );
+  }
+
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <Badge tone={tone}>

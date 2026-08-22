@@ -31,6 +31,7 @@ import { todayISO, uid } from '../lib/time';
 import { defaultState } from '../lib/storage';
 import { isVerifiedComplete, mergeStatus } from '../lib/canvas/verification';
 import { assignmentCanvasKey, findByExternalId } from '../lib/canvas/matching';
+import { isHandInWork } from '../lib/workState';
 import { createAssignmentFromCanvas, createAssignmentFromFeed } from './factories';
 import { MAX_ACTIVITY, MAX_COMPLETED_SESSIONS, trimActivity } from '../lib/retention';
 import { AWAY_GRACE_MS } from '../lib/focusGuard';
@@ -1161,6 +1162,10 @@ export function reducer(state: AppState, action: Action): AppState {
               : (assignment.canvas?.lastStatusChangeAt ?? seenAt),
             courseName: detected.courseName ?? assignment.canvas?.courseName,
             kind: detected.kind ?? assignment.canvas?.kind,
+            // Sticky: a list page that does not mention the submission type
+            // must not erase "this one is handed in on paper", which is read
+            // from the assignment's own page.
+            submissionType: detected.submissionType ?? assignment.canvas?.submissionType,
             score: detected.score ?? assignment.canvas?.score,
             scoreText: detected.scoreText ?? assignment.canvas?.scoreText,
             pointsPossible: detected.pointsPossible ?? assignment.canvas?.pointsPossible,
@@ -1196,12 +1201,70 @@ export function reducer(state: AppState, action: Action): AppState {
             message: `${assignment.title} verified through Canvas`,
             meta: { canvasStatus: status, domain },
           });
-        } else if (statusChanged && status === 'missing') {
+        } else if (
+          isVerifiedComplete(status) &&
+          statusChanged &&
+          assignment.status === 'Completed' &&
+          assignment.completionMethod !== 'canvas'
+        ) {
+          /**
+           * The teacher marked it, after the student had already said it was
+           * done — the ordinary life of paper homework, and of anything handed
+           * in outside Canvas.
+           *
+           * The completion itself is left exactly as it was: the student's
+           * word came first and stays first, including its timestamp. What
+           * changes is the evidence behind it, which stops being "they said
+           * so" and becomes "and the school's own system agrees".
+           */
+          updated = {
+            ...updated,
+            verificationMethod: 'canvas',
+            verificationStatus: 'verified',
+            verificationRecords: [
+              ...assignment.verificationRecords,
+              {
+                id: uid('ver'),
+                type: 'canvas_submission',
+                timestamp: seenAt,
+                status: 'verified',
+                sourceDomain: domain,
+                externalCourseId: detected.externalCourseId,
+                externalAssignmentId: detected.externalAssignmentId,
+                evidence: { canvasStatus: status },
+              },
+            ],
+          };
+          events.push({
+            type: 'canvas_grade_confirmed',
+            message:
+              status === 'graded'
+                ? `Canvas now shows a grade for “${assignment.title}”`
+                : `Canvas now shows “${assignment.title}” as handed in`,
+            meta: { canvasStatus: status, domain },
+          });
+        } else if (statusChanged && status === 'missing' && !isHandInWork(updated)) {
+          /**
+           * Canvas says nothing arrived.
+           *
+           * For work Canvas could have received, that is a fact worth acting
+           * on — but never by silently un-completing something. A student who
+           * marked it done keeps the completion (and their evening); what they
+           * get is a flag they can see and settle, because a gradebook that
+           * lags a day should not be able to re-block a browser on its own.
+           *
+           * Hand-in work is excluded above: for paper homework Canvas says
+           * "Missing" until it is graded, which is not a claim about whether
+           * the student handed it in.
+           */
+          const contested = assignment.status === 'Completed';
           updated = { ...updated, verificationStatus: 'pending' };
           events.push({
-            type: 'canvas_assignment_missing',
-            message: `Canvas marked “${assignment.title}” missing`,
-            meta: { domain },
+            type: contested ? 'canvas_completion_contested' : 'canvas_assignment_missing',
+            message: contested
+              ? `You marked “${assignment.title}” done, but Canvas still says nothing was handed in`
+              : `Canvas marked “${assignment.title}” missing`,
+            meta: { canvasStatus: status, domain },
           });
         }
 

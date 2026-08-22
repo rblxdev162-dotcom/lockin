@@ -5,6 +5,29 @@ User-visible changes only. Internal architecture and phase history live in
 
 ## 1.5.0
 
+### Homework you hand in on paper stops being called missing
+
+If an assignment is handed to your teacher in class, there is nothing to submit
+on Canvas — and Canvas often lists it as **Missing** until your teacher enters a
+grade. LockIn used to repeat that, so work you had actually done sat at the top
+of your list looking like your worst problem.
+
+LockIn now reads how Canvas says each assignment is handed in. Paper work (and
+work that expects no submission at all) is labelled *Handed in on paper —
+Canvas has nothing to show until your teacher grades it*. It is still overdue if
+it is genuinely overdue; it just is not accused of being missing.
+
+### A grade that shows up later confirms what you already said
+
+Tick something off in LockIn, and when your teacher finally marks it, the next
+check quietly upgrades it from "you said so" to "Canvas agrees". Your original
+tick keeps its own time — nothing is rewritten.
+
+If it is online work and Canvas keeps saying nothing was ever handed in, LockIn
+flags it in Accuracy review so you find out before your teacher does. It does
+**not** un-tick it or re-block your sites: a gradebook that is a day behind
+should not be able to do that to your evening.
+
 ### LockIn can now tell when you have turned something in
 
 Automatic checks used to open only your Grades page for each class. That page

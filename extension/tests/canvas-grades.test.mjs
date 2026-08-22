@@ -596,6 +596,151 @@ test('it is not filed as a separate import candidate as well', () => {
   assert.equal(next.canvas.detected.length, 0);
 });
 
+/* ------------------------------------------------------------------ */
+/* Paper homework, and the grade that arrives days later               */
+/* ------------------------------------------------------------------ */
+
+/** The student ticked it off themselves; Canvas has said nothing useful yet. */
+function stateWithStudentCompleted(canvasPatch = {}) {
+  const base = stateWithFeedAssignment();
+  const now = new Date().toISOString();
+  return {
+    ...base,
+    assignments: [
+      {
+        ...base.assignments[0],
+        status: 'Completed',
+        completionMethod: 'manual',
+        completedAt: now,
+        verificationStatus: 'verified',
+        externalCourseId: '404',
+        canvas: {
+          domain: DOMAIN,
+          url: `https://${DOMAIN}/courses/404/assignments/77001`,
+          submissionStatus: 'not_submitted',
+          lastCheckedAt: now,
+          lastStatusChangeAt: now,
+          ...canvasPatch,
+        },
+      },
+    ],
+  };
+}
+
+test('a grade arriving later confirms what the student already said', () => {
+  const before = stateWithStudentCompleted();
+  const next = reducer(before, {
+    type: 'CANVAS_DETECTED',
+    detected: [gradedDetection],
+    seenAt: new Date().toISOString(),
+  });
+  const assignment = next.assignments[0];
+
+  // The student's own completion is untouched — it came first and stays first.
+  assert.equal(assignment.status, 'Completed');
+  assert.equal(assignment.completionMethod, 'manual');
+  assert.equal(assignment.completedAt, before.assignments[0].completedAt);
+  // What changed is the evidence behind it.
+  assert.equal(assignment.verificationMethod, 'canvas');
+  assert.equal(assignment.verificationStatus, 'verified');
+  assert.equal(assignment.verificationRecords.at(-1)?.evidence?.canvasStatus, 'graded');
+  assert.equal(
+    next.activity.some((event) => event.type === 'canvas_grade_confirmed'),
+    true,
+  );
+});
+
+test('confirming twice does not stack up records', () => {
+  const seenAt = new Date().toISOString();
+  const once = reducer(stateWithStudentCompleted(), {
+    type: 'CANVAS_DETECTED',
+    detected: [gradedDetection],
+    seenAt,
+  });
+  const twice = reducer(once, { type: 'CANVAS_DETECTED', detected: [gradedDetection], seenAt });
+  assert.equal(
+    twice.assignments[0].verificationRecords.length,
+    once.assignments[0].verificationRecords.length,
+  );
+});
+
+test('paper homework Canvas calls missing does not contest the student', () => {
+  const next = reducer(stateWithStudentCompleted({ submissionType: 'on_paper' }), {
+    type: 'CANVAS_DETECTED',
+    detected: [
+      { ...gradedDetection, submissionStatus: 'missing', submissionType: 'on_paper', score: undefined },
+    ],
+    seenAt: new Date().toISOString(),
+  });
+  const assignment = next.assignments[0];
+  assert.equal(assignment.status, 'Completed');
+  // No flag, no scolding event: Canvas says "Missing" for paper work until it
+  // is graded, which says nothing about whether it was handed in.
+  assert.equal(assignment.verificationStatus, 'verified');
+  assert.equal(
+    next.activity.some((event) => event.type === 'canvas_completion_contested'),
+    false,
+  );
+});
+
+test('online work Canvas says never arrived is flagged, but never un-completed', () => {
+  const next = reducer(stateWithStudentCompleted({ submissionType: 'online' }), {
+    type: 'CANVAS_DETECTED',
+    detected: [
+      { ...gradedDetection, submissionStatus: 'missing', submissionType: 'online', score: undefined },
+    ],
+    seenAt: new Date().toISOString(),
+  });
+  const assignment = next.assignments[0];
+  assert.equal(assignment.status, 'Completed', 'a lagging gradebook cannot re-block a browser');
+  assert.equal(assignment.verificationStatus, 'pending');
+  assert.equal(
+    next.activity.some((event) => event.type === 'canvas_completion_contested'),
+    true,
+  );
+});
+
+test('the submission type sticks once read, so a quieter page cannot erase it', () => {
+  const first = reducer(stateWithStudentCompleted(), {
+    type: 'CANVAS_DETECTED',
+    detected: [{ ...gradedDetection, submissionStatus: 'not_submitted', submissionType: 'on_paper' }],
+    seenAt: new Date().toISOString(),
+  });
+  assert.equal(first.assignments[0].canvas?.submissionType, 'on_paper');
+
+  // A list page that says nothing about how work is handed in.
+  const second = reducer(first, {
+    type: 'CANVAS_DETECTED',
+    detected: [{ ...gradedDetection, submissionStatus: 'missing', submissionType: undefined }],
+    seenAt: new Date(Date.now() + 1000).toISOString(),
+  });
+  assert.equal(second.assignments[0].canvas?.submissionType, 'on_paper');
+});
+
+test('an unknown submission type never becomes a claim', () => {
+  const message = validateDetectionMessage(
+    {
+      type: 'CANVAS_DETECTION',
+      domain: DOMAIN,
+      readable: true,
+      assignments: [
+        {
+          externalCourseId: '404',
+          externalAssignmentId: '77001',
+          title: 'Museum Project',
+          url: `https://${DOMAIN}/courses/404/assignments/77001`,
+          submissionStatus: 'missing',
+          submissionType: 'ON PAPER, obviously',
+        },
+      ],
+      courses: [],
+      grades: [],
+    },
+    DOMAIN,
+  );
+  assert.equal(message.assignments[0].submissionType, undefined);
+});
+
 test('an id that belongs to a different Canvas install is not adopted', () => {
   const state = stateWithFeedAssignment();
   state.assignments[0].canvas = {

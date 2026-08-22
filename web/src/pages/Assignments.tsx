@@ -13,7 +13,7 @@ import { createAssignment } from '../store/factories';
 import type { Assignment } from '../types';
 import { PLATFORMS, PRIORITIES } from '../types';
 import { isComplete } from '../lib/selectors';
-import { byUrgency, groupByClass, isSettled, workStateOf } from '../lib/workState';
+import { byUrgency, groupByClass, isContested, isSettled, workStateOf } from '../lib/workState';
 import { SectionHeader } from '../components/ui/Status';
 import { cx } from '../lib/cx';
 import { toast } from '../components/ui/Toast';
@@ -293,8 +293,20 @@ export function AssignmentsPage() {
   }).length;
   const reviewQueue = state.assignments.filter((a) => {
     const status = workStateOf(a, now);
-    return status === 'needs_sync' || a.canvas?.submissionStatus === 'verification_unavailable';
+    return (
+      status === 'needs_sync' ||
+      a.canvas?.submissionStatus === 'verification_unavailable' ||
+      isContested(a)
+    );
   });
+  /**
+   * Work the student marked done that Canvas says was never handed in.
+   *
+   * It keeps its completion — a gradebook that lags a day must not re-block a
+   * browser on its own — but it is exactly the disagreement a student wants to
+   * find before their teacher does, so it is named rather than buried.
+   */
+  const contested = state.assignments.filter(isContested);
   const checkReport = state.canvas.lastCheckReport;
   const checkCoverage = checkReport
     ? describeStoredCoverage(checkReport.coverage, checkReport.rowsRead)
@@ -428,6 +440,13 @@ export function AssignmentsPage() {
                 {reviewQueue.length} item{reviewQueue.length === 1 ? '' : 's'} need a fresh date or a
                 clearer Canvas status. LockIn will not guess.
               </p>
+              {contested.length > 0 && (
+                <p className="mt-1.5 text-caption font-bold lk-status-behind lk-status-text">
+                  {contested.length === 1
+                    ? 'One of these is marked done here, but Canvas still says nothing was handed in.'
+                    : `${contested.length} of these are marked done here, but Canvas still says nothing was handed in.`}
+                </p>
+              )}
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {reviewQueue.slice(0, 3).map((a) => (
                   <button

@@ -15,6 +15,8 @@ const {
   WORK_STATE_LABEL,
   byUrgency,
   groupByClass,
+  isContested,
+  isHandInWork,
   isSettled,
   urgency,
   whatToDoNext,
@@ -28,7 +30,7 @@ const DAY = 24 * HOUR;
 const pad = (n) => String(n).padStart(2, '0');
 
 function assignment(patch = {}) {
-  const { dueIn, canvasStatus, ...rest } = patch;
+  const { dueIn, canvasStatus, submissionType, ...rest } = patch;
   const due = dueIn === null ? null : new Date(NOW + (dueIn ?? DAY));
   return {
     id: rest.id ?? 'a1',
@@ -54,6 +56,7 @@ function assignment(patch = {}) {
             domain: 'example.instructure.com',
             url: 'https://example.instructure.com/x',
             submissionStatus: canvasStatus,
+            submissionType,
             lastCheckedAt: null,
             lastStatusChangeAt: null,
           },
@@ -62,6 +65,82 @@ function assignment(patch = {}) {
     ...rest,
   };
 }
+
+
+/* ------------------------------------------------------------------ */
+/* Work Canvas can never see: paper homework                           */
+/* ------------------------------------------------------------------ */
+
+test('paper homework is never called Missing, because Canvas cannot know', () => {
+  const paper = assignment({
+    dueIn: -2 * DAY,
+    canvasStatus: 'missing',
+    submissionType: 'on_paper',
+  });
+  assert.equal(isHandInWork(paper), true);
+  // Overdue is honest — the deadline really has passed. "Missing" would be
+  // Canvas asserting nothing was handed in, which it has no way of knowing.
+  assert.equal(workStateOf(paper, NOW), 'overdue');
+});
+
+test('and it stops sitting in the worst-trouble band above genuinely missing work', () => {
+  const paper = assignment({
+    id: 'paper',
+    dueIn: -2 * DAY,
+    canvasStatus: 'missing',
+    submissionType: 'on_paper',
+  });
+  const reallyMissing = assignment({
+    id: 'online',
+    dueIn: -1 * HOUR,
+    canvasStatus: 'missing',
+    submissionType: 'online',
+  });
+  assert.deepEqual(
+    byUrgency([paper, reallyMissing], NOW).map((a) => a.id),
+    ['online', 'paper'],
+  );
+});
+
+test('an online assignment Canvas calls missing is still missing', () => {
+  const online = assignment({ dueIn: -DAY, canvasStatus: 'missing', submissionType: 'online' });
+  assert.equal(isHandInWork(online), false);
+  assert.equal(workStateOf(online, NOW), 'missing');
+});
+
+test('a page that never said how work is handed in changes nothing', () => {
+  // The dangerous default. Unknown must behave exactly as before, never as
+  // "on paper" (which would hide real missing work) and never as "online".
+  const unknown = assignment({ dueIn: -DAY, canvasStatus: 'missing' });
+  assert.equal(isHandInWork(unknown), false);
+  assert.equal(workStateOf(unknown, NOW), 'missing');
+});
+
+test('paper homework the student finished is done, and is not contested', () => {
+  const paper = assignment({
+    dueIn: -DAY,
+    canvasStatus: 'missing',
+    submissionType: 'on_paper',
+    status: 'Completed',
+    completedAt: new Date(NOW).toISOString(),
+  });
+  assert.equal(workStateOf(paper, NOW), 'done');
+  assert.equal(isContested(paper), false);
+});
+
+test('but online work marked done that Canvas says never arrived is contested', () => {
+  const online = assignment({
+    dueIn: -DAY,
+    canvasStatus: 'missing',
+    submissionType: 'online',
+    status: 'Completed',
+    completedAt: new Date(NOW).toISOString(),
+  });
+  // Still settled — a lagging gradebook does not un-complete work — but named.
+  assert.equal(workStateOf(online, NOW), 'done');
+  assert.equal(isSettled(workStateOf(online, NOW)), true);
+  assert.equal(isContested(online), true);
+});
 
 /* ------------------------------------------------------------------ */
 /* The distinctions the old list could not make                        */

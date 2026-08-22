@@ -51,6 +51,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 32 | **After school, and only after school** — blocking runs automatically through homework hours with no Focus session, and no-school dates stop the pause swallowing a day at home | **Done** |
 | 33 | **Finishing unlocks, and the parent suite runs again** — the promise on the block page made true, and the Phase 17 import that killed `test:parent-e2e` removed | **Done** |
 | 34 | **Reading what was turned in** — automatic checks read each class's Assignments page beside its gradebook, and pill-free row wording is understood | **Done** |
+| 35 | **Paper homework, and the grade that arrives later** — Canvas' submission type is read, so on-paper work stops being called missing, and a later grade confirms what the student already said | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -414,6 +415,63 @@ Since Phase 18 there is a third, and it is a safety rule:
 `web/src/lib/canvas/checkWindow.ts` ↔ `extension/canvas/checkWindow.js` ↔
 `autoFetchAllowed()` in `scripts/canvas-feed.mjs`. All three are run over the
 same matrix by `npm run test:canvas-grades`.
+
+---
+
+## Phase 35 — Paper homework, and the grade that arrives later (done)
+
+Phase 34 made LockIn read the page that says whether work was handed in. This
+phase is about the work that page can never answer for.
+
+**The problem.** Canvas assignments have a submission type. Some are handed in
+online; some are handed to the teacher **on paper**; some expect no submission
+at all. For the last two there is nothing to submit on Canvas, so no Submitted
+pill will ever appear — and Canvas marks them **Missing** until a grade is
+entered. LockIn repeated that as fact, which put finished paper homework in the
+worst-trouble band, at the top of the list, for days. Absence of evidence was
+being read as evidence of absence.
+
+**Canvas' own word for it is now read.** `parseSubmissionType()` takes the
+submission type off the assignment page — the machine value where the markup
+has one, otherwise the student-facing wording ("Submitting: on paper", "no
+submission", "a file upload"). It reads the container's text *and* each child's,
+because Canvas renders this as a label/value pair of siblings and the
+concatenation ("Submittingon paper") defeats a word-boundary match. Undefined —
+"the page did not say" — is a first-class answer and must never drift into
+`online`; a test pins exactly that. The value is sticky on the assignment, so a
+later list page that never mentions it cannot erase it.
+
+**What changes for hand-in work.** `isHandInWork()` gates three things:
+`workStateOf` no longer returns `missing` (the work is honestly overdue if it is
+overdue, and nothing worse); the reducer records no missing event and raises no
+flag; and an imported one no longer arrives pre-set to Urgent. The badge says
+*Handed in on paper — Canvas has nothing to show until your teacher grades it.*
+
+**The grade that arrives later.** When Canvas finally shows a grade for work the
+student had already ticked off, the completion itself is left untouched — their
+word came first and keeps its timestamp — and what changes is the evidence
+behind it: `verificationMethod` becomes `canvas`, a `canvas_submission` record
+is appended, and `canvas_grade_confirmed` is logged. Replaying the same
+detection adds nothing (`statusChanged` guards it).
+
+**The disagreement, when there is one.** Online work the student marked done
+that Canvas says never arrived is *contested*: `verificationStatus` goes to
+`pending`, `canvas_completion_contested` is logged, and the Accuracy review
+block on Assignments names it. It is deliberately **not** un-completed — a
+gradebook that lags a day must not be able to re-block a browser on its own —
+and `isContested()` is deliberately not a `WorkState` for the same reason.
+
+**One pre-existing bug fixed in passing.** `coerceCanvasLink()` in `storage.ts`
+never rebuilt the Phase 18 score fields, so `score`, `scoreText` and
+`pointsPossible` were silently dropped on every reload — the exact failure the
+comment two functions above warns about. They are rebuilt now, along with the
+new submission type.
+
+Verified with `npm test` (20 suites), `test:worklist` (25), `test:canvas-grades`
+(53), `test:parser` (59, real DOM, with on-paper / no-submission / online
+fixtures), `test:canvas-e2e` (69), a production build, and by seeding one paper
+and one online assignment into the running app: the online one reads *Missing*
+and sorts first, the paper one reads *Overdue* with the hand-in note.
 
 ---
 

@@ -134,6 +134,59 @@ function assignmentPage({ courseId, courseName, assignmentId, title, dueIso, sta
   });
 }
 
+/*
+ * A paper assignment: handed to the teacher in class, so Canvas has no
+ * submission to show and marks it missing until it is graded. The student
+ * overview names the type in words, which is the only place it appears.
+ */
+const onPaper = canvasShell({
+  title: 'Vocabulary Packet',
+  breadcrumbCourse: crumb(MATH.id, MATH.name),
+  body: `
+  <div id="assignment_show">
+    <h1 class="title" data-testid="assignment-name">Vocabulary Packet</h1>
+    <div class="assignment-date-due">Due <time datetime="${'2026-08-14T23:59:00.000Z'}">Aug 14</time></div>
+    <div class="student-assignment-overview">
+      <div class="title">Points</div><div class="content">10</div>
+      <div class="title">Submitting</div><div class="content">on paper</div>
+    </div>
+    <div class="submission-details" data-testid="submission-status">
+      <h2>Submission</h2>
+      <p>Missing</p>
+    </div>
+  </div>`,
+});
+
+/* An assignment with no submission expected at all. */
+const noSubmissionExpected = canvasShell({
+  title: 'Class Participation',
+  breadcrumbCourse: crumb(MATH.id, MATH.name),
+  body: `
+  <div id="assignment_show">
+    <h1 class="title" data-testid="assignment-name">Class Participation</h1>
+    <div class="student-assignment-overview">
+      <div class="title">Submitting</div><div class="content">no submission</div>
+    </div>
+  </div>`,
+});
+
+/* An ordinary online assignment, for the contrast that matters. */
+const onlineSubmission = canvasShell({
+  title: 'Essay Draft',
+  breadcrumbCourse: crumb(ENGLISH.id, ENGLISH.name),
+  body: `
+  <div id="assignment_show">
+    <h1 class="title" data-testid="assignment-name">Essay Draft</h1>
+    <div class="student-assignment-overview">
+      <div class="title">Submitting</div><div class="content">a file upload</div>
+    </div>
+    <div class="submission-details" data-testid="submission-status">
+      <h2>Submission</h2>
+      <p>Not Submitted</p>
+    </div>
+  </div>`,
+});
+
 /* 3. Not submitted */
 const notSubmitted = assignmentPage({
   courseId: MATH.id,
@@ -517,6 +570,9 @@ export const CANVAS_FIXTURES = {
   '/grades': allGrades,
   '/grades-modern': allGradesModern,
   '/courses/303/assignments': assignmentsIndexClassic,
+  [`/courses/${MATH.id}/assignments/5006`]: onPaper,
+  [`/courses/${MATH.id}/assignments/5007`]: noSubmissionExpected,
+  [`/courses/${ENGLISH.id}/assignments/6003`]: onlineSubmission,
   '/courses/777/assignments': customDomain,
   '/news': notCanvas,
 };

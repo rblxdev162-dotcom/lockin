@@ -104,6 +104,16 @@ export function isBlockingActive(state, now = Date.now()) {
   if (isDuringSchoolHours(state.schoolHours, now, state.noSchoolDates)) return false;
   // A session the student started themselves.
   if (state.focusModeActive) return true;
+  /**
+   * Work finished today stands the automatic half down.
+   *
+   * The block page promises "finish your required work to unlock
+   * distractions". Automatic blocking made that false — work finished, Focus
+   * Mode ended, sites stayed blocked. A promise broken on the one screen a
+   * student reads while annoyed with the app costs more than the afternoon is
+   * worth.
+   */
+  if (state.autoBlockEarnedUntil && state.autoBlockEarnedUntil > now) return false;
   // Homework hours, running on their own.
   return isHomeworkTime(state.homeworkWindow, now, state.noSchoolDates);
 }

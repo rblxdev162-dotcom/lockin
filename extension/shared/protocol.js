@@ -162,6 +162,7 @@ export function validateBridgeState(value) {
     noSchoolDates: Array.isArray(value.noSchoolDates)
       ? value.noSchoolDates.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 180)
       : [],
+    autoBlockEarnedUntil: finiteOrNull(value.autoBlockEarnedUntil),
   };
 }
 
@@ -228,5 +229,6 @@ export function emptyBridgeState() {
     schoolHours: null,
     homeworkWindow: null,
     noSchoolDates: [],
+    autoBlockEarnedUntil: null,
   };
 }

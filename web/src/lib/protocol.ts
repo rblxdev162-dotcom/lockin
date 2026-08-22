@@ -156,6 +156,11 @@ export interface BridgeState {
   } | null;
   /** `YYYY-MM-DD` dates that are not school days, however the calendar reads. */
   noSchoolDates: string[];
+  /**
+   * Epoch ms until which automatic blocking stands down because the student
+   * finished their work today, or `null`. A Focus session still blocks.
+   */
+  autoBlockEarnedUntil: number | null;
 }
 
 export interface Envelope<P = unknown> {
@@ -208,6 +213,9 @@ export function validateBridgeState(value: unknown): BridgeState | null {
           .filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
           .slice(0, 180)
       : [],
+    autoBlockEarnedUntil: Number.isFinite(s.autoBlockEarnedUntil)
+      ? Number(s.autoBlockEarnedUntil)
+      : null,
   };
 }
 

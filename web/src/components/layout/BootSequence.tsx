@@ -7,15 +7,29 @@ const PHASES = [
   'Preparing your focus space',
 ] as const;
 
+/**
+ * Shown once per page load, tracked in module scope rather than
+ * `sessionStorage`.
+ *
+ * LockIn writes exactly one key to browser storage — the state itself — and
+ * `parent-e2e` pins that as a privacy invariant, checking that nothing else
+ * accumulates anywhere a page can read. A cosmetic "already played" flag is
+ * not worth being the exception that makes the invariant untrue, and it is not
+ * worth a reader of that test having to decide whether this one is harmless.
+ *
+ * The only behavioural difference: reloading the tab plays the animation
+ * again, where the old flag suppressed it. That is the more honest reading of
+ * "first load" anyway — a reload *is* a first load.
+ */
+let bootPlayed = false;
+
 export function BootSequence() {
-  const [visible, setVisible] = useState(() => {
-    try { return sessionStorage.getItem('lockin.boot-shown') !== '1'; } catch { return true; }
-  });
+  const [visible, setVisible] = useState(() => !bootPlayed);
   const [phase, setPhase] = useState(0);
 
   useEffect(() => {
     if (!visible) return;
-    try { sessionStorage.setItem('lockin.boot-shown', '1'); } catch { /* presentation-only */ }
+    bootPlayed = true;
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduced) {
       const end = window.setTimeout(() => setVisible(false), 500);

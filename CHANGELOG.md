@@ -5,6 +5,12 @@ User-visible changes only. Internal architecture and phase history live in
 
 ## 1.5.0
 
+### Finishing your work unlocks your evening
+
+The block page says "finish your required work to unlock distractions", and now
+that is true: complete what you set out to do and blocking stands down for the
+rest of the day. Starting a new Focus session still blocks, if you want it to.
+
 ### After school, and only after school
 
 Blocking now follows your school day by itself. Nothing is blocked in class,

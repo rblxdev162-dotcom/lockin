@@ -95,6 +95,32 @@ export function blockingHomeworkWindow(state: AppState): HomeworkWindow | null {
 }
 
 /**
+ * When automatic blocking stands down because the student finished what they
+ * set out to do — epoch ms at the end of that local day, or `null`.
+ *
+ * The block page promises *"finish your required work to unlock distractions"*.
+ * Automatic homework-hours blocking made that promise false: work was
+ * finished, Focus Mode ended, and the sites stayed blocked anyway. A promise
+ * the app breaks on the one screen a student reads while annoyed with it costs
+ * more than an afternoon of blocking is worth, so finishing a run genuinely
+ * ends automatic blocking for that day.
+ *
+ * A deliberately started Focus session still blocks afterwards — this only
+ * stands down the automatic half. Only a run the student actually *completed*
+ * counts: one they abandoned, overrode or exited early does not.
+ */
+export function autoBlockEarnedUntil(state: AppState, now = Date.now()): number | null {
+  const today = todayISO(new Date(now));
+  const earned = state.focusRuns.some(
+    (run) => run.outcome === 'completed' && run.endedAt && run.endedAt.slice(0, 10) === today,
+  );
+  if (!earned) return null;
+  const end = new Date(now);
+  end.setHours(24, 0, 0, 0);
+  return end.getTime();
+}
+
+/**
  * True while blocking should actually be applied right now.
  *
  * **LockIn blocks after school, and only after school.** The school day is
@@ -117,6 +143,9 @@ export function blockingActive(state: AppState, now = Date.now()): boolean {
   const dates = state.settings.schoolSchedule.noSchoolDates;
   if (isDuringSchoolHours(blockingSchoolHours(state), now, dates)) return false;
   if (fm.active) return true;
+  // Work finished today: the automatic half stands down, as promised.
+  const earned = autoBlockEarnedUntil(state, now);
+  if (earned !== null && now < earned) return false;
   return isHomeworkTime(blockingHomeworkWindow(state), now, dates);
 }
 
@@ -154,6 +183,7 @@ export function toBridgeState(state: AppState): BridgeState {
     schoolHours: blockingSchoolHours(state),
     homeworkWindow: blockingHomeworkWindow(state),
     noSchoolDates: state.settings.schoolSchedule.noSchoolDates,
+    autoBlockEarnedUntil: autoBlockEarnedUntil(state),
   };
 }
 

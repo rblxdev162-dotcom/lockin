@@ -457,3 +457,25 @@ test('a valid homework window and no-school dates survive the wire', () => {
 test('blocking disabled in settings still beats every window', () => {
   assert.equal(isBlockingActive(autoState({ blockingEnabled: false }), at(3, '16:00')), false);
 });
+
+test('finishing the work really does unlock, as the block page promises', () => {
+  const evening = at(3, '17:00');
+  const state = autoState({ autoBlockEarnedUntil: at(3, '24:00') });
+  assert.equal(isBlockingActive(state, evening), false, 'work finished today');
+  // Tomorrow afternoon it is back, because the stand-down was for one day.
+  assert.equal(isBlockingActive(autoState(), at(4, '17:00')), true);
+});
+
+test('a finished day does not unlock a session the student chose to start', () => {
+  const state = autoState({ autoBlockEarnedUntil: at(3, '24:00'), focusModeActive: true });
+  assert.equal(isBlockingActive(state, at(3, '17:00')), true);
+});
+
+test('the stand-down lasts one day, not indefinitely', () => {
+  const state = autoState({ autoBlockEarnedUntil: at(3, '24:00') });
+  // Half past midnight is outside homework hours anyway — they end at midnight
+  // and the next ones start after tomorrow's last bell.
+  assert.equal(isBlockingActive(state, at(4, '00:30')), false);
+  // The stand-down has expired, so the next afternoon blocks normally.
+  assert.equal(isBlockingActive(state, at(4, '17:00')), true);
+});

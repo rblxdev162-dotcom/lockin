@@ -49,6 +49,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 30 | **Fifteen-minute after-school cadence** — all automatic transports and owned-tab reads use 15 minutes after the student's chosen start time | **Done** |
 | 31 | **Blocking stops at the school bell** — website blocking suspends itself during the configured school day, in both mirrors | **Done** |
 | 32 | **After school, and only after school** — blocking runs automatically through homework hours with no Focus session, and no-school dates stop the pause swallowing a day at home | **Done** |
+| 33 | **Finishing unlocks, and the parent suite runs again** — the promise on the block page made true, and the Phase 17 import that killed `test:parent-e2e` removed | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -79,7 +80,7 @@ dev server on `:5173`:
 | Canvas parser + Grades pages (real DOM) | 40 | `npm run test:parser` |
 | Phase 2 blocking e2e | 26 | `npm run test:e2e` |
 | Canvas e2e | 69 | `npm run test:canvas-e2e` |
-| Parent Dashboard e2e (PIN, controls, enforcement) | **BROKEN** | `npm run test:parent-e2e` |
+| Parent Dashboard e2e (PIN, controls, enforcement) | 60 | `npm run test:parent-e2e` |
 | Planner e2e (plan → start → partial → recalculate) | 54 | `npm run test:planner-e2e` |
 | **Release e2e** (production build + packaged zip) | 22 | `npm run test:release-e2e` |
 | **Accessibility e2e** (names, focus, keyboard, 320–768px, 200% zoom) | 40 | `npm run test:a11y-e2e` |
@@ -412,6 +413,42 @@ Since Phase 18 there is a third, and it is a safety rule:
 `web/src/lib/canvas/checkWindow.ts` ↔ `extension/canvas/checkWindow.js` ↔
 `autoFetchAllowed()` in `scripts/canvas-feed.mjs`. All three are run over the
 same matrix by `npm run test:canvas-grades`.
+
+---
+
+## Phase 33 — Finishing unlocks, and the parent suite runs again (done)
+
+Two defects, both found by rescuing the Parent Dashboard e2e suite.
+
+**The suite itself.** It had been marked BROKEN since Phase 17 for a duller
+reason than anyone assumed: it imported `edgenuity-fixtures.mjs`, deleted when
+Edgenuity was scrapped, so it failed at module resolution and never ran a
+single check. A rewrite was sitting uncommitted in an abandoned
+`.claude/worktrees` checkout from three days earlier. It drops the dead import
+and covers considerably more than the original: no-PIN refusal, five-attempt
+lockout, re-locking on reload, parent controls changing what the *reducer*
+enforces rather than what a settings page displays, and blocked attempts
+staying per-domain counts. Sixty checks.
+
+**Finishing your work now actually unlocks.** The block page promises *"finish
+your required work to unlock distractions."* Phase 32's automatic blocking made
+that false: the student finished, Focus Mode ended, and the sites stayed
+blocked until midnight anyway. `autoBlockEarnedUntil()` stands the automatic
+half down for the rest of the local day once a run ends with outcome
+`completed` — abandoned, overridden and early-exit runs do not count, and a
+Focus session the student starts afterwards still blocks. The suite caught
+this on the assertion that names the promise directly.
+
+**The boot screen stopped writing to browser storage.** Phase 26's "Locking In"
+animation kept a `lockin.boot-shown` flag in `sessionStorage`. LockIn writes
+exactly one key to browser storage — the state — and this suite pins that as a
+privacy invariant. A cosmetic flag is not worth being the exception that makes
+the invariant untrue, so it moved to module scope. A reload now replays the
+animation, which is the more honest reading of "first load".
+
+Verified with the full 60-check parent suite (green for the first time since
+Phase 17), 46 blocking checks, the complete `npm test` chain (20 suites),
+`test:release`, and a production build.
 
 ---
 

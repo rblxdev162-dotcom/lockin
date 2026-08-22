@@ -180,17 +180,47 @@ All three are generated from `lockin.config.json` by
 `scripts/gen-extension-config.mjs`, and are committed with development values
 so "Load unpacked" works straight from the repo.
 
+The production origin is the published site,
+`https://rblxdev162-dotcom.github.io`, committed in `lockin.config.json`.
+
 ```bash
 npm run config:extension     # regenerate for development
 
-# a production package, for an origin that exists
+# a production package, using the committed production origin
+LOCKIN_ENV=production npm run package:extension
+
+# or an extra origin — a staging build, or a custom domain
 LOCKIN_ENV=production LOCKIN_APP_ORIGIN=https://lockin.example.com \
   npm run package:extension
 ```
 
-A production build **refuses** to run without `LOCKIN_APP_ORIGIN` rather than
-quietly shipping localhost, and refuses a plain-`http` non-loopback origin,
-because the camera needs a secure context.
+A production build **refuses** to run with no origin configured at all rather
+than quietly shipping localhost, and refuses a plain-`http` non-loopback
+origin, because a secure context is required. `npm run test:release` pins that
+every production origin is `https` and none is loopback.
+
+---
+
+## Publishing the site
+
+```bash
+npm run build        # web/dist
+npm run deploy:site  # copy web/dist into the public Pages repo and push
+```
+
+The site is served from the **root** of a GitHub user site, so there is no base
+path and no router basename: `/home` live is `/home` in development, which is
+what lets one `appPath` describe both. `scripts/deploy-site.mjs` replaces the
+published tree wholesale (a deleted file must disappear from the site), writes
+`.nojekyll`, and copies `index.html` to `404.html` so a reload on `/assignments`
+still reaches the router.
+
+Only the built site is published. This repository is not.
+
+To move to a custom domain later: buy it, add a `CNAME` file to the Pages repo
+(or set the domain in its Pages settings), point DNS at GitHub, then add the new
+origin to `lockin.config.json` and repackage the extension so its bridge still
+recognises the site.
 
 ---
 
@@ -210,8 +240,8 @@ every file the manifest references actually present.
 `RELEASE_CHECKLIST.md` is the full pre-ship list. `MANUAL_QA.md` is the human
 test.
 
-Phase 8 prepares a release; it does not publish one. Nothing here uploads to
-the Chrome Web Store.
+`npm run deploy:site` publishes the website. Nothing here uploads to the Chrome
+Web Store — that needs a paid developer account and a review.
 
 ---
 

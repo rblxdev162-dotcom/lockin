@@ -182,19 +182,33 @@ test('the bridge takes its origin list from build config, never from a literal',
   );
 });
 
-test('a production build refuses to run without an origin, and refuses an insecure one', () => {
-  assert.throws(
-    () => resolveConfig({ LOCKIN_ENV: 'production' }),
-    /LOCKIN_APP_ORIGIN/,
-    'a production package with no origin must fail loudly, not ship localhost',
-  );
+test('a production build carries a real, secure origin — never localhost', () => {
+  /**
+   * This used to assert that a production build with no `LOCKIN_APP_ORIGIN`
+   * *threw*, because no production origin existed and a committed default
+   * would have been a dead address. One exists now — the published site — so
+   * the origin is committed, and what is worth pinning is the property the
+   * throw was protecting: production never ships a localhost or insecure
+   * origin. `resolveConfig` still throws when nothing is configured at all.
+   */
+  const shipped = resolveConfig({ LOCKIN_ENV: 'production' });
+  assert.ok(shipped.origins.length > 0, 'production must name an origin');
+  for (const origin of shipped.origins) {
+    assert.ok(origin.startsWith('https://'), `${origin} must be https`);
+    assert.ok(!origin.includes('localhost'), 'production must not carry localhost');
+    assert.ok(!origin.includes('127.0.0.1'), 'production must not carry loopback');
+    assert.equal(validateOrigin(origin), null, `${origin} must be a valid bare origin`);
+  }
+  assert.ok(shipped.appUrl.startsWith('https://'), 'the app URL must be https');
 
   const good = resolveConfig({
     LOCKIN_ENV: 'production',
     LOCKIN_APP_ORIGIN: 'https://lockin.example.com',
   });
-  assert.deepEqual(good.origins, ['https://lockin.example.com']);
-  assert.equal(good.appUrl, 'https://lockin.example.com/home');
+  // An origin supplied at build time is added to the committed one, so a
+  // staging or custom domain can be packaged without editing the repo.
+  assert.ok(good.origins.includes('https://lockin.example.com'));
+  assert.equal(good.appUrl, `${good.origins[0]}/home`);
   assert.ok(!good.origins.some((o) => o.includes('localhost')), 'production must not carry localhost');
 
   // The camera needs a secure context, so plain http off-loopback is refused.

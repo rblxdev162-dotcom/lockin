@@ -41,6 +41,10 @@ npm run test:all      # everything, ~10 minutes, needs the dev server on :5173
 - [ ] Accessible: `npm run test:a11y-e2e` passes, and someone has actually
       driven the app with a keyboard (see `MANUAL_QA.md`).
 
+- [ ] `npm run deploy:site` publishes the build, and the live site loads at
+      https://rblxdev162-dotcom.github.io/ — including a hard reload on a deep
+      path such as `/privacy`, which relies on the `404.html` fallback.
+
 ## Extension
 
 - [ ] `extension/manifest.json` requests only permissions that are used.

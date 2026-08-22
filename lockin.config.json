@@ -1,11 +1,16 @@
 {
-  "//": "Where the LockIn web app lives, per build environment. The extension is generated from this file by scripts/gen-extension-config.mjs (run automatically by build:extension). Production has no origin baked in because no production origin exists yet — supply one with LOCKIN_APP_ORIGIN, e.g. LOCKIN_ENV=production LOCKIN_APP_ORIGIN=https://lockin.example.com npm run package:extension",
+  "//": "Where the LockIn web app lives, per build environment. The extension is generated from this file by scripts/gen-extension-config.mjs (run automatically by build:extension). Production is the published GitHub Pages site, which serves from the root of the origin so appPath matches development exactly.",
   "development": {
-    "origins": ["http://localhost:5173", "http://127.0.0.1:5173"],
+    "origins": [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ],
     "appPath": "/home"
   },
   "production": {
-    "origins": [],
+    "origins": [
+      "https://rblxdev162-dotcom.github.io"
+    ],
     "appPath": "/home"
   }
 }

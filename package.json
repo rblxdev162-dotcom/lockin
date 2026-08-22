@@ -14,6 +14,8 @@
     "build:extension": "node scripts/build-extension.mjs",
     "package:extension": "node scripts/build-extension.mjs --zip",
     "build:release": "npm run build && npm run package:extension",
+    "//deploy": "Publishes web/dist to the public GitHub Pages repo. Source stays private.",
+    "deploy:site": "node scripts/deploy-site.mjs",
     "test": "npm run test:logic && npm run test:reminders && npm run test:bridge && npm run test:canvas-logic && npm run test:parent-selectors && npm run test:parent-state && npm run test:planner-logic && npm run test:planner-state && npm run test:storage && npm run test:security && npm run test:time && npm run test:release && npm run test:perf && npm run test:phase9 && npm run test:pace && npm run test:canvas-ics && npm run test:worklist && npm run test:companion && npm run test:phase16 && npm run test:canvas-grades",
     "test:logic": "node --test extension/tests/blocking.test.mjs",
     "test:reminders": "node --test extension/tests/reminders.test.mjs",

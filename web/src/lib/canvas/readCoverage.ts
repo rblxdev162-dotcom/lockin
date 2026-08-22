@@ -5,6 +5,8 @@ export interface CanvasReadSignal {
   reason?: string;
   pageKind?: string;
   readGrades?: boolean;
+  /** A page carrying per-assignment submission states was read. */
+  readSubmissions?: boolean;
   gradebookAnswered?: boolean;
   readableTabs?: number;
   rowsSeen?: number;
@@ -45,6 +47,26 @@ export function assessCanvasRead(signal: CanvasReadSignal | null | undefined): C
       label: 'Layout not read',
       detail:
         'Canvas answered, but LockIn could not reliably read the rendered gradebook. Existing data was not treated as a fresh result.',
+    };
+  }
+
+  /**
+   * The class Assignments page.
+   *
+   * It carries no scores, so it is not a gradebook read — but it does carry
+   * the Submitted / Missing / Late state of every assignment, which is the
+   * question blocking actually depends on. Naming it separately keeps the
+   * receipt honest about what was and was not read.
+   */
+  if (signal.pageKind === 'assignments_index' && signal.readSubmissions) {
+    const rowsRead = Math.max(0, signal.rowsRead ?? 0);
+    return {
+      coverage: 'submissions',
+      label: 'Turned-in states read',
+      detail:
+        rowsRead > 0
+          ? `${rowsRead} assignment row${rowsRead === 1 ? '' : 's'} on the class Assignments page said whether it was submitted, missing or late.`
+          : 'The class Assignments page was read; it carries submission states, not scores.',
     };
   }
 
@@ -104,6 +126,15 @@ export function describeStoredCoverage(
           rowsRead > 0
             ? `${rowsRead} assignment row${rowsRead === 1 ? '' : 's'} produced trustworthy structured data.`
             : 'The rendered class gradebook produced trustworthy structured data.',
+      };
+    case 'submissions':
+      return {
+        coverage,
+        label: 'Turned-in states read',
+        detail:
+          rowsRead > 0
+            ? `${rowsRead} assignment row${rowsRead === 1 ? '' : 's'} on the class Assignments page said whether it was submitted, missing or late.`
+            : 'The class Assignments page carries submission states, not scores.',
       };
     case 'totals_only':
       return {

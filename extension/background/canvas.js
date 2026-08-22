@@ -505,11 +505,18 @@ function pathOf(url) {
   }
 }
 
-/** How useful a Canvas URL is to read: a gradebook outranks anything else. */
+/**
+ * How useful a Canvas URL is to read.
+ *
+ * A gradebook outranks everything because it carries scores *and* statuses.
+ * A class Assignments index comes next: no scores, but a Submitted / Missing /
+ * Late state on every row, which is the one question blocking depends on.
+ */
 function gradesRank(url) {
   if (typeof url !== 'string') return 0;
-  if (/\/courses\/\d+\/grades/.test(url)) return 2;
-  if (/\/grades\/?$/.test(url)) return 2;
+  if (/\/courses\/\d+\/grades/.test(url)) return 3;
+  if (/\/grades\/?$/.test(url)) return 3;
+  if (/\/courses\/\d+\/assignments\/?(?:[?#]|$)/.test(url)) return 2;
   return 1;
 }
 
@@ -518,7 +525,7 @@ async function gradesTabOpen(domain) {
   if (!domain) return false;
   try {
     const tabs = await chrome.tabs.query({ url: `https://${domain}/*` });
-    return tabs.some((tab) => gradesRank(tab.url) === 2);
+    return tabs.some((tab) => gradesRank(tab.url) === 3);
   } catch {
     return false;
   }
@@ -683,12 +690,28 @@ export async function syncCanvasNow(options = {}) {
   if (reached === 0) {
     return { ok: false, reason: 'tab-not-ready', domain: config.domain };
   }
+  /**
+   * Pages that can answer "was this handed in?".
+   *
+   * The class Assignments index belongs here beside the gradebook: it is the
+   * page that shows a Submitted / Missing / Late pill on every row. Leaving it
+   * out is why a student sitting on exactly the right page was told they had
+   * read something with no scores on it.
+   */
+  const SUBMISSION_KINDS = ['grades', 'assignments_index'];
   const pageKind =
-    kinds.find((kind) => kind === 'grades' || kind === 'grades_all') ?? kinds[0] ?? 'unknown';
+    kinds.find((kind) => kind === 'grades') ??
+    kinds.find((kind) => kind === 'assignments_index' || kind === 'grades_all') ??
+    kinds[0] ??
+    'unknown';
   const gradebookReplies = replies.filter(
-    (reply) => reply.pageKind === 'grades' || reply.pageKind === 'grades_all',
+    (reply) =>
+      SUBMISSION_KINDS.includes(reply.pageKind) || reply.pageKind === 'grades_all',
   );
   const readableGradebook = gradebookReplies.find((reply) => reply.readable);
+  const readableSubmissionIndex = replies.find(
+    (reply) => reply.readable && reply.pageKind === 'assignments_index',
+  );
   const selectedDiagnostics =
     readableGradebook?.diagnostics ?? gradebookReplies[0]?.diagnostics ?? replies[0]?.diagnostics;
   const diagnosticCount = (key) => {
@@ -745,6 +768,8 @@ export async function syncCanvasNow(options = {}) {
     // True when they were on a page that actually carries scores, so the UI can
     // nudge them to Grades instead of silently finding little.
     readGrades: !!readableGradebook,
+    /** True when a page carrying per-assignment submission states was read. */
+    readSubmissions: !!readableSubmissionIndex,
     gradebookAnswered: gradebookReplies.length > 0,
     readableTabs,
     unreadableTabs,
@@ -805,6 +830,27 @@ async function setAutoReadState(state) {
 
 function gradebookPath(courseId) {
   return `/courses/${courseId}/grades`;
+}
+
+/**
+ * The class Assignments page.
+ *
+ * The gradebook carries scores; it is the *Assignments* index that carries a
+ * Submitted / Missing / Late state on every row, including for work that has
+ * been handed in but not marked. Reading only the gradebook is why finished
+ * work could sit in LockIn as not done: there was simply nothing on the page
+ * that said it had been turned in.
+ */
+function assignmentsPath(courseId) {
+  return `/courses/${courseId}/assignments`;
+}
+
+/** The two pages one automatic tick reads for a class, in order of value. */
+function autoReadTargets(courseId) {
+  return [
+    { kind: 'grades', path: gradebookPath(courseId) },
+    { kind: 'assignments_index', path: assignmentsPath(courseId) },
+  ];
 }
 
 function isOwnedGradebookUrl(url, domain, path) {
@@ -898,16 +944,82 @@ export async function closeOwnedCanvasReadTab(now = Date.now(), { force = false 
   }
 }
 
+/**
+ * Open (or reuse) one Canvas page, ask it to parse, and clean up after itself.
+ *
+ * Returns what the read proved rather than throwing: the caller decides what a
+ * failure means. A tab LockIn did not create is never closed, and a tab the
+ * student activates mid-read is treated as adopted and left alone.
+ */
+async function readOneCanvasPage(config, target) {
+  const url = `https://${config.domain}${target.path}`;
+  let tab = null;
+  let opened = false;
+  try {
+    const existing = await chrome.tabs.query({ url: `https://${config.domain}/*` });
+    tab = existing.find(
+      (candidate) =>
+        candidate.id !== undefined &&
+        isOwnedGradebookUrl(candidate.url, config.domain, target.path),
+    );
+    if (!tab) {
+      tab = await chrome.tabs.create({ url, active: false });
+      opened = true;
+      await chrome.storage.local.set({
+        [AUTO_READ_TAB_KEY]: {
+          id: tab.id,
+          domain: config.domain,
+          path: target.path,
+          openedAt: Date.now(),
+        },
+      });
+    }
+  } catch {
+    return { ok: false, reason: 'open-failed', opened: false, reused: false, closed: false };
+  }
+
+  if (tab?.id === undefined) {
+    return { ok: false, reason: 'open-failed', opened, reused: !opened, closed: false };
+  }
+  if (opened && !(await waitForTabReady(tab.id))) {
+    await closeOwnedCanvasReadTab(Date.now(), { force: true });
+    return { ok: false, reason: 'tab-not-ready', opened, reused: false, closed: true };
+  }
+
+  const reply = await reparseAutomaticTab(tab.id);
+  // The content script sends the detection separately from its quick reply.
+  if (reply) await new Promise((resolve) => setTimeout(resolve, 900));
+
+  const pageKind = typeof reply?.pageKind === 'string' ? reply.pageKind : undefined;
+  const ok = reply?.ok !== false && pageKind === target.kind;
+  const close = opened ? await closeOwnedCanvasReadTab(Date.now(), { force: true }) : null;
+  return {
+    ok,
+    reason: ok ? undefined : reply ? 'not-expected-page' : 'tab-not-ready',
+    reply: reply ?? null,
+    pageKind,
+    opened,
+    reused: !opened,
+    closed: close?.closed === true,
+  };
+}
+
 let autoReadInFlight = null;
 
 /**
- * Read one class gradebook without taking over the student's browser.
+ * Read one class — both of its pages — without taking over the browser.
  *
  * The web app supplies the bounded set of classes that still have live work.
  * The roster is retained as numeric ids only so the fifteen-minute extension
  * alarm can continue while LockIn is closed. Each tick chooses the least
  * recently read class; this prevents six classes becoming six simultaneous
- * tabs. Existing gradebook tabs are reused and never closed.
+ * tabs. Existing tabs are reused and never closed.
+ *
+ * A tick reads that class's gradebook *and* its Assignments page, in that
+ * order and one at a time. The gradebook alone was the original design and it
+ * could not answer the question the student actually asks: scores live there,
+ * but "Submitted / Missing / Late" per assignment lives on the Assignments
+ * index — so finished work stayed listed as not done.
  */
 export function autoReadCanvasCourses(rawCourseIds, options = {}) {
   if (autoReadInFlight) return autoReadInFlight;
@@ -942,54 +1054,53 @@ export function autoReadCanvasCourses(rawCourseIds, options = {}) {
     const courseId = [...courses].sort(
       (a, b) => Number(lastRead[a] || 0) - Number(lastRead[b] || 0) || a.localeCompare(b),
     )[0];
-    const path = gradebookPath(courseId);
-    const url = `https://${config.domain}${path}`;
-    let tab = null;
-    let opened = false;
-    try {
-      const existing = await chrome.tabs.query({ url: `https://${config.domain}/*` });
-      tab = existing.find(
-        (candidate) => candidate.id !== undefined && isOwnedGradebookUrl(candidate.url, config.domain, path),
-      );
-      if (!tab) {
-        tab = await chrome.tabs.create({ url, active: false });
-        opened = true;
-        await chrome.storage.local.set({
-          [AUTO_READ_TAB_KEY]: {
-            id: tab.id,
-            domain: config.domain,
-            path,
-            openedAt: now,
-          },
-        });
-      }
-    } catch {
-      return { ok: false, reason: 'open-failed', courseId };
+
+    /**
+     * Both class pages, one after the other, never at the same time.
+     *
+     * Sequential is the whole point: at most one owned tab exists at any
+     * moment, each is closed before the next opens, and a class still costs
+     * one tick. `readOneCanvasPage` reuses a page the student already has open
+     * and never closes a tab LockIn did not create.
+     */
+    const reads = [];
+    for (const target of autoReadTargets(courseId)) {
+      reads.push({ ...(await readOneCanvasPage(config, target)), kind: target.kind });
     }
 
-    if (tab?.id === undefined) return { ok: false, reason: 'open-failed', courseId };
-    if (opened && !(await waitForTabReady(tab.id))) {
-      return { ok: false, reason: 'tab-not-ready', courseId, opened: true };
-    }
-
-    const reply = await reparseAutomaticTab(tab.id);
-    // The content script sends the detection separately from its quick reply.
-    if (reply) await new Promise((resolve) => setTimeout(resolve, 900));
-
-    const readGrades = reply?.ok !== false && reply?.pageKind === 'grades';
-    if (readGrades) {
+    const gradesRead = reads.find((read) => read.kind === 'grades');
+    const submissionsRead = reads.find((read) => read.kind === 'assignments_index');
+    const ok = reads.some((read) => read.ok);
+    if (ok) {
       lastRead[courseId] = now;
       await setAutoReadState({ courses, lastRead, lastAttemptAt: now });
     }
-    const close = opened ? await closeOwnedCanvasReadTab(Date.now(), { force: true }) : null;
+
     return {
-      ok: readGrades,
-      reason: readGrades ? undefined : reply ? 'not-gradebook' : 'tab-not-ready',
+      ok,
+      reason: ok
+        ? undefined
+        : reads.some((read) => read.reply)
+          ? 'not-gradebook'
+          : 'tab-not-ready',
       courseId,
-      pageKind: typeof reply?.pageKind === 'string' ? reply.pageKind : undefined,
-      opened,
-      reused: !opened,
-      closed: close?.closed === true,
+      // Kept for callers written against the gradebook-only version.
+      pageKind: gradesRead?.pageKind,
+      pageKinds: reads.map((read) => read.pageKind).filter((kind) => typeof kind === 'string'),
+      /** Whether this tick actually read each of the two class pages. */
+      readGrades: gradesRead?.ok === true,
+      readSubmissions: submissionsRead?.ok === true,
+      opened: reads.some((read) => read.opened),
+      reused: reads.some((read) => read.reused),
+      closed: reads.some((read) => read.closed),
+      reads: reads.map((read) => ({
+        kind: read.kind,
+        ok: read.ok,
+        pageKind: read.pageKind,
+        opened: read.opened,
+        reused: read.reused,
+        closed: read.closed,
+      })),
     };
   })().finally(() => {
     autoReadInFlight = null;

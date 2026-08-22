@@ -137,6 +137,8 @@ export interface CanvasCheckReport {
 
 export type CanvasReadCoverage =
   | 'gradebook'
+  /** A class Assignments page: submission states per assignment, no scores. */
+  | 'submissions'
   | 'totals_only'
   | 'limited'
   | 'unreadable'

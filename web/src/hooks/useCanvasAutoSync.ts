@@ -42,6 +42,7 @@ import { canvasProvider } from '../lib/canvas/pageProvider';
 import { applyCanvasView } from '../lib/canvas/reconcile';
 import { canvasCourseIdsNeedingRead } from '../lib/canvas/autoRead';
 import type { AppState } from '../types';
+import type { CanvasReadCoverage } from '../types/canvas';
 import type { Action } from '../store/reducer';
 import type { Dispatch } from 'react';
 
@@ -163,9 +164,12 @@ export async function runFeedSync(
   /**
    * A calendar gives dates, never submission state. When scheduled checks are
    * authorised and the companion is present, hand it only the numeric class
-   * ids that still have unfinished work. It opens at most one class gradebook in
-   * the background, parses the rendered page, then closes only its own tab.
+   * ids that still have unfinished work. It reads one class per tick — that
+   * class's gradebook for scores, then its Assignments page for the
+   * Submitted / Missing / Late state of each row — one background tab at a
+   * time, closing only tabs it created.
    */
+  let coverage: CanvasReadCoverage = 'dates_only';
   if (origin === 'automatic' && options.autoReadPages) {
     const courseIds = canvasCourseIdsNeedingRead(
       current.assignments,
@@ -175,6 +179,11 @@ export async function runFeedSync(
     if (courseIds.length > 0) {
       const view = await canvasProvider.autoRead(courseIds);
       if (view) applyCanvasView(send, view);
+      // The receipt says what this check actually read, never what it hoped to.
+      if (view?.autoRead?.readSubmissions) coverage = 'submissions';
+      else if (view?.autoRead?.readGrades || view?.autoRead?.pageKind === 'grades') {
+        coverage = 'gradebook';
+      }
     }
   }
   const updated = diff.update.filter((item) => item.changes.length > 0).length;
@@ -188,7 +197,7 @@ export async function runFeedSync(
       newAssignments: diff.create.length,
       updatedAssignments: updated,
       cancelledAssignments: diff.cancel.length,
-      coverage: 'dates_only',
+      coverage,
     },
   });
 

@@ -64,6 +64,8 @@ export interface CanvasExtensionView {
     pageKind?: string;
     pageKinds?: string[];
     readGrades?: boolean;
+    /** A page carrying per-assignment submission states was read. */
+    readSubmissions?: boolean;
     tabsInjected?: number;
     /** Which Canvas tabs the check found, and whether each answered. */
     tabsSeen?: {
@@ -95,6 +97,9 @@ export interface CanvasExtensionView {
     reason?: string;
     courseId?: string;
     pageKind?: string;
+    pageKinds?: string[];
+    readGrades?: boolean;
+    readSubmissions?: boolean;
     opened?: boolean;
     reused?: boolean;
     closed?: boolean;

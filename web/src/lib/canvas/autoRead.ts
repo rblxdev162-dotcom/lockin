@@ -1,5 +1,5 @@
 /**
- * Which Canvas class gradebooks need a rendered-page refresh.
+ * Which Canvas classes need a rendered-page refresh.
  *
  * Pure and intentionally small: this module chooses numeric course ids. The
  * extension owns every browser action and re-checks configuration, permission,
@@ -26,7 +26,9 @@ function courseIdFromCanvasUrl(url: string | undefined, expectedDomain: string |
  * Completed work is out. Feed-only work can still contribute its course id
  * from its Canvas link before the first rendered-page detection attaches that
  * id to the local assignment. The extension retains this stable active roster
- * and chooses the least recently read class once per fifteen-minute tick.
+ * and chooses the least recently read class once per fifteen-minute tick,
+ * reading that class's gradebook and its Assignments page (the one carrying
+ * submitted / missing / late per row).
  */
 export function canvasCourseIdsNeedingRead(
   assignments: Assignment[],

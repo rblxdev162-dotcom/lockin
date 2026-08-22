@@ -50,6 +50,7 @@ Tagline: *Finish what matters before distractions take over.*
 | 31 | **Blocking stops at the school bell** — website blocking suspends itself during the configured school day, in both mirrors | **Done** |
 | 32 | **After school, and only after school** — blocking runs automatically through homework hours with no Focus session, and no-school dates stop the pause swallowing a day at home | **Done** |
 | 33 | **Finishing unlocks, and the parent suite runs again** — the promise on the block page made true, and the Phase 17 import that killed `test:parent-e2e` removed | **Done** |
+| 34 | **Reading what was turned in** — automatic checks read each class's Assignments page beside its gradebook, and pill-free row wording is understood | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -413,6 +414,46 @@ Since Phase 18 there is a third, and it is a safety rule:
 `web/src/lib/canvas/checkWindow.ts` ↔ `extension/canvas/checkWindow.js` ↔
 `autoFetchAllowed()` in `scripts/canvas-feed.mjs`. All three are run over the
 same matrix by `npm run test:canvas-grades`.
+
+---
+
+## Phase 34 — Reading what was turned in (done)
+
+The detection code was never the problem; the page choice was. Automatic checks
+opened `/courses/<id>/grades` and nothing else. A gradebook carries **scores**,
+so an assignment that had been handed in but not yet marked showed nothing the
+parser could act on — and LockIn, correctly refusing to guess, left finished
+work sitting as not done. The page that answers "did I turn it in?" is the
+class **Assignments** index, `/courses/<id>/assignments`, where every row
+carries a Submitted / Missing / Late state. The parser already understood that
+page. It was simply never visited on its own.
+
+**Each tick now reads both pages of one class**, gradebook first, Assignments
+second, strictly one at a time (`readOneCanvasPage` in
+`extension/background/canvas.js`). Every existing guarantee holds: one owned
+tab at a time, each closed before the next opens, a tab the student already had
+open is reused and never closed, a tab they activate mid-read is adopted and
+left alone, and the automatic school-hours gate is still re-checked at the
+trust boundary. Class rotation is unchanged — a class costs one tick, not two.
+
+**Pill-free rows are read.** Canvas' older list markup has no status pills at
+all; the state lives in screen-reader-only wording ("This assignment was
+submitted on ..."). `rowStatusFromSentences()` reads a narrow set of status
+containers and matches only sentences that are explicitly about that row's own
+submission, so the word "submitted" in a description still yields nothing. The
+asymmetry is intact: a false negative is fine, a false positive unlocks
+distractions.
+
+**The receipt stops overstating and understating itself.** A new coverage
+value, `submissions`, names an Assignments-page read for what it is — turned-in
+states, no scores — instead of being filed as a "limited page". Automatic
+checks record what they actually read rather than always claiming `dates_only`,
+and a manual press while sitting on a class Assignments page is now a success
+rather than "read your dashboard, which carries no scores".
+
+Verified with `npm test` (20 suites), `test:canvas-grades` (47), `test:parser`
+(54, real DOM, including a fixture in the pill-free markup), `test:canvas-e2e`
+(69), `test:e2e`, `test:parent-e2e` (60) and a production build.
 
 ---
 

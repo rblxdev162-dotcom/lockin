@@ -1249,6 +1249,7 @@ function coerceCanvas(raw: unknown): CanvasState {
       : 0;
   const coverage: CanvasReadCoverage | undefined =
     reportRaw?.coverage === 'gradebook' ||
+    reportRaw?.coverage === 'submissions' ||
     reportRaw?.coverage === 'totals_only' ||
     reportRaw?.coverage === 'limited' ||
     reportRaw?.coverage === 'unreadable' ||

@@ -166,6 +166,15 @@ export function parseCanvasSubmissionState(scope) {
     return { status: combineSignals(pillSignals), source: 'pill' };
   }
 
+  // 2b. Classic list rows (the course Assignments page) state the same fact in
+  //     words rather than pills, usually inside screen-reader-only text:
+  //     "This assignment was submitted on ...". Only sentences that are
+  //     explicitly about this row's own submission are read — a vague
+  //     "submitted" anywhere else stays unreadable, because a false pass
+  //     unlocks distractions.
+  const rowStatus = rowStatusFromSentences(scope);
+  if (rowStatus) return { status: rowStatus, source: 'row-sentence' };
+
   // 3. Scoped text. Only regions that are *about* submission are read, so a
   //    stray "submitted" in an assignment description can't fake a pass.
   const statusRegion = firstMatch(scope, [
@@ -194,6 +203,68 @@ export function parseCanvasSubmissionState(scope) {
   }
 
   return { status: 'verification_unavailable', source: 'none' };
+}
+
+/* ------------------------------------------------------------------ */
+/* Row wording (course Assignments page)                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where Canvas puts a row's submission wording. Narrow on purpose: these are
+ * status containers, not descriptions, so their text is *about* the handing in.
+ */
+const ROW_STATUS_SELECTORS = [
+  '.submission-status',
+  '.submission_status',
+  '[data-testid="submission-status-pill"]',
+  '.ig-details .screenreader-only',
+  '.ig-row .screenreader-only',
+  '.ig-details__item',
+];
+
+/**
+ * One row-status sentence to one status, or null when the wording is not one
+ * this parser recognises. Order matters: "not submitted" contains "submitted".
+ */
+function statusFromRowSentence(text) {
+  if (/\b(not submitted|no submission|nothing submitted|not yet submitted)\b/i.test(text)) {
+    return 'not_submitted';
+  }
+  if (/\bthis (?:assignment|quiz) (?:was|is|has been) graded\b/i.test(text)) return 'graded';
+  const submitted =
+    /\bthis (?:assignment|quiz) was submitted\b/i.test(text) ||
+    /^(submitted|turned in|handed in)\b/i.test(text) ||
+    /\bsubmitted (?:on|at|late|for grading)\b/i.test(text);
+  if (submitted) return /\blate\b/i.test(text) ? 'late_submitted' : 'submitted';
+  if (/^missing\b/i.test(text) || /\bthis (?:assignment|quiz) is missing\b/i.test(text)) {
+    return 'missing';
+  }
+  return null;
+}
+
+/**
+ * Reads every status container in a row and keeps the strongest recognised
+ * answer. `mergeStatus` does the ranking, so a row carrying both "Late" and
+ * "Submitted on ..." lands on `late_submitted` exactly as the pills would.
+ */
+function rowStatusFromSentences(scope) {
+  if (typeof scope.querySelectorAll !== 'function') return null;
+  let best = 'unknown';
+  for (const selector of ROW_STATUS_SELECTORS) {
+    let nodes;
+    try {
+      nodes = scope.querySelectorAll(selector);
+    } catch {
+      continue;
+    }
+    for (const node of nodes) {
+      const text = clean(node.textContent, 200);
+      if (!text) continue;
+      const status = statusFromRowSentence(text);
+      if (status) best = mergeStatus(best, status);
+    }
+  }
+  return best === 'unknown' ? null : best;
 }
 
 function mapExplicitState(raw) {
@@ -395,6 +466,30 @@ export function parseCanvasAssignmentPage(doc, baseUrl) {
 /* Courses                                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Privacy-safe counts for a list page, in the same shape the gradebook
+ * reports: how many assignment rows were on the page, and how many produced a
+ * submission state definite enough to act on. Counts only — never page text.
+ */
+function listPageDiagnostics(doc, assignments) {
+  let rowsConsidered = 0;
+  try {
+    rowsConsidered = doc.querySelectorAll('.ig-row, li.assignment, [id^="assignment_"]').length;
+  } catch {
+    rowsConsidered = 0;
+  }
+  const rowsRead = assignments.filter(
+    (assignment) =>
+      assignment.submissionStatus !== 'unknown' &&
+      assignment.submissionStatus !== 'verification_unavailable',
+  ).length;
+  return {
+    rows: Math.max(rowsConsidered, assignments.length),
+    rowsConsidered: Math.max(rowsConsidered, assignments.length),
+    rowsRead,
+  };
+}
+
 export function parseCanvasCourses(doc, baseUrl) {
   const courses = new Map();
   for (const anchor of doc.querySelectorAll('a[href]')) {
@@ -452,7 +547,9 @@ export function parseCanvasPage(doc, baseUrl) {
       assignments = parseCanvasTodo(doc, baseUrl);
       break;
     case 'assignments_index':
+      // The class Assignments page: no scores, but a submission state per row.
       assignments = parseCanvasAssignmentsPage(doc, baseUrl);
+      diagnostics = listPageDiagnostics(doc, assignments);
       break;
     case 'grades': {
       // The one page that carries status AND scores for a whole class.

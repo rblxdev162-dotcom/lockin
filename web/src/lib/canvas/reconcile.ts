@@ -173,6 +173,21 @@ export function describeSync(view: CanvasExtensionView | null): {
     };
   }
 
+  /**
+   * A class Assignments page. It has no scores on it, so saying "rows read"
+   * alone would undersell what it just answered: which work is marked as
+   * turned in.
+   */
+  if (sync.pageKind === 'assignments_index') {
+    const rows = sync.rowsRead ?? 0;
+    const detail = [
+      `${rows} assignment${rows === 1 ? '' : 's'} on this class's Assignments page reported whether they were turned in`,
+    ];
+    if (sync.updated) detail.push(`${sync.updated} updated`);
+    if (sync.newlySubmitted) detail.push(`${sync.newlySubmitted} newly submitted`);
+    return { ok: true, message: detail.join(' · ') };
+  }
+
   const currentRows = sync.rowsRead ?? 0;
   const parts = [
     `${currentRows} assignment row${currentRows === 1 ? '' : 's'} read from this page`,

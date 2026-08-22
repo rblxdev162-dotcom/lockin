@@ -77,6 +77,40 @@ test('current structured gradebook rows produce gradebook coverage', () => {
   assert.match(assessment.detail, /13 assignment rows/);
 });
 
+test('the class Assignments page is reported as turned-in states, not a gradebook', () => {
+  const assessment = readCoverage.assessCanvasRead({
+    ok: true,
+    pageKind: 'assignments_index',
+    readSubmissions: true,
+    readGrades: true,
+    gradebookAnswered: true,
+    readableTabs: 1,
+    rowsSeen: 9,
+    rowsRead: 9,
+  });
+  assert.equal(assessment.coverage, 'submissions');
+  assert.match(assessment.detail, /9 assignment rows/);
+  assert.match(assessment.detail, /submitted, missing or late/);
+});
+
+test('an Assignments page whose rows said nothing is not counted as submissions', () => {
+  const assessment = readCoverage.assessCanvasRead({
+    ok: true,
+    pageKind: 'assignments_index',
+    readSubmissions: false,
+    readableTabs: 1,
+    rowsSeen: 9,
+    rowsRead: 0,
+  });
+  assert.notEqual(assessment.coverage, 'submissions');
+});
+
+test('a stored submissions receipt still describes itself later', () => {
+  const stored = readCoverage.describeStoredCoverage('submissions', 4);
+  assert.equal(stored?.coverage, 'submissions');
+  assert.match(stored.detail, /4 assignment rows/);
+});
+
 test('the all-classes grades page is labelled totals only', () => {
   const assessment = readCoverage.assessCanvasRead({
     ok: true,

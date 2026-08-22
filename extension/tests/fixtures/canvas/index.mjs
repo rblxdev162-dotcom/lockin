@@ -74,6 +74,46 @@ const assignmentsIndex = canvasShell({
   </ul>`,
 });
 
+/*
+ * 2b. The same page in Canvas' older list markup, which carries no pills at
+ * all: the row's state lives in screen-reader-only wording. This is the shape
+ * that made LockIn blind to work that had actually been handed in.
+ */
+const assignmentsIndexClassic = canvasShell({
+  title: 'Assignments',
+  breadcrumbCourse: crumb('303', 'Science'),
+  body: `
+  <h1>Assignments</h1>
+  <div class="assignment-list">
+    <div class="ig-row" id="assignment_8001">
+      <a class="ig-title" href="/courses/303/assignments/8001">Lab Report</a>
+      <div class="ig-details">
+        <div class="ig-details__item"><span class="screenreader-only">This assignment was submitted on Aug 20 and is awaiting grading.</span></div>
+        <span class="assignment-date-due">Due <time datetime="${'2026-08-20T23:59:00.000Z'}">Aug 20</time></span>
+      </div>
+    </div>
+    <div class="ig-row" id="assignment_8002">
+      <a class="ig-title" href="/courses/303/assignments/8002">Reading Questions</a>
+      <div class="ig-details">
+        <div class="ig-details__item"><span class="screenreader-only">This assignment was submitted late on Aug 21.</span></div>
+      </div>
+    </div>
+    <div class="ig-row" id="assignment_8003">
+      <a class="ig-title" href="/courses/303/assignments/8003">Unit Reflection</a>
+      <div class="ig-details">
+        <div class="ig-details__item"><span class="screenreader-only">This assignment was not submitted.</span></div>
+      </div>
+    </div>
+    <div class="ig-row" id="assignment_8004">
+      <a class="ig-title" href="/courses/303/assignments/8004">Poster Project</a>
+      <div class="ig-details">
+        <span class="assignment-date-due">No due date</span>
+      </div>
+      <p class="description">Work submitted by other groups will be displayed in the hallway.</p>
+    </div>
+  </div>`,
+});
+
 /** A single assignment page. `statusBlock` is what varies between fixtures. */
 function assignmentPage({ courseId, courseName, assignmentId, title, dueIso, statusBlock }) {
   return canvasShell({
@@ -476,6 +516,7 @@ export const CANVAS_FIXTURES = {
   '/courses/303/grades': courseGradesModern,
   '/grades': allGrades,
   '/grades-modern': allGradesModern,
+  '/courses/303/assignments': assignmentsIndexClassic,
   '/courses/777/assignments': customDomain,
   '/news': notCanvas,
 };

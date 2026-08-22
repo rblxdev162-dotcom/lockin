@@ -210,6 +210,41 @@ async function main() {
   const listSubmitted = index.find((a) => a.externalAssignmentId === '5002');
   check('reads a submitted pill on a list row', listSubmitted?.submissionStatus === 'submitted');
 
+  /* ---- The class Assignments page in Canvas' pill-free markup ---- */
+  const classic = await inPage(
+    browser,
+    `https://${CANVAS_HOST}/courses/303/assignments`,
+    `({ parser }) => parser.parseCanvasPage(document, location.href)`,
+  );
+  const classicBy = (id) =>
+    classic.assignments.find((a) => a.externalAssignmentId === id)?.submissionStatus;
+  check('the class Assignments page is recognised as such', classic.pageKind === 'assignments_index');
+  check(
+    'reads "was submitted" wording with no pill present',
+    classicBy('8001') === 'submitted',
+    classicBy('8001'),
+  );
+  check(
+    'reads submitted-late wording as late_submitted',
+    classicBy('8002') === 'late_submitted',
+    classicBy('8002'),
+  );
+  check(
+    'reads "was not submitted" as not submitted, never as done',
+    classicBy('8003') === 'not_submitted',
+    classicBy('8003'),
+  );
+  check(
+    'the word "submitted" in a description never marks a row done',
+    classicBy('8004') === 'unknown',
+    classicBy('8004'),
+  );
+  check(
+    'the Assignments page reports how many rows answered',
+    classic.diagnostics?.rowsRead === 3 && classic.diagnostics?.rowsConsidered === 4,
+    JSON.stringify(classic.diagnostics),
+  );
+
   /* ---- 7-11. Submission states on detail pages ---- */
   console.log('\nSubmission states');
   const states = [

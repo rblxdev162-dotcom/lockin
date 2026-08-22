@@ -5,6 +5,22 @@ User-visible changes only. Internal architecture and phase history live in
 
 ## 1.5.0
 
+### LockIn can now tell when you have turned something in
+
+Automatic checks used to open only your Grades page for each class. That page
+shows scores, so work you had handed in but that had not been marked yet looked
+like nothing at all — and LockIn, which refuses to guess, kept listing it as
+not done.
+
+Each check now also opens that class's **Assignments** page, which shows a
+Submitted / Missing / Late label on every row. It still opens one background
+tab at a time, closes only the tabs it opened itself, leaves alone anything you
+had open, and only runs after school. Classes with older Canvas layouts, which
+show that label as text rather than a coloured pill, are now read too.
+
+The check receipt says which of the two it read, so "it checked" and "it could
+actually tell" are never the same claim.
+
 ### Finishing your work unlocks your evening
 
 The block page says "finish your required work to unlock distractions", and now

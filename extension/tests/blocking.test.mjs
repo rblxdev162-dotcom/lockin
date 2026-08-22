@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildRules, isBlockingActive, effectiveBlocklist } from '../background/rules.js';
+import { buildRules, isBlockingActive, isHomeworkTime, effectiveBlocklist } from '../background/rules.js';
 import { normalizeDomain, hostMatches, shouldBlock, PROTECTED_DOMAINS } from '../shared/domains.js';
 import { validateBridgeState, emptyBridgeState, isEnvelope, MSG } from '../shared/protocol.js';
 
@@ -262,4 +262,198 @@ test('duplicate and invalid entries never reach the rule set', () => {
   });
   const blocked = effectiveBlocklist(state);
   assert.deepEqual(blocked, ['youtube.com']);
+});
+
+/* ------------------------------------------------------------------ */
+/* The school-hours pause                                              */
+/* ------------------------------------------------------------------ */
+
+/** A local wall-clock time on a given weekday. 0 = Sunday. */
+function at(weekday, hhmm) {
+  // 2024-01-07 was a Sunday, so +weekday lands on the day asked for.
+  const [hours, minutes] = hhmm.split(':').map(Number);
+  return new Date(2024, 0, 7 + weekday, hours, minutes, 0, 0).getTime();
+}
+
+/** Mon–Fri, 7:30am–3:30pm. */
+const SCHOOL = { days: [1, 2, 3, 4, 5], from: 7 * 60 + 30, until: 15 * 60 + 30 };
+
+test('no rules exist during school hours', () => {
+  const state = stateWith({ schoolHours: SCHOOL });
+  assert.equal(isBlockingActive(state, at(3, '10:15')), false);
+  assert.deepEqual(buildRules(state, at(3, '10:15')), []);
+});
+
+test('a blocked site loads normally during school', () => {
+  const state = stateWith({ schoolHours: SCHOOL });
+  const rules = buildRules(state, at(1, '12:00'));
+  assert.equal(matchRules(rules, 'https://youtube.com/watch'), 'no-match');
+});
+
+test('blocking returns by itself after the last bell', () => {
+  const state = stateWith({ schoolHours: SCHOOL });
+  assert.equal(isBlockingActive(state, at(3, '15:29')), false, 'still school at 3:29');
+  assert.equal(isBlockingActive(state, at(3, '15:30')), true, 'the bell ends school');
+  const rules = buildRules(state, at(3, '16:00'));
+  assert.deepEqual(matchRules(rules, 'https://youtube.com/watch'), {
+    redirectTo: '/blocked/blocked.html?d=youtube.com',
+  });
+});
+
+test('before the first bell is still homework time', () => {
+  const state = stateWith({ schoolHours: SCHOOL });
+  assert.equal(isBlockingActive(state, at(2, '07:29')), true);
+  assert.equal(isBlockingActive(state, at(2, '07:30')), false);
+});
+
+test('the pause is weekday-scoped: Saturday blocks all day', () => {
+  const state = stateWith({ schoolHours: SCHOOL });
+  assert.equal(isBlockingActive(state, at(6, '10:15')), true);
+  assert.equal(isBlockingActive(state, at(0, '10:15')), true);
+});
+
+test('no school hours means nothing is suspended', () => {
+  const state = stateWith({ schoolHours: null });
+  assert.equal(isBlockingActive(state, at(3, '10:15')), true);
+});
+
+test('a malformed window suspends nothing rather than everything', () => {
+  // Validation is the boundary, so junk should never reach the rule builder —
+  // but the direction of failure is the whole point, so it is pinned here too.
+  for (const broken of [
+    { days: [1], from: 600, until: 600 },
+    { days: [1], from: 900, until: 600 },
+    { days: [], from: 450, until: 930 },
+    { days: [1], from: 'noon', until: 930 },
+  ]) {
+    const clean = validateBridgeState(stateWith({ schoolHours: broken }));
+    assert.equal(clean.schoolHours, null, JSON.stringify(broken));
+    assert.equal(isBlockingActive(stateWith({ schoolHours: broken }), at(1, '10:00')), true);
+  }
+});
+
+test('a valid window survives the wire contract intact', () => {
+  const clean = validateBridgeState(stateWith({ schoolHours: SCHOOL }));
+  assert.deepEqual(clean.schoolHours, SCHOOL);
+});
+
+test('school hours cannot resurrect blocking that is off for another reason', () => {
+  // Outside school, but Focus Mode is off / blocking disabled / unlocked.
+  const evening = at(3, '19:00');
+  assert.equal(isBlockingActive(stateWith({ schoolHours: SCHOOL, focusModeActive: false }), evening), false);
+  assert.equal(isBlockingActive(stateWith({ schoolHours: SCHOOL, blockingEnabled: false }), evening), false);
+  assert.equal(
+    isBlockingActive(stateWith({ schoolHours: SCHOOL, temporaryUnlockUntil: evening + 60_000 }), evening),
+    false,
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* Homework hours — blocking that does not wait to be switched on      */
+/* ------------------------------------------------------------------ */
+
+/** School ends 3:30pm; free days start 9am; runs to midnight. */
+const HOMEWORK = { schoolDays: [1, 2, 3, 4, 5], from: 15 * 60 + 30, freeDayFrom: 9 * 60, until: 24 * 60 };
+
+/** A student who never presses Start: no Focus session, automatic window on. */
+function autoState(overrides = {}) {
+  return stateWith({
+    focusModeActive: false,
+    schoolHours: SCHOOL,
+    homeworkWindow: HOMEWORK,
+    ...overrides,
+  });
+}
+
+test('blocking runs after school with no Focus session started', () => {
+  const rules = buildRules(autoState(), at(3, '16:00'));
+  assert.deepEqual(matchRules(rules, 'https://youtube.com/watch'), {
+    redirectTo: '/blocked/blocked.html?d=youtube.com',
+  });
+});
+
+test('homework hours begin at the same bell school hours end at', () => {
+  const state = autoState();
+  assert.equal(isBlockingActive(state, at(3, '15:29')), false, 'still in class');
+  assert.equal(isBlockingActive(state, at(3, '15:30')), true, 'homework hours');
+});
+
+test('nothing is blocked before school, automatic or not', () => {
+  assert.equal(isBlockingActive(autoState(), at(2, '06:45')), false);
+  assert.equal(isBlockingActive(autoState(), at(2, '07:30')), false);
+});
+
+test('automatic blocking runs to midnight, not to an evening cutoff', () => {
+  const state = autoState();
+  assert.equal(isBlockingActive(state, at(3, '21:30')), true);
+  assert.equal(isBlockingActive(state, at(3, '23:59')), true);
+});
+
+test('a free day blocks from the morning instead of waiting for a bell', () => {
+  const state = autoState();
+  assert.equal(isBlockingActive(state, at(6, '08:59')), false);
+  assert.equal(isBlockingActive(state, at(6, '09:00')), true);
+});
+
+test('a no-school date is a free day, not a school day', () => {
+  // 2024-01-10 is the Wednesday `at(3, …)` lands on.
+  const state = autoState({ noSchoolDates: ['2024-01-10'] });
+  // The school pause must not swallow a day spent at home...
+  assert.equal(isBlockingActive(state, at(3, '10:15')), true);
+  // ...and homework hours start in the morning rather than at 3:30pm.
+  assert.equal(isHomeworkTime(HOMEWORK, at(3, '09:30'), ['2024-01-10']), true);
+  assert.equal(isHomeworkTime(HOMEWORK, at(3, '09:30'), []), false);
+});
+
+test('turning automatic blocking off restores Focus-session-only blocking', () => {
+  const off = autoState({ homeworkWindow: null });
+  assert.equal(isBlockingActive(off, at(3, '16:00')), false, 'no session, no automatic window');
+  assert.equal(
+    isBlockingActive({ ...off, focusModeActive: true }, at(3, '16:00')),
+    true,
+    'a deliberate session still blocks',
+  );
+});
+
+test('a deliberate Focus session blocks outside homework hours too', () => {
+  // 6am on a school day is outside every automatic window, but the student
+  // pressed Start, and that is an explicit choice to be held to.
+  const state = autoState({ focusModeActive: true });
+  assert.equal(isBlockingActive(state, at(2, '06:00')), true);
+  // School is the one thing a session cannot override.
+  assert.equal(isBlockingActive(state, at(2, '10:00')), false);
+});
+
+test('the 5-minute test blocks at any hour, including during school', () => {
+  const state = autoState({ isTest: true, testExpiresAt: at(2, '10:05'), focusModeActive: true });
+  assert.equal(isBlockingActive(state, at(2, '10:00')), true, 'a test is deliberate and expires');
+  assert.equal(isBlockingActive(state, at(2, '10:06')), false, 'and it still expires on time');
+});
+
+test('temporary unlock still wins during homework hours', () => {
+  const evening = at(3, '17:00');
+  const state = autoState({ temporaryUnlockUntil: evening + 60_000 });
+  assert.equal(isBlockingActive(state, evening), false);
+  assert.equal(isBlockingActive(state, evening + 120_000), true, 'and it expires');
+});
+
+test('a malformed homework window blocks nothing rather than everything', () => {
+  for (const broken of [
+    { schoolDays: [1], from: 930, freeDayFrom: 540, until: 540 },
+    { schoolDays: [1], from: 'later', freeDayFrom: 540, until: 1440 },
+    { schoolDays: [1], from: 930, freeDayFrom: 540, until: 1441 },
+  ]) {
+    const clean = validateBridgeState(autoState({ homeworkWindow: broken }));
+    assert.equal(clean.homeworkWindow, null, JSON.stringify(broken));
+  }
+});
+
+test('a valid homework window and no-school dates survive the wire', () => {
+  const clean = validateBridgeState(autoState({ noSchoolDates: ['2024-01-10', 'nonsense'] }));
+  assert.deepEqual(clean.homeworkWindow, HOMEWORK);
+  assert.deepEqual(clean.noSchoolDates, ['2024-01-10']);
+});
+
+test('blocking disabled in settings still beats every window', () => {
+  assert.equal(isBlockingActive(autoState({ blockingEnabled: false }), at(3, '16:00')), false);
 });

@@ -8,6 +8,7 @@ import type { IconName } from '../components/ui/Icon';
 import type { ActivityType } from '../types';
 import { prettyDomain } from '../lib/domains';
 import { relativeTime } from '../lib/time';
+import { WeeklyReviewCard } from '../components/features/WeeklyReviewCard';
 
 const ICONS: Record<ActivityType, IconName> = {
   focus_mode_started: 'lock',
@@ -141,6 +142,8 @@ export function ActivityPage() {
           </Card>
         ))}
       </div>
+
+      <WeeklyReviewCard />
 
       <Card>
         <CardHeader

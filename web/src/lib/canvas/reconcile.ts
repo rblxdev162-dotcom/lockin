@@ -115,6 +115,12 @@ export function describeSync(view: CanvasExtensionView | null): {
         };
       case 'tab-not-ready':
         return { ok: false, message: 'Reload the Canvas tab, then press Check Canvas again.' };
+      case 'page-unreadable':
+        return {
+          ok: false,
+          message:
+            'Canvas answered, but LockIn could not reliably read this layout. Existing saved results were not counted as a fresh check.',
+        };
       case 'gate-refused':
         return { ok: false, message: refusalMessage(sync.verdict) };
       case 'no-permission':
@@ -143,7 +149,9 @@ export function describeSync(view: CanvasExtensionView | null): {
     return {
       ok: false,
       message:
-        'Read your Canvas dashboard, which carries no scores. Open a class → Grades, then press Check Canvas again.',
+        sync.gradebookAnswered
+          ? 'The Canvas gradebook answered, but its assignment rows could not be read reliably. LockIn did not guess.'
+          : 'Read your Canvas dashboard, which carries no scores. Open a class → Grades, then press Check Canvas again.',
     };
   }
 
@@ -165,7 +173,10 @@ export function describeSync(view: CanvasExtensionView | null): {
     };
   }
 
-  const parts = [`${sync.found ?? 0} assignment${sync.found === 1 ? '' : 's'} read`];
+  const currentRows = sync.rowsRead ?? 0;
+  const parts = [
+    `${currentRows} assignment row${currentRows === 1 ? '' : 's'} read from this page`,
+  ];
   if (sync.updated) parts.push(`${sync.updated} updated`);
   if (sync.newlySubmitted) {
     parts.push(`${sync.newlySubmitted} newly submitted`);

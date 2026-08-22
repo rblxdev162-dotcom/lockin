@@ -24,6 +24,7 @@ import { buildPlan, livePlan, selectWeekSummary } from '../lib/planner';
 import { diffPlans, isMeaningfulChange } from '../lib/planner/reschedule';
 import type { PlanChange } from '../lib/planner/reschedule';
 import { explainPlanReason, formatMinutes } from '../lib/planner/explanations';
+import { PlannerIntelligence } from '../components/features/planner/PlannerIntelligence';
 
 const TABS = ['Today', 'This Week', 'Exams', 'Availability', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
@@ -32,6 +33,7 @@ export function PlannerPage() {
   const { state, now } = useApp();
   const at = new Date(now);
   const [tab, setTab] = useState<Tab>('Today');
+  const [plannerDays, setPlannerDays] = useState(7);
   const [preview, setPreview] = useState<PlanChange[] | null>(null);
   const planner = usePlanner();
 
@@ -86,6 +88,7 @@ export function PlannerPage() {
       {tab === 'Today' && (
         <>
           <TodayPlanCard />
+          <PlannerIntelligence onAvailability={() => setTab('Availability')} />
           {plan && (
             <Card>
               <CardHeader title="Why did my plan change?" />
@@ -118,7 +121,8 @@ export function PlannerPage() {
 
       {tab === 'This Week' && (
         <>
-          <WeekView days={7} />
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-caption font-bold lk-muted">Spatial zoom</p><div className="flex gap-2">{[{label:'Day',days:1},{label:'Week',days:7},{label:'Month',days:28}].map((option) => <Chip key={option.days} active={plannerDays === option.days} onClick={() => setPlannerDays(option.days)}>{option.label}</Chip>)}</div></div>
+          <WeekView days={plannerDays} />
           <Card>
             <CardHeader title="Upcoming load" />
             <div className="grid grid-cols-3 gap-3">

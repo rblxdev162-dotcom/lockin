@@ -300,6 +300,35 @@ export interface Settings {
    */
   blockingAsked: boolean;
   /**
+   * Suspend website blocking while school is in session (schema v15).
+   *
+   * On by default. Blocking exists to protect homework time, and school time
+   * is not homework time: during the school day the sites a student needs are
+   * chosen by a teacher, not by this app, and a block page in the middle of a
+   * lesson is LockIn getting in the way of the exact thing it claims to
+   * protect. The school day comes from the schedule the student filled in
+   * during onboarding — see `schoolHoursFrom()`.
+   *
+   * This only suspends *blocking*. Focus Mode, its timer, Focus Guard and
+   * reminders are untouched: a student who deliberately starts a session in a
+   * free period still gets one, it simply does not redirect anything.
+   */
+  pauseBlockingDuringSchool: boolean;
+  /**
+   * Block distractions automatically through homework hours, with no Focus
+   * session started (schema v16).
+   *
+   * Until this existed, blocking only ever ran inside a timer the student
+   * chose to start, which meant the student most in need of it — the one who
+   * never presses Start — was never blocked at all. Paired with the school
+   * pause above, the rule a student can actually hold in their head is:
+   * **LockIn blocks after school, and only after school.**
+   *
+   * Blocking still needs `blockingEnabled`, a non-empty blocklist, and the
+   * extension. This decides *when*, not *whether*.
+   */
+  autoBlockAfterSchool: boolean;
+  /**
    * When LockIn is allowed to touch Canvas at all (schema v11).
    *
    * The student takes proctored tests at school on a district device while

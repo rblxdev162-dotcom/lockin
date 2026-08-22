@@ -68,6 +68,8 @@ export const MSG = {
   CANVAS_REQUEST_PERMISSION: 'CANVAS_REQUEST_PERMISSION',
   CANVAS_GET_VIEW: 'CANVAS_GET_VIEW',
   CANVAS_SYNC: 'CANVAS_SYNC',
+  /** Ask the companion to read one needed class gradebook in a background tab. */
+  CANVAS_AUTO_READ: 'CANVAS_AUTO_READ',
   /** web → ext: the school-hours check window the gate enforces. */
   CANVAS_SET_WINDOW: 'CANVAS_SET_WINDOW',
   CANVAS_DISCONNECT: 'CANVAS_DISCONNECT',
@@ -133,6 +135,27 @@ export interface BridgeState {
    * blocking engine protects it even if it is removed from the school allowlist.
    */
   canvasDomain: string | null;
+  /**
+   * The school day, so the extension can keep blocking out of it without a
+   * LockIn tab being open (schema v15).
+   *
+   * `null` means either the student turned the pause off or LockIn genuinely
+   * does not know when school is. Both cases mean "do not suspend anything" —
+   * the extension never invents an interval of its own.
+   */
+  schoolHours: { days: number[]; from: number; until: number } | null;
+  /**
+   * Homework hours — when blocking runs on its own, with no Focus session
+   * (schema v16). `null` means automatic blocking is off.
+   */
+  homeworkWindow: {
+    schoolDays: number[];
+    from: number;
+    freeDayFrom: number;
+    until: number;
+  } | null;
+  /** `YYYY-MM-DD` dates that are not school days, however the calendar reads. */
+  noSchoolDates: string[];
 }
 
 export interface Envelope<P = unknown> {
@@ -178,5 +201,64 @@ export function validateBridgeState(value: unknown): BridgeState | null {
     appUrl: typeof s.appUrl === 'string' ? s.appUrl.slice(0, 300) : '',
     canvasDomain:
       typeof s.canvasDomain === 'string' && s.canvasDomain.length < 254 ? s.canvasDomain : null,
+    schoolHours: schoolHours(s.schoolHours),
+    homeworkWindow: homeworkWindow(s.homeworkWindow),
+    noSchoolDates: Array.isArray(s.noSchoolDates)
+      ? s.noSchoolDates
+          .filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+          .slice(0, 180)
+      : [],
   };
+}
+
+/**
+ * Rebuilt like `schoolHours`, but failing the other way.
+ *
+ * A malformed school window must not switch blocking off, so it becomes
+ * `null`. A malformed homework window must not switch blocking *on* at a time
+ * nobody chose — so it also becomes `null`, which here means "no automatic
+ * blocking". Both directions land on the same rule: an unusable window does
+ * nothing.
+ */
+function homeworkWindow(value: unknown): BridgeState['homeworkWindow'] {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const minute = (v: unknown, max: number) =>
+    typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= max ? v : null;
+  const from = minute(raw.from, 1439);
+  const freeDayFrom = minute(raw.freeDayFrom, 1439);
+  const until = minute(raw.until, 1440);
+  if (from === null || freeDayFrom === null || until === null) return null;
+  if (until <= from || until <= freeDayFrom) return null;
+  const schoolDays = Array.isArray(raw.schoolDays)
+    ? [...new Set(raw.schoolDays)].filter(
+        (d): d is number => typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6,
+      )
+    : [];
+  return { schoolDays, from, freeDayFrom, until };
+}
+
+/**
+ * Rebuilt field by field, like every other part of this contract.
+ *
+ * An interval is only kept if it is genuinely usable: real minute values, an
+ * end after its start, and at least one weekday. Anything else becomes `null`,
+ * which means "do not suspend blocking" — a malformed window must never be
+ * able to switch blocking off for a day, or forever.
+ */
+function schoolHours(value: unknown): BridgeState['schoolHours'] {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as { days?: unknown; from?: unknown; until?: unknown };
+  const minute = (v: unknown) =>
+    typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 1440 ? v : null;
+  const from = minute(raw.from);
+  const until = minute(raw.until);
+  if (from === null || until === null || until <= from) return null;
+  const days = Array.isArray(raw.days)
+    ? [...new Set(raw.days)].filter(
+        (d): d is number => typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6,
+      )
+    : [];
+  if (!days.length) return null;
+  return { days, from, until };
 }

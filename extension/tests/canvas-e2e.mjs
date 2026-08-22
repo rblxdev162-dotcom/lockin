@@ -641,6 +641,44 @@ async function main() {
     JSON.stringify(afterStale?.sync?.tabsSeen),
   );
   await closeTab(staleTab.targetId);
+
+  /* ---- 0e: scheduled reading owns and cleans up its background tab ---- */
+  console.log('\nTEST 0e — scheduled reading opens, reads and closes one owned gradebook tab');
+  await swEval(
+    `chrome.storage.local.remove([
+      'lockin_canvas_cache',
+      'lockin_canvas_grades',
+      'lockin_canvas_auto_read',
+      'lockin_canvas_auto_read_tab'
+    ]).then(() => 1)`,
+  );
+  const automatic = await bridgeRequest(
+    gateApp.sessionId,
+    'CANVAS_AUTO_READ',
+    { courseIds: ['101'] },
+    20_000,
+  );
+  check(
+    'the automatic path read the class gradebook',
+    automatic?.autoRead?.ok === true && automatic?.autoRead?.pageKind === 'grades',
+    JSON.stringify(automatic?.autoRead),
+  );
+  check('it opened the page in the background', automatic?.autoRead?.opened === true);
+  check('it closed the tab after the reading landed', automatic?.autoRead?.closed === true);
+  check(
+    'the rendered grade reached the extension before close',
+    (automatic?.grades ?? []).some((grade) => grade.currentScore === 93.75),
+    JSON.stringify(automatic?.grades),
+  );
+  const canvasTabsAfterAutoRead = await swEval(
+    `chrome.tabs.query({ url: 'https://${CANVAS_HOST}/*' }).then((tabs) => tabs.length)`,
+  );
+  check(
+    'no temporary Canvas tab was left behind',
+    Number(canvasTabsAfterAutoRead) === 0,
+    String(canvasTabsAfterAutoRead),
+  );
+
   await closeTab(gateApp.targetId);
   // The gradebook fixture marks 5001 graded; leaving that in the cache would
   // pre-complete the assignment the tests below start from.

@@ -507,8 +507,9 @@ export { mergeStatus };
  * out, per assignment and in a table it has emitted the same way for years:
  * the name, the due date, the submission status, the score and the points
  * possible. Reading the page the student deliberately opened gives LockIn
- * everything it needs while making zero requests of its own — no API call, no
- * token, no background tab, nothing to explain.
+ * everything it needs without an API call or token. The page may be one the
+ * student opened or a temporary background gradebook tab created by LockIn's
+ * explicitly authorized after-school schedule.
  *
  * Rule 1 of this file still holds: identity comes from the href
  * (`/courses/:id/assignments/:id`), never from the row's text.

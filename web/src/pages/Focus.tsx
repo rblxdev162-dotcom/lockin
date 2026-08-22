@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { AppState, FocusSession } from '../types';
 import { useApp } from '../store/context';
-import { Card, CardHeader, EmptyState } from '../components/ui/Card';
+import { Card, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Chip, Field, TextInput } from '../components/ui/Field';
 import { Badge } from '../components/ui/Badge';
@@ -16,6 +16,7 @@ import { FocusGuardCard } from '../components/features/FocusGuardCard';
 import { toast } from '../components/ui/Toast';
 import {
   blockingActive,
+  blockingSchoolHours,
   dueSoon,
   dueTimestamp,
   isComplete,
@@ -25,10 +26,14 @@ import {
 } from '../lib/selectors';
 import { verifyPin } from '../lib/pin';
 import { formatClock } from '../lib/time';
+import { describeSchoolHours, isDuringSchoolHours } from '../lib/schoolSchedule';
 import { prettyPlural } from '../lib/text';
 import { useCanvas } from '../hooks/useCanvas';
 import { CanvasStatusBadge } from '../components/features/CanvasStatusBadge';
 import { cx } from '../lib/cx';
+import { playLocalSound } from '../lib/localExperience';
+import { readToolkit, updateToolkit } from '../lib/localExperience';
+import { BreakCockpit, FocusToolkit } from '../components/features/FocusToolkit';
 
 const PRESETS = [15, 25, 45, 60];
 const UNLOCK_OPTIONS = [10, 15, 30];
@@ -50,6 +55,7 @@ export function FocusPage() {
   const [customMinutes, setCustomMinutes] = useState('');
   const [sessionGoal, setSessionGoal] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [ritualOpen, setRitualOpen] = useState(false);
 
   useEffect(() => {
     const fromLink = params.get('assignment');
@@ -92,6 +98,7 @@ export function FocusPage() {
     }
     if (!chimed && elapsedMs >= plannedMs && session.state === 'running') {
       setChimed(true);
+      playLocalSound('timer');
       toast(`${session.plannedMinutes} minutes done. Keep going or end the session.`, 'success');
     }
   }, [session, elapsedMs, plannedMs, chimed]);
@@ -108,7 +115,9 @@ export function FocusPage() {
     minutes: number;
     label: string;
     completedAssignment: boolean;
+    assignmentId: string | null;
   } | null>(null);
+  const [breakUntil, setBreakUntil] = useState<number | null>(null);
 
   const endSession = (alsoComplete: boolean) => {
     const assignmentId = session?.assignmentId ?? null;
@@ -123,7 +132,10 @@ export function FocusPage() {
       minutes: finishedMinutes,
       label: finishedLabel,
       completedAssignment: alsoComplete && !!assignmentId,
+      assignmentId,
     });
+    playLocalSound('complete');
+    try { sessionStorage.removeItem('lockin.focus-goal'); } catch { /* optional */ }
     toast('Study time logged.', 'success');
   };
 
@@ -133,6 +145,11 @@ export function FocusPage() {
   const remaining = Math.max(0, fm.requiredCompletionCount - fm.completedCount);
   const strict = state.settings.reminderMode === 'Strict';
   const unlocked = fm.temporaryUnlockUntil !== null && fm.temporaryUnlockUntil > now;
+  // Why blocking is off matters: "school hours" is a rule working as intended,
+  // and reads very differently from "the extension is offline".
+  const schoolHoursNow = blockingSchoolHours(state);
+  const schoolPaused = isDuringSchoolHours(schoolHoursNow, now, state.settings.schoolSchedule.noSchoolDates);
+  const schoolHoursLabel = describeSchoolHours(schoolHoursNow);
   const canEndFreely = !strict || remaining === 0;
 
   const [setupOpen, setSetupOpen] = useState(false);
@@ -165,6 +182,10 @@ export function FocusPage() {
         overrun={overrun}
         extensionConnected={extension.status === 'connected'}
         blockingCount={fm.active ? state.settings.blockedDomains.length : 0}
+        goal={sessionGoal || (() => { try { return sessionStorage.getItem('lockin.focus-goal') ?? ''; } catch { return ''; } })()}
+        steps={sessionAssignment?.steps ?? []}
+        intention={readToolkit().sessionIntention}
+        focusKind={readToolkit().focusKind}
         onPause={() => dispatch({ type: 'PAUSE_SESSION' })}
         onResume={() => dispatch({ type: 'RESUME_SESSION' })}
         onEnd={() => setConfirmEnd(true)}
@@ -200,8 +221,18 @@ export function FocusPage() {
           completedAssignment={justFinished.completedAssignment}
           nextLine={completionLine(state, now)}
           onDismiss={() => setJustFinished(null)}
+          onBreak={() => setBreakUntil(Date.now() + 5 * 60_000)}
+          landingKey={justFinished.assignmentId ?? justFinished.label}
+          onMomentum={() => {
+            const next = unfinished.find((item) => item.id !== justFinished.assignmentId);
+            if (next) setSelectedId(next.id);
+            setJustFinished(null);
+          }}
+          hasMomentumTask={unfinished.some((item) => item.id !== justFinished.assignmentId)}
         />
       )}
+
+      {breakUntil && <BreakCockpit until={breakUntil} onEnd={() => setBreakUntil(null)} />}
 
       {/* ================= Timer ================= */}
       <Card>
@@ -273,22 +304,51 @@ export function FocusPage() {
               />
             </Field>
 
+            <FocusToolkit assignments={unfinished} selectedId={selectedId} minutes={minutes} onSelect={setSelectedId} onMinutes={(value) => { setMinutes(value); setCustomMinutes(''); }} />
+
             <Button
               size="lg"
               block
               icon={<Icon name="play" size={17} />}
               onClick={() => {
+                if (readToolkit().focusRitual) {
+                  setRitualOpen(true);
+                  return;
+                }
+                try { sessionStorage.setItem('lockin.focus-goal', sessionGoal.trim()); } catch { /* optional */ }
                 dispatch({
                   type: 'START_SESSION',
                   assignmentId: selectedId || null,
                   minutes: Math.min(240, Math.max(1, minutes)),
                 });
+                const toolkit = readToolkit();
+                if (selectedId && toolkit.focusQueue.includes(selectedId)) updateToolkit({ focusQueue: toolkit.focusQueue.filter((id) => id !== selectedId) });
+                playLocalSound('start');
                 toast(`${minutes}-minute session started.`, 'success');
                 if (sessionGoal.trim()) toast(`Session goal: ${sessionGoal.trim()}`, 'info');
               }}
             >
               Start {minutes}-minute session
             </Button>
+            <StartRitual
+              open={ritualOpen}
+              label={unfinished.find((item) => item.id === selectedId)?.title ?? 'General study'}
+              onCancel={() => setRitualOpen(false)}
+              onComplete={() => {
+                setRitualOpen(false);
+                try { sessionStorage.setItem('lockin.focus-goal', sessionGoal.trim()); } catch { /* optional */ }
+                dispatch({
+                  type: 'START_SESSION',
+                  assignmentId: selectedId || null,
+                  minutes: Math.min(240, Math.max(1, minutes)),
+                });
+                const toolkit = readToolkit();
+                if (selectedId && toolkit.focusQueue.includes(selectedId)) updateToolkit({ focusQueue: toolkit.focusQueue.filter((id) => id !== selectedId) });
+                playLocalSound('start');
+                toast(`${minutes}-minute session started.`, 'success');
+                if (sessionGoal.trim()) toast(`Session goal: ${sessionGoal.trim()}`, 'info');
+              }}
+            />
           </div>
       </Card>
 
@@ -475,6 +535,12 @@ export function FocusPage() {
                   site{state.settings.blockedDomains.length === 1 ? '' : 's'}. School and Google
                   domains stay open.
                 </>
+              ) : schoolPaused ? (
+                <>
+                  <strong className="lk-strong">School hours.</strong> Blocking stays off until{' '}
+                  {schoolHoursLabel ? schoolHoursLabel.split('– ')[1] : 'the end of the school day'}
+                  , then resumes on its own. This session is still timed and still counts.
+                </>
               ) : (
                 <>Blocking is currently paused (turned off in Settings, or extension offline).</>
               )}
@@ -524,44 +590,6 @@ export function FocusPage() {
 
       {/* ================= Focus Guard ================= */}
       <FocusGuardCard />
-
-      {/* ================= Recent sessions ================= */}
-      <Card>
-        <CardHeader title="Recent sessions" subtitle="Study time logged on this device" />
-        {state.completedSessions.length === 0 ? (
-          <EmptyState
-            icon={<Icon name="timer" size={26} />}
-            title="No sessions yet"
-            hint="Finish a focus session and it shows up here."
-          />
-        ) : (
-          <div className="space-y-2">
-            {state.completedSessions.slice(0, 6).map((s) => (
-              <div
-                key={s.id}
-                className="lk-sunken flex items-center justify-between gap-3 rounded-xl border lk-border px-3.5 py-2.5"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold lk-strong">
-                    {s.assignmentTitle ?? 'General study'}
-                  </p>
-                  <p className="text-xs lk-muted">
-                    {new Date(s.endedAt).toLocaleString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </p>
-                </div>
-                <Badge tone={s.actualMinutes >= s.plannedMinutes ? 'mint' : 'neutral'}>
-                  {s.actualMinutes} / {s.plannedMinutes} min
-                </Badge>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
 
       {/* ================= Dialogs ================= */}
       <FocusSetupModal
@@ -857,6 +885,10 @@ function FocusRunning({
   overrun,
   extensionConnected,
   blockingCount,
+  goal,
+  steps,
+  intention,
+  focusKind,
   onPause,
   onResume,
   onEnd,
@@ -870,6 +902,10 @@ function FocusRunning({
   overrun: boolean;
   extensionConnected: boolean;
   blockingCount: number;
+  goal: string;
+  steps: { id: string; text: string; done: boolean }[];
+  intention: 'start' | 'progress' | 'finish';
+  focusKind: 'standard' | 'reading' | 'practice';
   onPause: () => void;
   onResume: () => void;
   onEnd: () => void;
@@ -880,7 +916,8 @@ function FocusRunning({
   const pct = plannedMs > 0 ? Math.min(100, (elapsedMs / plannedMs) * 100) : 0;
 
   return (
-    <div className="animate-fade flex min-h-[70vh] flex-col items-center justify-center py-8 text-center">
+    <div className="lk-focus-cockpit animate-fade relative flex min-h-[calc(100dvh-7rem)] flex-col items-center justify-center overflow-hidden rounded-[2rem] border lk-border px-5 py-8 text-center">
+      <div className={cx('lk-focus-companion', paused && 'is-paused', !paused && 'is-calm')} aria-hidden="true"><span className="lk-focus-face">•‿•</span></div>
       <p className="text-caption font-bold tracking-[0.18em] lk-muted uppercase">
         {paused ? 'Paused' : overrun ? 'Overtime' : 'Focus'}
       </p>
@@ -889,6 +926,8 @@ function FocusRunning({
       <h1 className="mt-0.5 max-w-xl px-4 text-title font-extrabold text-balance lk-strong">
         {label}
       </h1>
+      {goal && <div className="mt-4 max-w-lg rounded-full border lk-border bg-white/35 px-4 py-2 text-body font-semibold lk-strong backdrop-blur dark:bg-black/15"><span className="lk-muted">Goal · </span>{goal}</div>}
+      <p className="mt-2 text-caption font-bold lk-muted">{focusKind === 'reading' ? 'Reading mode' : focusKind === 'practice' ? 'Practice mode' : 'Standard mode'} · {intention === 'start' ? 'Create momentum' : intention === 'progress' ? 'Make progress' : 'Aim to finish'}</p>
 
       {/*
         The clock is the largest thing on screen by a wide margin. Tabular
@@ -930,6 +969,12 @@ function FocusRunning({
           style={{ width: `${pct}%` }}
         />
       </div>
+
+      <div className="mt-3 flex w-full max-w-md items-center gap-2" aria-label="Session minimap">
+        {['Started', paused ? 'Paused' : 'Working', overrun ? 'Overtime' : 'Finish'].map((stage, index) => <div key={stage} className="min-w-0 flex-1"><div className={`h-1 rounded-full ${index === 0 || index === 1 || (index === 2 && pct > 85) ? 'bg-brand-500' : 'lk-sunken'}`}/><p className="mt-1 truncate text-[0.62rem] font-bold lk-muted">{stage}</p></div>)}
+      </div>
+
+      {steps.length > 0 && <div className="mt-5 w-full max-w-md rounded-2xl border lk-border bg-white/30 p-3 text-left backdrop-blur dark:bg-black/10"><p className="text-caption font-extrabold tracking-wide lk-muted uppercase">Steps</p><div className="mt-2 space-y-1.5">{steps.slice(0, 5).map((step) => <p key={step.id} className={cx('flex items-center gap-2 text-caption font-semibold lk-strong', step.done && 'opacity-55 line-through')}><span className={cx('grid h-4 w-4 place-items-center rounded-full border text-[0.55rem]', step.done ? 'border-mint-500 bg-mint-500 text-white' : 'lk-border')}>{step.done ? '✓' : ''}</span>{step.text}</p>)}</div></div>}
 
       <div className="mt-8 flex flex-wrap justify-center gap-2">
         {paused ? (
@@ -1002,15 +1047,26 @@ function FocusComplete({
   completedAssignment,
   nextLine,
   onDismiss,
+  onBreak,
+  landingKey,
+  onMomentum,
+  hasMomentumTask,
 }: {
   minutes: number;
   label: string;
   completedAssignment: boolean;
   nextLine: string;
   onDismiss: () => void;
+  onBreak: () => void;
+  landingKey: string;
+  onMomentum: () => void;
+  hasMomentumTask: boolean;
 }) {
+  const [toolkit, setToolkit] = useState(readToolkit);
+  const landing = toolkit.softLandings[landingKey] ?? '';
   return (
-    <Card className="lk-card-primary animate-pop relative overflow-hidden">
+    <Card className="lk-card-primary lk-completion-burst animate-pop relative overflow-hidden">
+      <div aria-hidden="true" className="lk-particles">{Array.from({ length: 10 }, (_, index) => <i key={index} style={{ '--particle': index } as CSSProperties} />)}</div>
       <button
         type="button"
         onClick={onDismiss}
@@ -1021,12 +1077,26 @@ function FocusComplete({
       </button>
 
       <p className="text-caption font-bold tracking-[0.18em] lk-muted uppercase">Focus complete</p>
+      <span className="mt-3 inline-grid h-12 w-12 place-items-center rounded-full bg-mint-500 text-white shadow-lg shadow-mint-500/25"><Icon name="check" size={24} strokeWidth={2.8} /></span>
       <p className="mt-2 text-display font-extrabold tabular-nums lk-strong">{minutes} min</p>
       <p className="mt-1 text-body font-semibold lk-strong">{label}</p>
       {completedAssignment && <p className="mt-1 text-body lk-muted">Marked complete.</p>}
       <p className="mt-3 text-body lk-muted">{nextLine}</p>
+      <label className="mx-auto mt-4 block max-w-lg text-left text-caption font-bold lk-strong">Soft landing<TextInput value={landing} maxLength={500} placeholder="Where did you stop, and what is the exact next action?" onChange={(event) => setToolkit(updateToolkit({ softLandings: { ...toolkit.softLandings, [landingKey]: event.target.value } }))}/></label>
+      <div className="mt-4 flex flex-wrap justify-center gap-2"><Button size="sm" variant="secondary" onClick={onBreak}>Take a 5-minute break</Button>{hasMomentumTask && <Button size="sm" variant="ghost" onClick={onMomentum}>Keep momentum</Button>}</div>
     </Card>
   );
+}
+
+function StartRitual({ open, label, onCancel, onComplete }: { open: boolean; label: string; onCancel: () => void; onComplete: () => void }) {
+  const [remaining, setRemaining] = useState(10);
+  useEffect(() => {
+    if (!open) { setRemaining(10); return; }
+    const timer = window.setInterval(() => setRemaining((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [open]);
+  useEffect(() => { if (open && remaining === 0) onComplete(); }, [open, remaining]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <Modal open={open} title="Settle in" subtitle="A short boundary between everything else and this session." onClose={onCancel}><div className="lk-start-ritual text-center"><p className="text-caption font-bold tracking-widest lk-muted uppercase">Starting with</p><p className="mt-2 text-heading font-extrabold lk-strong">{label}</p><p className="mt-5 font-mono text-display font-extrabold tabular-nums text-brand-600 dark:text-brand-300">{remaining}</p><p className="mt-2 text-body lk-muted">Close extra tabs. Put the first material in front of you. Exhale.</p><Button className="mt-5" variant="secondary" onClick={onComplete}>Start now</Button></div></Modal>;
 }
 
 /**

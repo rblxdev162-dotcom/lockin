@@ -34,6 +34,18 @@ async function render() {
 
   const { state } = view;
 
+  /**
+   * The static copy says "Focus Mode is active", which stopped being true when
+   * blocking started running through homework hours on its own. Saying it
+   * anyway would be the app misdescribing its own state on the one page a
+   * student reads when they are annoyed with it.
+   */
+  if (!state.focusModeActive && !state.isTest) {
+    $('kicker').textContent = 'Homework hours.';
+    $('hint').textContent =
+      'LockIn blocks distractions after school. It stops by itself at midnight, and during school hours.';
+  }
+
   if (state.isTest) {
     $('kicker').textContent = 'TEST MODE is active.';
     $('hint').textContent =

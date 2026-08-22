@@ -4,6 +4,7 @@ import { useApp } from './store/context';
 import { useTheme } from './hooks/useTheme';
 import { useReminders } from './hooks/useReminders';
 import { useCanvasAutoSync } from './hooks/useCanvasAutoSync';
+import { useGradeHistory } from './hooks/useGradeHistory';
 import { Shell } from './components/layout/Shell';
 import { RouteErrorBoundary } from './components/layout/ErrorBoundary';
 import { Toaster } from './components/ui/Toast';
@@ -22,6 +23,8 @@ import { SettingsPage } from './pages/Settings';
 import { PrivacyPage } from './pages/Privacy';
 import { HelpPage } from './pages/Help';
 import { ParentPage } from './pages/Parent';
+import { ClassDashboard } from './pages/ClassDashboard';
+import { BootSequence } from './components/layout/BootSequence';
 
 /** Keeps un-onboarded visitors on the welcome/onboarding flow. */
 function Protected({ children }: { children: ReactNode }) {
@@ -48,11 +51,13 @@ function ParentRoute() {
 export default function App() {
   useTheme();
   useReminders();
-  // Folds the extension's cached Canvas feed in on load and every 30 minutes.
+  // Folds the cached Canvas feed in on load and every 15 minutes.
   useCanvasAutoSync();
+  useGradeHistory();
 
   return (
     <>
+      <BootSequence />
       <Routes>
         <Route path="/" element={<Welcome />} />
         <Route path="/onboarding" element={<Onboarding />} />
@@ -101,6 +106,14 @@ export default function App() {
           element={
             <Protected>
               <Grades />
+            </Protected>
+          }
+        />
+        <Route
+          path="/class/:subject"
+          element={
+            <Protected>
+              <ClassDashboard />
             </Protected>
           }
         />

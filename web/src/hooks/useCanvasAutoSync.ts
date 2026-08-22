@@ -10,7 +10,7 @@
  * the rules that decide whether something is new.
  *
  * So this hook does the other half. Whenever the app is open it folds the
- * cached feed in — on load, and every 30 minutes after — and it does it
+ * cached feed in — on load, and every 15 minutes after — and it does it
  * silently when there is nothing to decide.
  *
  * ## When it asks first
@@ -38,12 +38,15 @@ import { syncFeed } from '../lib/canvas/feedTransport';
 import { describeDiff, diffIsInteresting, reconcileFeed } from '../lib/canvas/calendarReconcile';
 import { toast } from '../components/ui/Toast';
 import { evaluateCheckWindow } from '../lib/canvas/checkWindow';
+import { canvasProvider } from '../lib/canvas/pageProvider';
+import { applyCanvasView } from '../lib/canvas/reconcile';
+import { canvasCourseIdsNeedingRead } from '../lib/canvas/autoRead';
 import type { AppState } from '../types';
 import type { Action } from '../store/reducer';
 import type { Dispatch } from 'react';
 
 /** Matches the extension's alarm. One cadence, defined in two places that agree. */
-export const AUTO_SYNC_MS = 30 * 60 * 1000;
+export const AUTO_SYNC_MS = 15 * 60 * 1000;
 
 /** Long enough after load that it never competes with the first paint. */
 const FIRST_RUN_DELAY_MS = 4000;
@@ -53,11 +56,11 @@ export function useCanvasAutoSync(): void {
 
   // Everything the sync needs, read through a ref so the effect below does not
   // re-run — and re-sync — on every keystroke elsewhere in the app.
-  const latest = useRef({ state, dispatch });
-  latest.current = { state, dispatch };
+  const latest = useRef({ state, dispatch, extensionConnected: extension.status === 'connected' });
+  latest.current = { state, dispatch, extensionConnected: extension.status === 'connected' };
 
   const runSync = useCallback(async () => {
-    const { state: current, dispatch: send } = latest.current;
+    const { state: current, dispatch: send, extensionConnected } = latest.current;
 
     /**
      * The gate, before anything else.
@@ -72,7 +75,7 @@ export function useCanvasAutoSync(): void {
     const gate = evaluateCheckWindow(current.settings.canvasCheckWindow, 'automatic', Date.now());
     if (!gate.allowed) return;
 
-    await runFeedSync(current, send);
+    await runFeedSync(current, send, 'automatic', { autoReadPages: extensionConnected });
   }, []);
 
   useEffect(() => {
@@ -95,7 +98,7 @@ export function useCanvasAutoSync(): void {
     if (decision.allowed || decision.nextAllowedAt === null) return;
 
     // Wake at the exact first allowed minute instead of waiting for the next
-    // half-hour interval. This is what makes a teacher's moved deadline arrive
+    // fifteen-minute interval. This is what makes a teacher's moved deadline arrive
     // as soon as LockIn's configured after-school window opens.
     const delay = Math.min(decision.nextAllowedAt - Date.now() + 250, 2_147_000_000);
     const timer = window.setTimeout(() => void runSync(), Math.max(0, delay));
@@ -114,6 +117,7 @@ export async function runFeedSync(
   current: AppState,
   send: Dispatch<Action>,
   origin: 'manual' | 'automatic' = 'automatic',
+  options: { autoReadPages?: boolean } = {},
 ): Promise<{ ok: boolean; changed: boolean; created: number; updated: number; cancelled: number }> {
   const connected = current.integrations.records.find((r) => r.id === 'canvas_calendar');
   // Nothing configured, nothing to do. The common case for a new install, and
@@ -155,6 +159,24 @@ export async function runFeedSync(
     status: 'connected',
     itemCount: diff.create.length,
   });
+
+  /**
+   * A calendar gives dates, never submission state. When scheduled checks are
+   * authorised and the companion is present, hand it only the numeric class
+   * ids that still have unfinished work. It opens at most one class gradebook in
+   * the background, parses the rendered page, then closes only its own tab.
+   */
+  if (origin === 'automatic' && options.autoReadPages) {
+    const courseIds = canvasCourseIdsNeedingRead(
+      current.assignments,
+      result.feed.items,
+      current.canvas.connection?.domain ?? null,
+    );
+    if (courseIds.length > 0) {
+      const view = await canvasProvider.autoRead(courseIds);
+      if (view) applyCanvasView(send, view);
+    }
+  }
   const updated = diff.update.filter((item) => item.changes.length > 0).length;
   send({
     type: 'CANVAS_CHECK_RECORDED',
@@ -166,6 +188,7 @@ export async function runFeedSync(
       newAssignments: diff.create.length,
       updatedAssignments: updated,
       cancelledAssignments: diff.cancel.length,
+      coverage: 'dates_only',
     },
   });
 

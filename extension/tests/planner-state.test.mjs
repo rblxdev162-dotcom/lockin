@@ -378,6 +378,27 @@ test('manual ordering is applied immediately and survives until a rebuild', () =
   );
 });
 
+test('dragging a study block moves it between days without losing minutes', () => {
+  const { state, id } = withAssignment(configured(), { estimatedMinutes: 90, dueDate: D(4) });
+  const plan = state.planner.plan;
+  const from = plan.days.find((day) => day.items.some((item) => item.sourceId === id));
+  const item = from.items.find((entry) => entry.sourceId === id);
+  const to = plan.days.find((day) => day.date !== from.date);
+  const before = minutesFor(state, id);
+
+  const moved = reducer(state, {
+    type: 'PLANNER_MOVE_ITEM',
+    itemId: item.id,
+    fromDate: from.date,
+    toDate: to.date,
+  });
+
+  assert.equal(moved.planner.plan.days.find((day) => day.date === from.date).items.some((entry) => entry.id === item.id), false);
+  assert.equal(moved.planner.plan.days.find((day) => day.date === to.date).items.some((entry) => entry.id === item.id), true);
+  assert.equal(minutesFor(moved, id), before, 'a drag never creates or loses study time');
+  assert.equal(moved.activity[0].type, 'plan_item_moved');
+});
+
 test('locking a day is recorded and can be released', () => {
   const state = reducer(configured(), { type: 'PLANNER_SET_LOCK', date: todayISO(), locked: true });
   assert.deepEqual(state.planner.lockedDates, [todayISO()]);

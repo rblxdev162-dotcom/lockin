@@ -24,6 +24,8 @@ import { applyRules, isBlockingActive, effectiveBlocklist } from './rules.js';
 import { getState, setState, getStats, recordBlock, clearStats } from './storage.js';
 import { CANVAS_MSG } from '../canvas/messaging.js';
 import {
+  autoReadCanvasCourses,
+  closeOwnedCanvasReadTab,
   configureCanvas,
   canvasGate,
   disconnectCanvas,
@@ -152,8 +154,8 @@ async function reassertCalendarAlarm() {
  *
  * Chrome starting is the one moment LockIn knows the student has sat down, and
  * it is when their data is furthest out of date — the machine may have been off
- * for a day. So the feed is fetched immediately rather than waiting up to half
- * an hour for the first alarm, and, if they asked for it, Canvas is opened in
+ * for a day. So the feed is fetched immediately rather than waiting for the
+ * first fifteen-minute alarm, and, if they asked for it, Canvas is opened in
  * the background so submission status catches up too.
  */
 async function startupSync() {
@@ -164,6 +166,7 @@ async function startupSync() {
   const gate = await canvasGate('automatic');
   if (!gate.allowed) return;
   await runCalendarRefresh();
+  await autoReadCanvasCourses();
 }
 
 // If the student revokes Canvas access from chrome://extensions, stop the
@@ -185,12 +188,22 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     // The feed refresh is Canvas traffic like any other, so it goes through
     // the same gate: off entirely in manual mode, and never during configured
     // school hours.
-    void canvasGate('automatic').then((gate) => {
-      if (gate.allowed) return runCalendarRefresh();
+    void canvasGate('automatic').then(async (gate) => {
+      if (gate.allowed) {
+        await runCalendarRefresh();
+        await autoReadCanvasCourses();
+      }
       return undefined;
     });
   }
   if (alarm.name === HEARTBEAT_ALARM) {
+    // A worker stopped mid-load cannot strand a background Canvas tab. This
+    // closes only a tab recorded as LockIn-owned, and never an active/adopted one.
+    void closeOwnedCanvasReadTab();
+    // The roster is numeric ids only and survives LockIn being closed. The
+    // reader's global fifteen-minute throttle means this one-minute heartbeat is
+    // a reliable wake-up mechanism, not a one-minute Canvas poll.
+    void autoReadCanvasCourses();
     // Reminders ride the existing one-minute heartbeat rather than adding an
     // alarm of their own; the check is a storage read and some arithmetic.
     // `studyPresence` is passed in so a student already working is not
@@ -275,6 +288,14 @@ async function handlePageMessage(envelope, sender) {
       // "I am not at school right now". It is honoured and it is logged.
       const result = await syncCanvasNow({ override: envelope.payload?.override === true });
       return { type: MSG.CANVAS_VIEW, payload: { ...(await getCanvasView()), sync: result } };
+    }
+
+    case MSG.CANVAS_AUTO_READ: {
+      const autoRead = await autoReadCanvasCourses(envelope.payload?.courseIds);
+      return {
+        type: MSG.CANVAS_VIEW,
+        payload: { ...(await getCanvasView()), autoRead },
+      };
     }
 
     case MSG.CANVAS_SET_WINDOW: {
@@ -551,7 +572,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleCanvasContentMessage(message, sender)
       .then(async (result) => {
         // Only wake the web app when something actually changed.
-        if (result.ok && (result.changed > 0 || result.newlyComplete > 0)) {
+        if (
+          result.ok &&
+          (result.changed > 0 || result.newlyComplete > 0 || result.gradesChanged > 0)
+        ) {
           await notifyAppOfCanvas();
         }
         sendResponse(result);

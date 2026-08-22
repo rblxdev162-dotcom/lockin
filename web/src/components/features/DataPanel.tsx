@@ -22,6 +22,7 @@ import { toast } from '../ui/Toast';
 import { ParentPinDialog } from './ParentPinDialog';
 import { buildExport, downloadExport } from '../../lib/export';
 import { APP_VERSION } from '../../version';
+import { clearLocalExperienceData } from '../../lib/localExperience';
 
 type Scope = 'activity' | 'focus' | 'verification';
 
@@ -156,6 +157,7 @@ export function DataPanel() {
         message="Assignments, exams, your study plan, all history, settings and your parent PIN will be deleted from this device. This cannot be undone."
         onCancel={() => setResetOpen(false)}
         onConfirm={() => {
+          clearLocalExperienceData();
           dispatch({ type: 'RESET' });
           setResetOpen(false);
           window.location.href = '/';

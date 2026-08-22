@@ -15,13 +15,97 @@ import { PROTECTED_DOMAINS, hostMatches, normalizeDomain } from '../shared/domai
 const ALLOW_PRIORITY = 2;
 const BLOCK_PRIORITY = 1;
 
-/** True when blocking should be enforced right now. Mirrors the web selector. */
+/**
+ * True while `now` falls inside the school day the web app sent.
+ *
+ * `schoolHours` is absent whenever the pause is switched off or LockIn does
+ * not know when school is, and an absent window suspends nothing. The interval
+ * is half-open, so the moment the last bell rings is already after school.
+ *
+ * This is checked against the wall clock rather than a stored "school is on"
+ * flag on purpose: an MV3 worker that was asleep across the last bell has no
+ * flag to trust, but it always knows what time it is.
+ */
+export function isDuringSchoolHours(schoolHours, now = Date.now(), noSchoolDates = []) {
+  if (!schoolHours) return false;
+  const { days, from, until } = schoolHours;
+  if (!Array.isArray(days) || until <= from) return false;
+  const at = new Date(now);
+  // A holiday is not a school day. Without this the pause swallows a Monday
+  // the student spends at home, which is the opposite of what it is for.
+  if (noSchoolDates.includes(localISODate(at))) return false;
+  if (!days.includes(at.getDay())) return false;
+  const minutes = at.getHours() * 60 + at.getMinutes();
+  return minutes >= from && minutes < until;
+}
+
+/**
+ * `YYYY-MM-DD` in local time — never `toISOString()`, which is UTC and names
+ * yesterday for anyone west of Greenwich in the afternoon. The afternoon is
+ * the entire subject of this file.
+ */
+function localISODate(at) {
+  const month = String(at.getMonth() + 1).padStart(2, '0');
+  const day = String(at.getDate()).padStart(2, '0');
+  return `${at.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * True while `now` is inside homework hours — after the last bell on a school
+ * day, from the free-day hour otherwise, until midnight.
+ *
+ * There is no evening cutoff on purpose. The late hours are the ones a student
+ * most needs held, and a blocker that clocks off at half past nine protects
+ * the wrong half of the evening.
+ */
+export function isHomeworkTime(homeworkWindow, now = Date.now(), noSchoolDates = []) {
+  if (!homeworkWindow) return false;
+  const { schoolDays, from, freeDayFrom, until } = homeworkWindow;
+  const at = new Date(now);
+  const holiday = noSchoolDates.includes(localISODate(at));
+  const schoolDay = !holiday && Array.isArray(schoolDays) && schoolDays.includes(at.getDay());
+  const start = schoolDay ? from : freeDayFrom;
+  const minutes = at.getHours() * 60 + at.getMinutes();
+  return minutes >= start && minutes < until;
+}
+
+/**
+ * True when blocking should be enforced right now. Mirrors `blockingActive()`
+ * in `web/src/lib/selectors.ts`.
+ *
+ * The rule a student can hold in their head is: **LockIn blocks after school,
+ * and only after school.** Two mechanisms produce it —
+ *
+ *   - the school day is carved out, so nothing is blocked in class; and
+ *   - homework hours block on their own, with no Focus session started.
+ *
+ * The second half is the one that matters. Until it existed, blocking only
+ * ever ran inside a timer the student chose to start, which meant the student
+ * most in need of it — the one who never presses Start — was never blocked at
+ * all. A deliberately started Focus session still blocks outside school
+ * whenever it runs, including late at night, because that is the student
+ * asking for it explicitly.
+ */
 export function isBlockingActive(state, now = Date.now()) {
-  if (!state || !state.focusModeActive) return false;
+  if (!state) return false;
   if (!state.blockingEnabled) return false;
   if (state.temporaryUnlockUntil && state.temporaryUnlockUntil > now) return false;
   if (state.isTest && state.testExpiresAt && state.testExpiresAt <= now) return false;
-  return true;
+  /**
+   * The five-minute test from Settings ignores the schedule.
+   *
+   * It is the one way a student can confirm blocking actually works, and a
+   * test button that silently does nothing because of the hour teaches the
+   * opposite of what it is for. It is deliberate, self-expiring and has a Stop
+   * button, so it is the student's call to make at any time.
+   */
+  if (state.isTest) return true;
+  // School time is not homework time.
+  if (isDuringSchoolHours(state.schoolHours, now, state.noSchoolDates)) return false;
+  // A session the student started themselves.
+  if (state.focusModeActive) return true;
+  // Homework hours, running on their own.
+  return isHomeworkTime(state.homeworkWindow, now, state.noSchoolDates);
 }
 
 /**

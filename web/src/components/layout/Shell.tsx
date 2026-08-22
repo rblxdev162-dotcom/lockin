@@ -12,6 +12,8 @@ import { ThemeToggle } from './ThemeToggle';
 import { RecoveryNotice } from './RecoveryNotice';
 import { Modal } from '../ui/Modal';
 import { TextInput } from '../ui/Field';
+import { FloatingQuickAdd } from '../features/FloatingQuickAdd';
+import { EXPERIENCE_EVENT, readToolkit, updateToolkit } from '../../lib/localExperience';
 
 interface NavItem {
   to: string;
@@ -52,8 +54,10 @@ const SECONDARY: NavItem[] = [
 
 export function Shell({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const [toolkit, setToolkit] = useState(readToolkit);
+  useEffect(() => { const refresh = () => setToolkit(readToolkit()); window.addEventListener(EXPERIENCE_EVENT, refresh); return () => window.removeEventListener(EXPERIENCE_EVENT, refresh); }, []);
   return (
-    <div className="lk-app-shell min-h-dvh lk-surface">
+    <div className={cx('lk-app-shell min-h-dvh lk-surface', toolkit.zenMode && 'lk-zen')}>
       <div className="lk-atmosphere" aria-hidden="true">
         <span className="lk-orb lk-orb-one" />
         <span className="lk-orb lk-orb-two" />
@@ -74,11 +78,14 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>
       <BottomNav />
       <CommandPalette />
+      <FloatingQuickAdd />
+      {toolkit.zenMode && <button type="button" className="lk-zen-exit fixed right-4 top-4 z-[80] rounded-full border lk-border lk-raised px-4 py-2 text-caption font-extrabold lk-strong shadow-lg" onClick={() => updateToolkit({ zenMode: false })}>Exit Zen</button>}
     </div>
   );
 }
 
 function CommandPalette() {
+  const { state } = useApp();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -100,21 +107,24 @@ function CommandPalette() {
     };
   }, []);
   const commands = [
-    ['Add assignment', '/assignments?new=1'],
-    ['Check Canvas', '/assignments'],
-    ['Start Focus', '/focus'],
-    ['Open today’s plan', '/planner'],
-    ['View grades', '/grades'],
-    ['Review class schedule', '/settings#school-schedule'],
-    ['Canvas settings', '/settings#canvas-checks'],
-  ].filter(([label]) => label.toLowerCase().includes(query.trim().toLowerCase()));
+    { label: 'Add assignment', to: '/assignments?new=1' },
+    { label: 'Check Canvas', to: '/assignments' },
+    { label: 'Start Focus', to: '/focus' },
+    { label: 'Open today’s plan', to: '/planner' },
+    { label: 'View grades', to: '/grades' },
+    { label: 'Review class schedule', to: '/settings#school-schedule' },
+    { label: 'Canvas settings', to: '/settings#canvas-checks' },
+    { label: 'Enter Zen display', action: () => updateToolkit({ zenMode: true }) },
+    ...state.settings.schoolSchedule.classes.map((item) => ({ label: `Open ${item.name}`, to: `/class/${encodeURIComponent(item.name)}` })),
+    ...state.assignments.filter((item) => item.status !== 'Completed').slice(0, 20).map((item) => ({ label: `Focus: ${item.title}`, to: `/focus?assignment=${item.id}` })),
+  ].filter((command) => command.label.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 12);
   return (
     <Modal open={open} title="Jump anywhere" onClose={() => { setOpen(false); setQuery(''); }}>
       <TextInput autoFocus value={query} placeholder="Search actions…" onChange={(event) => setQuery(event.target.value)} />
       <div className="mt-3 space-y-1">
-        {commands.map(([label, to]) => (
-          <button key={label} type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-body font-bold lk-strong hover:lk-sunken" onClick={() => { navigate(to); setOpen(false); setQuery(''); }}>
-            {label}<span className="text-caption lk-muted">↵</span>
+        {commands.map((command) => (
+          <button key={command.label} type="button" className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-body font-bold lk-strong hover:lk-sunken" onClick={() => { if ('action' in command) command.action?.(); else if (command.to) navigate(command.to); setOpen(false); setQuery(''); }}>
+            {command.label}<span className="text-caption lk-muted">↵</span>
           </button>
         ))}
       </div>
@@ -207,6 +217,7 @@ function Sidebar() {
           </NavLink>
         </div>
         <ThemeToggle />
+        <button type="button" className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-caption font-bold lk-muted hover:lk-sunken hover:lk-strong" onClick={() => updateToolkit({ zenMode: true })}><Icon name="timer" size={15}/>Zen display</button>
         {state.profile && (
           <div className="flex items-center gap-2.5 rounded-xl px-1 py-1">
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-sm font-bold text-brand-700 dark:bg-brand-900/60 dark:text-brand-200">

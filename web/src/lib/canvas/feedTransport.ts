@@ -47,7 +47,7 @@ const NONE: FeedView = {
   host: null,
   lastFetchedAt: null,
   lastError: null,
-  refreshMinutes: 30,
+  refreshMinutes: 15,
   transport: 'none',
 };
 

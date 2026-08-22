@@ -1,5 +1,5 @@
 /**
- * Check Canvas — the one button, and the only way LockIn touches Canvas.
+ * Check Canvas — the deliberate, immediate way to refresh Canvas.
  *
  * ## What one press does
  *
@@ -12,10 +12,10 @@
  * ## Why it is shaped like this
  *
  * The student takes proctored tests at school while this app runs at home, and
- * the design rule that follows is: LockIn makes no request to Canvas of its
- * own, and reads nothing the student did not deliberately open. So there is no
- * poller, no background tab, no API call — there is a button, and the page in
- * front of them.
+ * automatic reading is separately authorized and uses the same gate. This
+ * button remains the student's immediate path and reads their existing tabs;
+ * the scheduled path may create one owned background gradebook tab and closes
+ * it after the data lands. Neither path uses a Canvas API.
  *
  * The two halves are here together because they are one question in the
  * student's head ("is my list right?"), and splitting them into two buttons
@@ -32,6 +32,7 @@ import {
   gateExplanation,
   type GateDecision,
 } from '../lib/canvas/checkWindow';
+import { assessCanvasRead, datesOnlyAssessment } from '../lib/canvas/readCoverage';
 
 export interface CanvasCheckResult {
   ok: boolean;
@@ -98,6 +99,20 @@ export function useCanvasCheck() {
         if (extension.status !== 'connected') {
           const message =
             'Due dates updated. Open LockIn in Chrome with the Companion enabled to read grades.';
+          const assessment = datesOnlyAssessment();
+          dispatch({
+            type: 'CANVAS_CHECK_RECORDED',
+            report: {
+              checkedAt: new Date().toISOString(),
+              origin: 'manual',
+              ok: true,
+              message,
+              newAssignments: dates.created,
+              updatedAssignments: dates.updated,
+              cancelledAssignments: dates.cancelled,
+              coverage: assessment.coverage,
+            },
+          });
           toast(message, 'info');
           const result = { ok: true, message };
           setLastResult(result);
@@ -108,6 +123,7 @@ export function useCanvasCheck() {
         const view = await canvasProvider.sync(options.override === true);
         applyCanvasView(dispatch, view, { markSynced: true });
         const summary = describeSync(view);
+        const assessment = assessCanvasRead(view?.sync);
         toast(summary.message, summary.ok ? 'success' : 'info');
         const result = {
           ok: summary.ok,
@@ -125,6 +141,9 @@ export function useCanvasCheck() {
             updatedAssignments: dates.updated,
             cancelledAssignments: dates.cancelled,
             pageKind: view?.sync?.pageKind,
+            coverage: assessment.coverage,
+            rowsSeen: view?.sync?.rowsSeen,
+            rowsRead: view?.sync?.rowsRead,
           },
         });
         setLastResult(result);

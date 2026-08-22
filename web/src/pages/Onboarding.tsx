@@ -217,7 +217,7 @@ export function Onboarding() {
                 const cleanBreaks = breaks.filter((item) => item.label.trim() && item.start < item.end).map((item) => ({ ...item, label: item.label.trim() }));
                 const meetingDays = [...new Set(cleanClasses.flatMap((item) => item.days))].sort();
                 dispatch({ type: 'UPDATE_SETTINGS', patch: {
-                  schoolSchedule: { configured: true, schoolStart, schoolEnd, classes: cleanClasses, breaks: cleanBreaks, quietMode: false },
+                  schoolSchedule: { configured: true, schoolStart, schoolEnd, classes: cleanClasses, breaks: cleanBreaks, quietMode: false, noSchoolDates: state.settings.schoolSchedule.noSchoolDates },
                   canvasCheckWindow: {
                     ...state.settings.canvasCheckWindow,
                     schoolDays: meetingDays.length > 0 ? meetingDays : [1, 2, 3, 4, 5],
@@ -507,9 +507,10 @@ export function Onboarding() {
               When LockIn may check Canvas
             </h1>
             <p className="mt-1.5 text-sm lk-muted">
-              LockIn never opens Canvas by itself and never asks Canvas for
-              anything. It reads the page you already have open, when you press
-              Check Canvas.
+              LockIn never uses a Canvas API or stores your password. Manual
+              checks read a page you opened. If you later enable scheduled
+              checks, the Companion may briefly load one needed class Grades
+              page after school and close only the tab it created.
             </p>
 
             <div className="mt-5 rounded-2xl border lk-border p-4">

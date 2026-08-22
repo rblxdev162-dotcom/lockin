@@ -37,12 +37,18 @@ Tagline: *Finish what matters before distractions take over.*
 | 13 | **OS reminders** — fired by the extension's alarm, so they survive every LockIn tab being closed | **Done** |
 | 12 | **Screen-capture proofs** — sharing the Edgenuity window for OCR | **Removed in Phase 17** |
 | 11 | **Edgenuity browser reading** — read course progress off the Edgenuity page the student opens | **Removed in Phase 16** |
-| 17 | **Canvas only** — Edgenuity scrapped, 30-minute auto-sync, graded-vs-undone, urgency ordering, class columns, and a large deletion pass | **Done** |
+| 17 | **Canvas only** — Edgenuity scrapped, original auto-sync (cadence superseded by Phase 28), graded-vs-undone, urgency ordering, class columns, and a large deletion pass | **Done** |
 | 18 | **The Grades page reader** — read the Canvas page the student opened, class grades, the school-hours gate, and the layout pass | **Done** |
 | 19 | **Class-first work hub** — Home course overview, class-first Assignments layout, freshness-aware overdue labels | **Done** |
 | 20 | **After-school accuracy pass** — exact gate-opening date refresh, persistent check receipts, review queue, class cleanup/details, expandable cards, Undo | **Done** |
 | 21 | **Student schedule hub** — onboarding class days/breaks, Today timeline, weekly reset, teacher changes, conflicts, steps, quiet mode, command palette | **Done** |
 | 22 | **Kinetic visual system** — aurora atmosphere, luminous depth, richer card/navigation/timeline/modal motion, accessibility fallbacks | **Done** |
+| 23 | **Student command center** — calmer Home hierarchy, day-mode rail/briefing, class dashboards, focus cockpit, visual planning, local themes/sounds | **Done** |
+| 28 | **Three-minute scheduled sync** — web, local service, and extension cadence aligned; former 30-minute defaults migrated; school-hours gate retained | **Done** |
+| 29 | **Owned-tab Canvas reading** — scheduled checks rotate through needed class gradebooks, parse rendered data, and close only LockIn-created background tabs | **Done** |
+| 30 | **Fifteen-minute after-school cadence** — all automatic transports and owned-tab reads use 15 minutes after the student's chosen start time | **Done** |
+| 31 | **Blocking stops at the school bell** — website blocking suspends itself during the configured school day, in both mirrors | **Done** |
+| 32 | **After school, and only after school** — blocking runs automatically through homework hours with no Focus session, and no-school dates stop the pause swallowing a day at home | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -59,10 +65,10 @@ Tagline: *Finish what matters before distractions take over.*
 | Release safety: packaging, versions, export secrets, no-network | 17 | `npm run test:release` |
 | Performance budgets on a 100-assignment dataset | 7 | `npm run test:perf` |
 | **Provenance + Pace Engine** | 20 | `npm run test:pace` |
-| **The Canvas gate, its 3 mirrors, grades** | 21 | `npm run test:canvas-grades` |
+| **The Canvas gate, its 3 mirrors, grades, owned-tab lifecycle** | 40 | `npm run test:canvas-grades` |
 | **Work states, urgency, class grouping** | 17 | `npm run test:worklist` |
 | **Canvas ICS: parser, mapper, reconciler** | 36 | `npm run test:canvas-ics` |
-| **Companion: activity, cooldowns, calendar** | 28 | `npm run test:companion` |
+| **Companion: activity, cooldowns, calendar** | 29 | `npm run test:companion` |
 | **Phase 16 state, migration and feedback** | 14 | `npm run test:phase16` |
 
 **Real browser** — needs Chrome for Testing, and (except the release suite) the
@@ -72,7 +78,7 @@ dev server on `:5173`:
 | --- | --- | --- |
 | Canvas parser + Grades pages (real DOM) | 40 | `npm run test:parser` |
 | Phase 2 blocking e2e | 26 | `npm run test:e2e` |
-| Canvas e2e | 57 | `npm run test:canvas-e2e` |
+| Canvas e2e | 69 | `npm run test:canvas-e2e` |
 | Parent Dashboard e2e (PIN, controls, enforcement) | **BROKEN** | `npm run test:parent-e2e` |
 | Planner e2e (plan → start → partial → recalculate) | 54 | `npm run test:planner-e2e` |
 | **Release e2e** (production build + packaged zip) | 22 | `npm run test:release-e2e` |
@@ -179,7 +185,7 @@ one.
 7. **Local only.** No network calls in either half of the project. No analytics,
    no tracking, no browsing history — block stats are per-domain counts only.
 8. **Schema migrations, never wipes.** Bump `SCHEMA_VERSION` in
-   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v13**.
+   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v16**.
 9. **Only a machine-read measurement can verify Edgenuity progress** — a frame
    from a window the student shared with `getDisplayMedia` (Phase 12), or a DOM
    read from their own authenticated Edgenuity session (Phase 11, or Phase 14's
@@ -409,6 +415,424 @@ same matrix by `npm run test:canvas-grades`.
 
 ---
 
+## Phase 32 — After school, and only after school (done)
+
+Phase 31 stopped blocking during school. This finishes the sentence: blocking
+now also **starts** on its own once school is over, so the rule a student can
+hold in their head is one line — *LockIn blocks after school, and only after
+school.*
+
+Until now, blocking only ever ran inside a Focus session the student chose to
+start. That meant the student most in need of it — the one who never presses
+Start — was never blocked at all, and the extension the whole project is named
+after sat idle most afternoons. `isBlockingActive()` no longer requires
+`focusModeActive`.
+
+The decision, in order, in both mirrors:
+
+1. `blockingEnabled` off, or a live temporary unlock → no.
+2. An expired test → no. A **live** test → **yes, at any hour**, school
+   included. It is the only way to confirm blocking works, it is deliberate,
+   it expires by itself and it has a Stop button; a test that silently does
+   nothing because of the clock teaches the opposite of what it is for.
+3. Inside school hours → no.
+4. A Focus session the student started → yes. Outside school, that holds at
+   any hour, 6am or 11pm, because they asked for it explicitly.
+5. Otherwise → whether `now` is inside **homework hours**.
+
+Homework hours begin at the same bell school hours end at — one boundary, so
+blocking can never start before the day it waits on has finished — and run
+until **midnight**. There is deliberately no evening cutoff: the Canvas
+window's `dayEnd` bounds *network requests to a school server*, which is a
+privacy question, while the late hours are exactly the ones a student most
+needs held. A blocker that clocks off at half past nine protects the wrong
+half of the evening. On a day with no school, they start at the Canvas
+window's `freeDayStart` instead.
+
+**No-school dates** (`schoolSchedule.noSchoolDates`, schema v16) close the hole
+Phase 31 left: without them, the school pause swallowed a holiday Monday and
+LockIn went quiet for a day the student spent at home. A no-school date is not
+a school day in either direction — nothing is suspended, and homework hours
+start in the morning rather than waiting for a bell that never rings. The
+"Mark today no-school" control on Home now writes to settings rather than the
+local toolkit, because a value the extension has to act on cannot live in a
+localStorage record the bridge never sees.
+
+Dates are `YYYY-MM-DD` in **local** time throughout. `toISOString().slice(0,10)`
+is UTC and names yesterday for anyone west of Greenwich in the afternoon, which
+is the entire subject of this phase.
+
+Both new wire fields are rebuilt field by field in both `validateBridgeState`
+mirrors, and both fail towards doing nothing: a malformed school window must
+not switch blocking off, and a malformed homework window must not switch it on
+at an hour nobody chose. The one-minute heartbeat re-evaluates against the wall
+clock, so blocking arrives within a minute of the last bell and leaves within a
+minute of midnight with no LockIn tab open.
+
+The block page's static kicker said "Focus Mode is active." That stopped being
+true the moment blocking ran without one, so it is now replaced at render time
+with "Homework hours." — the app must not misdescribe its own state on the one
+page a student reads while annoyed with it.
+
+Two independent toggles under **Settings → Browser Protection**, both on by
+default and migrated on: *Pause blocking during school* (v15) and *Block
+automatically after school* (v16). Each names the actual hours it derived, or
+points at School schedule when it could not derive any.
+
+Verified with 43 checks in `extension/tests/blocking.test.mjs` — the 3:29/3:30
+bell in both directions, before-school staying clear, midnight rather than an
+evening cutoff, free-day mornings, no-school dates cutting both ways, a
+deliberate session blocking at 6am but never during school, the test-mode
+exemption and its expiry, temporary unlock still winning, malformed windows
+doing nothing — plus the full `npm test` chain (20 suites), `test:storage`,
+`test:release`, a production build, and both toggles exercised in a real
+browser against state migrated v15 → v16.
+
+---
+
+## Phase 31 — Blocking stops at the school bell (done)
+
+Website blocking now suspends itself for the whole school day. Between the
+first and last bell on a school day, `buildRules()` returns an empty rule set:
+no site is redirected, and the block page is not reached.
+
+The reason is that blocking exists to protect the hours a student is meant to
+be doing their own work, and school is not those hours. During the school day
+the sites they need are chosen by a teacher, and a redirect to a LockIn block
+page mid-lesson is this app obstructing the exact thing it claims to protect —
+on a district device, during a lesson, it is also the student's problem to
+explain rather than ours.
+
+**Only blocking is suspended.** Focus Mode, its timer, Focus Guard, session
+logging and reminders are untouched, so a student who deliberately starts a
+session in a free period gets a real one; it simply does not redirect
+anything. Focus says so in as many words rather than showing the generic
+"blocking is paused" line, which reads like a fault.
+
+Where the school day comes from, in order:
+
+1. The school schedule filled in during onboarding (Phase 21) — the student's
+   own answer to when they are in class. Days come from the days their classes
+   meet, falling back to Mon–Fri when hours are set but no class is listed.
+2. Failing that, the Canvas check window's `schoolDayFrom` → `schoolDayStart`
+   interval, which is already this codebase's definition of school hours.
+
+There is deliberately no third fallback that invents an interval. With neither
+source configured, `schoolHoursFrom()` returns `null` and nothing is
+suspended: guessing wrong here either switches blocking off through a school
+day or leaves it on during one, and both are worse than doing nothing.
+
+The decision is mirrored, like `isBlockingActive` itself — `blockingActive()`
+in `web/src/lib/selectors.ts` and `isBlockingActive()` in
+`extension/background/rules.js`. The extension is the one that enforces, so
+the window travels over the bridge as `schoolHours` rather than being
+recomputed there: the schedule lives in the web app, and the extension has to
+be able to pause and resume with no LockIn tab open. `validateBridgeState()`
+rebuilds it field by field in both mirrors and yields `null` for anything
+malformed — an unusable window must fail towards blocking, never away from it.
+
+Resumption needs no event. The existing one-minute heartbeat re-evaluates the
+rules against the wall clock, so blocking lifts within a minute of the first
+bell and returns within a minute of the last one, even if the MV3 worker slept
+through both. A worker that was asleep across the bell has no "school is on"
+flag to trust, but it always knows what time it is.
+
+The toggle is **Settings → Browser Protection → Pause blocking during school**,
+on by default and migrated on for existing students (schema v15). Its
+description names the actual hours it derived, or points at School schedule
+when it could not derive any.
+
+Verified with 30 checks in `extension/tests/blocking.test.mjs` — including the
+3:29/3:30 and 7:29/7:30 bell boundaries, weekends blocking all day, malformed
+windows suspending nothing, and the pause being unable to resurrect blocking
+that is off for another reason — plus the full `npm test` chain (20 suites),
+`test:storage`, `test:release`, a production build, and the toggle exercised
+in a real browser against the migrated v15 state.
+
+---
+
+## Phase 30 — Fifteen-minute after-school cadence (done)
+
+Automatic Canvas work now begins at the student's configured after-school
+start time and repeats every **15 minutes** until the existing evening cutoff.
+The exact gate-opening timer still performs the first check immediately when
+that chosen time arrives; the student does not have to wait for the next
+interval. School hours, pauses, the cutoff, and opt-in consent are still checked
+at execution time.
+
+The web reconciliation timer, local calendar-feed service, Chrome Companion
+alarm, and automatic owned-gradebook-tab throttle all use the same cadence.
+Persisted values from both former shipped defaults (`3` and `30`) migrate to
+`15`, and lower inputs are clamped to 15. Longer deliberate custom values remain
+valid. The Companion's one-minute recovery heartbeat is unchanged, but the
+global throttle prevents it from opening or reading more than one class within
+each 15-minute interval.
+
+This is still the existing Canvas calendar ICS and rendered class Grades page
+flow. No Canvas API, token, password, new dependency, or third-party
+communication software was introduced.
+
+Verified with the full `npm test` chain, the cadence/migration Companion tests,
+the 40-check Canvas grade/owned-tab suite, `test:release`, and a production
+build. The restarted live service reports `refreshMinutes: 15`; its current
+privacy-safe gate verdict is `automatic_disabled`, so it will not fetch until
+the student enables scheduled checks in LockIn.
+
+---
+
+## Phase 29 — Automatic owned-tab Canvas reading (done; cadence superseded by Phase 30)
+
+When scheduled Canvas checks are enabled and LockIn sees unfinished
+Canvas-linked work, the web app now sends the Companion a bounded roster of
+numeric course ids. The Companion rotates through **one class per scheduled
+tick**, loads the exact rendered page `https://<configured-host>/courses/<id>/grades`
+in an inactive background tab, asks the existing page parser to read it, waits
+for the structured detection to land, and closes the tab it created. This is
+the class-specific Grades page that carries assignment status; `/grades` is
+still only the all-classes totals screen.
+
+The roster contains at most 20 numeric ids—no titles, scores, page text, or
+URLs—and lets the extension continue cycling while LockIn is closed. The app
+derives ids only from already linked assignments or HTTPS calendar links on
+the configured Canvas host. Completed work is excluded; the extension chooses
+the least recently read active class, keeping the roster useful while LockIn is closed.
+
+Tab ownership is structural:
+
+- Existing Canvas gradebook tabs are reused and **never closed**.
+- New tabs are opened with `active: false` and recorded in extension storage.
+- A created tab is closed only if its id, configured host, and exact gradebook
+  path still match.
+- If the student activates it or navigates it elsewhere, it is considered
+  adopted and left open.
+- The one-minute heartbeat cleans up a recorded tab after 25 seconds if the
+  MV3 worker dies during the read, so failures do not strand background tabs.
+
+The `automatic` trigger travels from the reparse request into the content
+message. `handleCanvasContentMessage()` therefore runs the safety gate again
+at the final trust boundary. Manual mode, school hours, pauses, the evening
+cutoff, missing permission, or a foreign host all stop the read before data is
+accepted. Automatic mode remains off by default and the Settings, onboarding,
+privacy, Help, and Integrations copy now disclose the temporary-tab behavior.
+
+No Canvas API, password, token, cookie handling, third-party dependency, or
+new network client exists. Tests cover roster selection, foreign-host refusal,
+the automatic gate, background creation, existing-tab reuse, adopted tabs,
+worker-interruption cleanup, data arrival before close, and the full real-Chrome
+flow. `test:canvas-e2e` proves a rendered fixture grade is stored and zero
+temporary Canvas tabs remain afterward. The full `npm test` chain,
+release/no-network suite, production build, and real-Chrome accessibility audit
+also pass.
+
+---
+
+## Phase 28 — Three-minute scheduled Canvas sync (done; cadence superseded by Phase 30)
+
+When the student enables scheduled Canvas checks, LockIn now refreshes the
+existing calendar-feed transport every **3 minutes** inside the configured
+after-school window. The in-app reconciliation timer, always-on local service,
+and Chrome companion alarm use the same cadence. The exact gate-opening timer
+from Phase 20 remains, so the first allowed check still happens immediately
+after the student's chosen time rather than waiting for an interval.
+
+The old shipped `refreshMinutes: 30` value is normalized to 3 in persisted web
+state, the local service config, and extension storage. Other valid custom
+values are preserved and all inputs are clamped to a three-minute minimum.
+Automatic checks remain off by default, manual **Check Canvas** still works,
+and the school-hours/paused/evening gates still run at the moment each timer
+fires. This uses only the existing Canvas calendar ICS and rendered pages: no
+Canvas API, new dependency, analytics, or third-party communication path was
+added.
+
+Verified with `test:companion` (including default/migration cadence),
+`test:canvas-grades` (all three safety-gate mirrors), `test:release`
+(no-network), the full `npm test` chain, a production build, and the real-Chrome
+accessibility/responsive audit. The restarted live service reports
+`refreshMinutes: 3` from its privacy-safe status view.
+
+---
+
+## Phase 27 — Teacher assignment tabs (done)
+
+Assignments now has two explicit browse-tab types: **Classes** and **Teachers**.
+Class tabs retain the existing class filter. Teacher tabs group every assignment
+using the teacher name saved on that class's local dashboard, show the combined
+open count, and then keep the filtered results grouped by class below. A teacher
+with several classes therefore gets one tab without losing the class boundary.
+
+LockIn does not infer or scrape a teacher name. Classes without a locally saved
+contact are grouped under **Teacher not set**, with copy explaining where to add
+the name. Teacher selection is URL-addressable with `?teacher=`, remembers the
+student's preferred tab type locally, and is cleared by Clear Local Data. Class
+deep links always force the class tab type so existing links stay deterministic.
+The old ambiguous "By class" layout button now says **Grouped cards** or **Flat
+list**, separating layout from the new class/teacher filtering concept.
+
+No Canvas code or network path changed. Production build, worklist tests,
+release/no-network checks, and the real-Chrome accessibility/responsive audit
+pass, including 320px width and 200% zoom.
+
+---
+
+## Phase 26 — Information architecture and startup polish (done)
+
+This phase deliberately removes surfaces rather than adding another layer.
+Home now reads top-to-bottom as: automatic day context, one primary next
+action, a two-column Top Three/work-horizon summary, compact class stacks, and
+one closed Insights & Weekly Review disclosure. The duplicated standalone
+Today Plan and command-center Timeline were removed from Home; the full plan
+stays in Planner. The secondary command center no longer has drag-arranging,
+because arranging three rarely used review cards was more interface than value.
+
+Daily tools remain available beneath Top Three but each is its own collapsed
+row. Assignment Bundles were removed because the class stacks already provide
+that grouping, Uncertainty Inbox was removed because Data Confidence owns that
+question, and Deadline Gravity was removed because Deadline Radar owns the same
+relationship. Focus now presents assignment, duration and outcome first, with
+queue/intention/presets/modes/soundscape under one closed Customize disclosure.
+Its duplicate Recent Sessions card was removed; history remains in Progress.
+
+A first-load-per-tab startup sequence now says **Locking In** and cycles through
+Planning study sessions, Organizing deadlines and Preparing your focus space.
+It is a short CSS/React transition over already-local state, not fake network
+progress. Reduced Motion gets a static 500 ms version. Collapsed disclosures
+are explicitly removed from layout and keyboard flow, including in browsers
+whose native `<details>` implementation reports hidden descendants loosely.
+
+Motion was made calmer and more consistent: the page entrance uses a restrained
+blur/settle, interactive cards lift two pixels instead of four, heading glints
+and the sidebar scan run less often, disclosure chevrons share one easing, and
+the boot orbit/progress/exit sequence uses the same motion language. Every new
+animation collapses under Reduced Motion.
+
+No assignment truth, planner rule, Canvas parser/transport/permission, API,
+dependency or network path changed. Production build, complete `npm test`
+(including release/no-network), and the real-Chrome accessibility/responsive
+audit pass at 320/375/430/768px and 200% zoom.
+
+---
+
+## Phase 25 — Layered student operating system (done)
+
+The second idea set is implemented as progressive disclosure, not another wall
+of cards. Home keeps the existing one-primary-action hierarchy, then offers a
+single **Daily top three** card whose toolkit expands into: top-three pinning,
+smallest-effort-first Catch-up Mode, a tiny-task pass, class assignment bundles,
+an uncertainty inbox, factual workload weather and pressure source, free-time
+balance/rest protection, exam countdown lanes, deadline gravity, tomorrow's
+classes and bag checklist, reusable routines, manual no-school/commute modes,
+a meaningful Win Archive and a non-destructive Fresh Start.
+
+Every assignment card now has one collapsed **Plan, requirements & materials**
+area. It contains a rubric checklist, dependencies, local materials shelf,
+reading/practice target, private submission-confidence memory, waiting-on-
+teacher state, uncertainty note, local field-change history, similar-title
+warning and a completion postmortem. These are student-authored planning aids.
+They never mutate, override or impersonate Canvas verification.
+
+Focus adds standard, reading and practice modes; a ten-second optional start
+ritual; synthesized rain/library/fireplace/brown-noise soundscapes; a session
+minimap; softly growing companion habitat; completion soft landing; and a
+one-tap momentum handoff. Sound is local Web Audio, defaults to silence and is
+stopped when the setup surface unmounts. The prior Reduced Motion and optional
+cue settings remain authoritative for visual celebrations and cues.
+
+The existing command palette now searches open assignments and classes and can
+enter Zen display. Planner's workload map zooms continuously in concept from
+day to week to 28-day month while retaining the same deterministic plan data.
+Class patterns now visually calm or intensify with workload state. Settings can
+schedule the local Aurora/Ocean/Sunset/Midnight backgrounds by time of day, and
+class dashboards keep a private before/after-exam confidence note.
+
+New optional state is sanitized and capped inside `lockin.toolkit.v1`; Clear
+Local Data removes it with the other experience records. There is still no
+Canvas API call, remote sync, analytics, external asset, package, prediction or
+location collection. The production build, full `npm test` suite (including
+release/no-network), and the complete real-Chrome accessibility/responsive
+audit pass at 320/375/430/768px and 200% zoom.
+
+---
+
+## Phase 24 — Calm intelligence toolkit (done)
+
+The second organization pass turns the dashboard into a true triage surface.
+Assignments are summarized into Today, Soon, Later, Inbox and Parking Lot
+horizons instead of being repeated as a long mixed feed. Home shows three
+class cards initially, supports an explicit local show-all, and lets a student
+archive quiet classes without deleting any work. The primary task now explains
+why it was selected, while the weekly constellation exposes a small memory for
+each completed star and Weekly Reset tells a factual session story with an
+optional private reflection.
+
+Focus now has a small ordered queue, per-class duration presets, a session
+intention, distraction parking notes and a five-minute break cockpit. These
+features are deliberately inside the Focus surface rather than additional Home
+cards. Starting a queued task removes it from the queue; none of the controls
+changes assignment truth or invents progress.
+
+Planner intelligence adds a local bedtime runway, low/normal/high energy
+reordering, a preview-only capacity what-if control, protected-free-time
+shortcut, spillover visibility and plain-language collision explanations. It
+uses the existing planner actions and deterministic plan cache. The what-if
+slider never silently writes settings.
+
+Each class page now includes a local notebook, teacher contact card, smallest-
+effort-first missing-work recovery list, workload anomaly check, exam-readiness
+topics, estimate calibration from completed sessions and a grade-change
+journal. Readiness and journal entries are student notes, not predictions or
+claims imported from Canvas.
+
+All new personal state lives in the capped `lockin.toolkit.v1` local record and
+is removed by the existing clear-local-data action. The additional atmosphere,
+hover depth, glowing horizon cards, readiness wheel and break wave are CSS-only
+and collapse with Reduced Motion. No API, remote service, analytics call,
+third-party package or external asset was added. `npm run build`, the complete
+`npm test` suite (including release/no-network and planner-state 26/26), and the
+full accessibility/responsive audit all pass.
+
+---
+
+## Phase 23 — Student command center (done)
+
+Home is now a command center rather than a wall of assignment rows. It keeps
+one next action, adds an automatic morning/after-school rail and one short
+after-school briefing, keeps assignments grouped behind themed class cards,
+and lets the student drag the Timeline, Teacher Changes, Weekly Reset and Data
+Confidence cards into their preferred order. Deadline radar and the weekly
+focus constellation are derived visual summaries; the constellation resets on
+Monday and never treats an empty day as a failure.
+
+Every scheduled class now has a gradient, icon and CSS pattern on Home and the
+Assignments page, plus a dedicated local `/class/:subject` dashboard with open
+work, Canvas-published grade, meeting days, recorded study time, exams,
+calendar changes and a locally recorded grade-history chart. Grade history is
+observational only: it records real page readings and never predicts a future
+grade.
+
+Focus sessions now render as a full-height breathing cockpit with the current
+task, remaining time, session goal, assignment steps, protection truth and a
+small non-judgmental companion. Completion uses a sub-second light/particle
+burst. The six background packs and optional oscillator sound cues are local;
+sounds ship off. Every new animation collapses under Reduced Motion.
+
+The Planner's week view is an animated workload map. A study block can be
+dragged to another unlocked day; the reducer moves the same deterministic item,
+recounts both days immediately and never creates or loses minutes. A later
+explicit rebuild may revisit that cache edit, consistent with the existing
+"plan is a cache" invariant. A reducer test pins minute preservation.
+
+A floating Quick Add opens the existing trusted one-line capture flow from
+every student page. All visual preferences, Home ordering and grade-history
+samples are capped local presentation data and introduce no dependency.
+
+No Canvas transport, parser, permission, gate or request path changed. No
+Canvas API, third-party package, external asset, analytics call or network
+request was added. Production build, `npm test`, parser (48), Canvas e2e (64),
+planner-state (26), and the full accessibility/responsive audit pass, including
+320/375/430/768px and 200% zoom.
+
+---
+
 ## Phase 19 — Class-first work hub (done)
 
 The mixed assignment rows on Home made six classes look like one undifferentiated
@@ -517,7 +941,7 @@ accessibility/responsive, parser (48), and Canvas e2e (64) pass.
 
 When scheduled checks are enabled and LockIn is open, the calendar refresh now
 sets a timer for the exact first allowed minute after school. The existing
-30-minute interval remains as recovery, but it no longer decides when the first
+interval remains as recovery (changed to 15 minutes in Phase 30), but it no longer decides when the first
 after-school check happens. The central gate still runs inside the callback, so
 a sleeping computer, changed setting, or pause cannot turn a late timer into an
 out-of-window request. This path is calendar-feed only: it does not open or read
@@ -1632,7 +2056,8 @@ verification" for how it works.
   Splitting it further was not attempted: the OCR engine is loaded lazily
   already, and the remaining size buys reliability that a smaller bundle would
   not.
-- **The project is not a git repository.** There is no history, no branches and
-  no undo. `git init` would be the single highest-value thing to do next.
+- **The project is now a git repository.** Current work is on
+  `phase18-grades`; preserve unrelated local edits and inspect status before
+  changing files.
 - **No license has been selected.** The project is private; nobody has usage
   rights.

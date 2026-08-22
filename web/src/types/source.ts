@@ -124,7 +124,7 @@ export interface SourceRecord {
  * exactly as configured is how you train somebody to ignore the word.
  */
 export const FRESHNESS_HOURS: Record<SourceKind, { fresh: number; stale: number }> = {
-  // The feed is checked every 30 minutes, so two hours is several missed
+  // The feed is checked every 15 minutes, so two hours is a prolonged run of missed
   // checks — enough to notice, not so tight that a laptop lid closing for
   // lunch makes the app cry stale.
   CANVAS_CALENDAR: { fresh: 2, stale: 24 },

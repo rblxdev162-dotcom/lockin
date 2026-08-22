@@ -30,6 +30,7 @@ import type {
   FocusRunUnlock,
   ParentControls,
   CanvasLink,
+  CanvasReadCoverage,
   CanvasState,
   Settings,
   CanvasCalendarConfig,
@@ -72,7 +73,7 @@ import {
  */
 export const STORAGE_KEY = 'lockin.state.v1';
 export const CORRUPT_KEY = 'lockin.state.corrupt';
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 16;
 
 export function defaultSettings(): Settings {
   return {
@@ -89,6 +90,10 @@ export function defaultSettings(): Settings {
     // students actually keep. Onboarding still announces it.
     focusGuard: true,
     blockingAsked: false,
+    // Blocking stays out of the school day unless the student says otherwise.
+    pauseBlockingDuringSchool: true,
+    // The point of a homework blocker is the afternoon nobody opts into.
+    autoBlockAfterSchool: true,
     canvasCheckWindow: defaultCheckWindow(),
     schoolSchedule: defaultSchoolSchedule(),
   };
@@ -142,7 +147,7 @@ export function defaultIntegrationsState(): IntegrationsState {
           ? ('unavailable' as const)
           : ('not_configured' as const),
     })),
-    canvasCalendar: { configured: false, refreshMinutes: 30, horizonDays: 120 },
+    canvasCalendar: { configured: false, refreshMinutes: 15, horizonDays: 120 },
   };
 }
 
@@ -356,6 +361,48 @@ const MIGRATIONS: Record<number, Migration> = {
       schoolSchedule: defaultSchoolSchedule(),
     },
   }),
+  // 13 -> 14: the Canvas check receipt records what the current rendered page
+  // actually yielded. Old receipts stay readable, but deliberately gain no
+  // inferred coverage: a pageKind alone cannot prove that its rows parsed.
+  13: (s) => ({
+    ...s,
+    schemaVersion: 14,
+    canvas: {
+      ...((s.canvas ?? {}) as Record<string, unknown>),
+      lastCheckReport:
+        s.canvas && typeof s.canvas === 'object'
+          ? ((s.canvas as Record<string, unknown>).lastCheckReport ?? null)
+          : null,
+    },
+  }),
+  // 14 -> 15: website blocking pauses during school hours. Existing students
+  // get it on, because it is the behaviour they would have chosen: nobody
+  // installs a homework blocker in order to be blocked during class.
+  14: (s) => ({
+    ...s,
+    schemaVersion: 15,
+    settings: {
+      ...((s.settings ?? {}) as Record<string, unknown>),
+      pauseBlockingDuringSchool: true,
+    },
+  }),
+  // 15 -> 16: blocking runs through homework hours by itself, and the schedule
+  // learns which dates are not school days. Existing students get automatic
+  // blocking on, because "only when I remember to press Start" is the failure
+  // mode this app exists to fix — Settings turns it off in one tap.
+  15: (s) => {
+    const settings = (s.settings ?? {}) as Record<string, unknown>;
+    const schedule = (settings.schoolSchedule ?? {}) as Record<string, unknown>;
+    return {
+      ...s,
+      schemaVersion: 16,
+      settings: {
+        ...settings,
+        autoBlockAfterSchool: true,
+        schoolSchedule: { ...schedule, noSchoolDates: [] },
+      },
+    };
+  },
 };
 
 function migrate(raw: Record<string, unknown>): Record<string, unknown> {
@@ -570,8 +617,10 @@ function coerceCanvasCalendarConfig(value: unknown): CanvasCalendarConfig {
         : undefined,
     connectedAt: typeof raw.connectedAt === 'string' ? raw.connectedAt : undefined,
     refreshMinutes: Number.isFinite(raw.refreshMinutes)
-      ? Math.min(24 * 60, Math.max(30, Math.round(Number(raw.refreshMinutes))))
-      : 30,
+      ? [3, 30].includes(Number(raw.refreshMinutes))
+        ? 15
+        : Math.min(24 * 60, Math.max(15, Math.round(Number(raw.refreshMinutes))))
+      : 15,
     horizonDays: Number.isFinite(raw.horizonDays)
       ? Math.min(365, Math.max(7, Math.round(Number(raw.horizonDays))))
       : 120,
@@ -610,6 +659,10 @@ function coerce(raw: Record<string, unknown>, report = emptyRecovery()): AppStat
   );
   settings.focusGuard = settings.focusGuard !== false;
   settings.blockingAsked = settings.blockingAsked === true;
+  // Defaults on, like `focusGuard`: a save file missing the field belongs to a
+  // student who never had the choice, and the pause is the kinder default.
+  settings.pauseBlockingDuringSchool = settings.pauseBlockingDuringSchool !== false;
+  settings.autoBlockAfterSchool = settings.autoBlockAfterSchool !== false;
   // Rebuilt rather than trusted: a hand-edited save file must not be able to
   // widen the window LockIn is allowed to touch Canvas in, and an unreadable
   // one falls back to the conservative default rather than to "always".
@@ -1194,6 +1247,14 @@ function coerceCanvas(raw: unknown): CanvasState {
     typeof value === 'number' && Number.isFinite(value)
       ? Math.max(0, Math.min(10_000, Math.round(value)))
       : 0;
+  const coverage: CanvasReadCoverage | undefined =
+    reportRaw?.coverage === 'gradebook' ||
+    reportRaw?.coverage === 'totals_only' ||
+    reportRaw?.coverage === 'limited' ||
+    reportRaw?.coverage === 'unreadable' ||
+    reportRaw?.coverage === 'dates_only'
+      ? reportRaw.coverage
+      : undefined;
   const lastCheckReport =
     reportRaw &&
     typeof reportRaw.checkedAt === 'string' &&
@@ -1208,6 +1269,9 @@ function coerceCanvas(raw: unknown): CanvasState {
           cancelledAssignments: count(reportRaw.cancelledAssignments),
           pageKind:
             typeof reportRaw.pageKind === 'string' ? reportRaw.pageKind.slice(0, 40) : undefined,
+          coverage,
+          rowsSeen: count(reportRaw.rowsSeen),
+          rowsRead: count(reportRaw.rowsRead),
         }
       : null;
   return {

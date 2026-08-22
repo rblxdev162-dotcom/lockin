@@ -38,8 +38,8 @@ const FILE = join(DIR, 'canvas-feed.json');
 const MAX_BYTES = 4 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 20_000;
 
-/** Half an hour, matching the extension's alarm. One cadence, two places. */
-export const DEFAULT_REFRESH_MINUTES = 30;
+/** Fifteen minutes, matching the extension's alarm. One cadence, two places. */
+export const DEFAULT_REFRESH_MINUTES = 15;
 
 const DEFAULTS = {
   url: '',
@@ -70,7 +70,15 @@ let cache = { text: '', at: 0 };
 function read() {
   try {
     if (!existsSync(FILE)) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...JSON.parse(readFileSync(FILE, 'utf8')) };
+    const merged = { ...DEFAULTS, ...JSON.parse(readFileSync(FILE, 'utf8')) };
+    // Migrate the former shipped default while preserving any deliberate
+    // custom cadence already on disk.
+    return {
+      ...merged,
+      refreshMinutes: [3, 30].includes(merged.refreshMinutes)
+        ? 15
+        : Math.min(1440, Math.max(15, merged.refreshMinutes || DEFAULT_REFRESH_MINUTES)),
+    };
   } catch {
     return { ...DEFAULTS };
   }

@@ -71,7 +71,7 @@ export function IntegrationsPage() {
           can={[
             'Block distracting sites in every window of this Chrome profile',
             'Send reminders while LockIn is closed',
-            'Fetch your Canvas calendar feed every 30 minutes',
+            'Fetch your Canvas calendar feed every 15 minutes',
             'Read assignment status from Canvas pages open in this profile',
           ]}
           cannot={[
@@ -348,7 +348,7 @@ function CanvasCard() {
         statusText={statusText}
         can={[
           'Assignment titles, courses and due dates from your calendar feed',
-          'Submitted, graded, missing and late status from Canvas pages you open',
+          'Submitted, graded, missing and late status from class Grades pages',
           'Links back to Canvas',
         ]}
         cannot={[
@@ -414,16 +414,16 @@ function CanvasCard() {
             </p>
             <p className="text-caption lk-muted">
               A calendar feed says when work is due but never whether it was
-              handed in. That comes from opening Canvas → Grades yourself and
-              pressing <strong>Check Canvas</strong> — LockIn reads the page in
-              front of you and never opens Canvas on its own.
+              handed in. Manual checks read the Grades pages you opened. With
+              scheduled checks authorized, the Companion can briefly open one
+              needed class Grades page in the background and close only its own tab.
             </p>
           </div>
         )}
 
         {view?.configured && view.transport === 'service' && (
           <p className="mt-3 border-t lk-border pt-3 text-caption lk-muted">
-            LockIn’s own local service is doing the fetching, every 30 minutes —
+            LockIn’s own local service is doing the fetching, every 15 minutes —
             including while Chrome is closed. Nothing else needs installing.
           </p>
         )}

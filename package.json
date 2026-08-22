@@ -24,7 +24,7 @@
     "test:e2e:headful": "node extension/tests/e2e.mjs --headful",
     "test:canvas-e2e": "node extension/tests/canvas-e2e.mjs",
     "//parent": "Phase 6. Parent Dashboard: selectors, state and the enforcement E2E.",
-    "test:parent-selectors": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/parent-selectors.test.mjs",
+    "test:parent-selectors": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/parent-selectors.test.mjs extension/tests/student-review.test.mjs",
     "test:parent-state": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/parent-state.test.mjs",
     "test:parent-e2e": "node extension/tests/parent-e2e.mjs",
     "test:parent-e2e:headful": "node extension/tests/parent-e2e.mjs --headful --verbose",
@@ -57,7 +57,7 @@
     "service:uninstall": "node scripts/service.mjs uninstall",
     "service:status": "node scripts/service.mjs status",
     "service:restart": "node scripts/service.mjs restart",
-    "test:canvas-grades": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/canvas-grades.test.mjs"
+    "test:canvas-grades": "node --import ./extension/tests/ts-resolve.mjs --test extension/tests/canvas-grades.test.mjs extension/tests/canvas-auto-read.test.mjs"
   },
   "engines": {
     "node": ">=22.0.0",

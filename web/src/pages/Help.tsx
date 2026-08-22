@@ -47,10 +47,10 @@ const TOPICS: Topic[] = [
     question: 'Why can’t LockIn see my Canvas work?',
     answer: (
       <>
-        LockIn only reads Canvas pages you open yourself, and only after you grant access to your
-        Canvas site in Settings. It cannot log in for you. If an assignment isn’t updating, open it
-        in Canvas once and come back. Canvas occasionally changes its page layout, and when that
-        happens LockIn reports that it couldn’t read the page rather than guessing.
+        LockIn reads rendered Canvas pages only after you grant access in Settings. It cannot log
+        in for you. Manual checks use pages you opened; scheduled checks can briefly open one class
+        Grades page after school and close the temporary tab after reading. If Canvas changes its
+        layout, LockIn reports that it could not read the page rather than guessing.
       </>
     ),
   },

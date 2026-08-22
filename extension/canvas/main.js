@@ -49,7 +49,7 @@ export function startCanvasContentScript() {
 
   function parseAndReport(reason) {
     const detection = detectCanvasPage(document, location.href, domain);
-    if (!detection.isCanvas) return;
+    if (!detection.isCanvas) return null;
 
     let result;
     try {
@@ -57,7 +57,7 @@ export function startCanvasContentScript() {
     } catch (error) {
       console.warn('[LockIn] Canvas parse error', error);
       send({ type: CANVAS_MSG.UNREADABLE, domain, url: location.href.slice(0, 500) });
-      return;
+      return { pageKind: detection.pageKind, readable: false };
     }
 
     if (!result.readable) {
@@ -75,9 +75,13 @@ export function startCanvasContentScript() {
         domain,
         pageKind: result.pageKind,
         diagnostics: result.diagnostics,
-        trigger: reason === 'forced' ? 'manual' : 'passive',
+        trigger: reason === 'automatic' ? 'automatic' : reason === 'forced' ? 'manual' : 'passive',
       });
-      return;
+      return {
+        pageKind: result.pageKind,
+        readable: false,
+        diagnostics: result.diagnostics,
+      };
     }
 
     const payload = {
@@ -91,7 +95,7 @@ export function startCanvasContentScript() {
       diagnostics: result.diagnostics,
       // Which half of the gate this reading has to pass: a press, or the
       // observer noticing the page changed while the student browses.
-      trigger: reason === 'forced' ? 'manual' : 'passive',
+      trigger: reason === 'automatic' ? 'automatic' : reason === 'forced' ? 'manual' : 'passive',
       detectedAt: new Date().toISOString(),
     };
 
@@ -109,10 +113,21 @@ export function startCanvasContentScript() {
       g: payload.grades.map((g) => [g.externalCourseId, g.currentScore, g.currentGrade]),
       k: payload.pageKind,
     });
-    if (key === lastPayloadKey && reason !== 'forced') return;
+    if (key === lastPayloadKey && reason !== 'forced') {
+      return {
+        pageKind: result.pageKind,
+        readable: true,
+        diagnostics: result.diagnostics,
+      };
+    }
     lastPayloadKey = key;
 
     send(payload);
+    return {
+      pageKind: result.pageKind,
+      readable: true,
+      diagnostics: result.diagnostics,
+    };
   }
 
   observer = createCanvasObserver(parseAndReport);
@@ -122,11 +137,14 @@ export function startCanvasContentScript() {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.type !== CANVAS_MSG.REPARSE) return false;
     lastPayloadKey = '';
-    parseAndReport('forced');
+    const summary = parseAndReport(message.trigger === 'automatic' ? 'automatic' : 'forced');
     sendResponse({
-      ok: true,
+      ok: summary?.readable === true,
       url: location.href.slice(0, 500),
-      pageKind: detectCanvasPage(document, location.href, domain).pageKind,
+      pageKind:
+        summary?.pageKind ?? detectCanvasPage(document, location.href, domain).pageKind,
+      readable: summary?.readable === true,
+      diagnostics: summary?.diagnostics,
     });
     return true;
   });

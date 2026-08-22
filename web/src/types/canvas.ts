@@ -128,7 +128,19 @@ export interface CanvasCheckReport {
   updatedAssignments: number;
   cancelledAssignments: number;
   pageKind?: string;
+  /** What the last check actually covered; never inferred from stale cache data. */
+  coverage?: CanvasReadCoverage;
+  /** Privacy-safe parser counts from the rendered gradebook. */
+  rowsSeen?: number;
+  rowsRead?: number;
 }
+
+export type CanvasReadCoverage =
+  | 'gradebook'
+  | 'totals_only'
+  | 'limited'
+  | 'unreadable'
+  | 'dates_only';
 
 export function defaultCanvasState(): CanvasState {
   return {

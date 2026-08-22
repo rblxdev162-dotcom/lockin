@@ -42,23 +42,13 @@ const DEFAULTS = {
   lastFetchedAt: 0,
   lastError: '',
   /**
-   * Half an hour.
+   * Fifteen minutes.
    *
    * Canvas publishes this feed for exactly this purpose and a check is one
-   * conditional GET, so twice an hour is nowhere near heavy — and it is the
-   * difference between an assignment your teacher posted this morning showing
-   * up before lunch or after dinner.
+   * conditional GET. The timer still obeys LockIn's automatic-check window,
+   * so this cadence never turns into traffic during configured school hours.
    */
-  refreshMinutes: 30,
-  /**
-   * Open the Canvas dashboard in a background tab at browser startup so the
-   * content script can read submission status.
-   *
-   * A calendar feed says when work is due and never whether it was handed in.
-   * This is the only way to know what is already graded without an OAuth
-   * Developer Key that no student can issue themselves. It is one page load,
-   * in the student's own session, on the site they were about to open anyway.
-   */
+  refreshMinutes: 15,
   /** The last successful body, so opening LockIn is instant and offline-safe. */
   cachedText: '',
   cachedAt: 0,
@@ -67,7 +57,15 @@ const DEFAULTS = {
 export async function getCalendarConfig() {
   try {
     const stored = await chrome.storage.local.get(KEY);
-    return { ...DEFAULTS, ...(stored[KEY] ?? {}) };
+    const merged = { ...DEFAULTS, ...(stored[KEY] ?? {}) };
+    // Phase 30: migrate both former shipped defaults without touching a student
+    // who deliberately chose another valid cadence.
+    return {
+      ...merged,
+      refreshMinutes: [3, 30].includes(merged.refreshMinutes)
+        ? 15
+        : Math.min(1440, Math.max(15, merged.refreshMinutes || 15)),
+    };
   } catch {
     return { ...DEFAULTS };
   }
@@ -134,7 +132,7 @@ export async function configureCalendar(rawUrl, refreshMinutes) {
 
   const minutes = Number.isFinite(refreshMinutes)
     ? Math.min(1440, Math.max(15, Math.round(refreshMinutes)))
-    : 30;
+    : 15;
 
   await setCalendarConfig({
     url: check.url,
@@ -174,7 +172,7 @@ export async function disconnectCalendar() {
 }
 
 export async function scheduleCalendarRefresh(minutes) {
-  const period = Math.min(1440, Math.max(15, Number(minutes) || 30));
+  const period = Math.min(1440, Math.max(15, Number(minutes) || 15));
   await chrome.alarms.create(CALENDAR_ALARM, { periodInMinutes: period, delayInMinutes: 1 });
 }
 

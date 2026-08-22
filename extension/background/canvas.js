@@ -22,10 +22,15 @@ const GRADES_KEY = 'lockin_canvas_grades';
 const WINDOW_KEY = 'lockin_canvas_window';
 const GATE_LOG_KEY = 'lockin_canvas_gate_log';
 const LAST_READ_KEY = 'lockin_canvas_last_read';
+const AUTO_READ_KEY = 'lockin_canvas_auto_read';
+const AUTO_READ_TAB_KEY = 'lockin_canvas_auto_read_tab';
 const SCRIPT_ID = 'lockin-canvas';
 
 /** Gate decisions kept for the student to inspect. Small on purpose. */
 const MAX_GATE_LOG = 60;
+/** One class per fifteen-minute tick; a class is not reopened inside that tick. */
+const AUTO_READ_COOLDOWN_MS = 15 * 60 * 1000;
+const MAX_AUTO_READ_COURSES = 20;
 
 /* ------------------------------------------------------------------ */
 /* Config                                                              */
@@ -424,7 +429,7 @@ export async function disconnectCanvas() {
     }
   }
 
-  await chrome.storage.local.remove(CONFIG_KEY);
+  await chrome.storage.local.remove([CONFIG_KEY, AUTO_READ_KEY, AUTO_READ_TAB_KEY]);
   return { ok: true, permissionRemoved };
 }
 
@@ -534,15 +539,13 @@ export async function isCanvasScriptRegistered() {
  *
  * ## Why the *active* tab only
  *
- * The old version messaged every open Canvas tab, and an earlier phase went
- * further and opened one in the background. Both are gone. LockIn now reads
- * exactly the page the student deliberately has in front of them, when they
- * press the button — which is the whole claim this feature makes, and it
- * should be true by construction rather than by policy.
+ * Manual Check Canvas messages the pages the student already has open. The
+ * separately authorized scheduled path lives below and may create one owned
+ * background gradebook tab; keeping the paths separate makes the UI's consent
+ * and the gate reason auditable.
  *
- * If the active tab is not Canvas, that is not an error: it is an instruction
- * to the student ("open Canvas → Grades"), and LockIn does not navigate there
- * for them.
+ * If no Canvas tab is open, manual checking still returns an instruction. It
+ * does not silently turn a button press into a different automatic workflow.
  *
  * @param {{ override?: boolean, now?: number }} options
  */
@@ -574,9 +577,8 @@ export async function syncCanvasNow(options = {}) {
    * the active tab is always LockIn and never Canvas. The feature returned
    * "no Canvas tab" every single time.
    *
-   * Reading every open Canvas tab keeps the rule that actually matters — LockIn
-   * reads pages the student opened themselves, and opens none of its own. A tab
-   * they left on their gradebook is exactly such a page.
+   * Manual reading covers every Canvas tab the student already opened. Owned
+   * temporary tabs are created only by `autoReadCanvasCourses` below.
    */
   let tabs = [];
   try {
@@ -610,6 +612,7 @@ export async function syncCanvasNow(options = {}) {
    */
   const kinds = [];
   const tabsSeen = [];
+  const replies = [];
   let reached = 0;
   let injected = 0;
 
@@ -650,10 +653,16 @@ export async function syncCanvasNow(options = {}) {
     if (reply) {
       reached += 1;
       seen.answered = true;
+      seen.readable = reply.readable === true;
       if (typeof reply.pageKind === 'string') {
         kinds.push(reply.pageKind);
         seen.kind = reply.pageKind;
       }
+      replies.push({
+        pageKind: typeof reply.pageKind === 'string' ? reply.pageKind : 'unknown',
+        readable: reply.readable === true,
+        diagnostics: sanitizeDiagnostics(reply.diagnostics),
+      });
     }
     tabsSeen.push(seen);
   }
@@ -676,6 +685,44 @@ export async function syncCanvasNow(options = {}) {
   }
   const pageKind =
     kinds.find((kind) => kind === 'grades' || kind === 'grades_all') ?? kinds[0] ?? 'unknown';
+  const gradebookReplies = replies.filter(
+    (reply) => reply.pageKind === 'grades' || reply.pageKind === 'grades_all',
+  );
+  const readableGradebook = gradebookReplies.find((reply) => reply.readable);
+  const selectedDiagnostics =
+    readableGradebook?.diagnostics ?? gradebookReplies[0]?.diagnostics ?? replies[0]?.diagnostics;
+  const diagnosticCount = (key) => {
+    const value = selectedDiagnostics?.[key];
+    return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+  };
+  const rowsSeen = Math.max(
+    diagnosticCount('rowsConsidered'),
+    diagnosticCount('rows'),
+  );
+  const rowsRead = Math.max(
+    diagnosticCount('rowsRead'),
+    diagnosticCount('rowsFound'),
+  );
+  const readableTabs = replies.filter((reply) => reply.readable).length;
+  const unreadableTabs = replies.length - readableTabs;
+
+  if (readableTabs === 0) {
+    return {
+      ok: false,
+      reason: 'page-unreadable',
+      domain: config.domain,
+      pageKind,
+      pageKinds: kinds,
+      tabsChecked: reached,
+      tabsInjected: injected,
+      tabsSeen,
+      readableTabs,
+      unreadableTabs,
+      gradebookAnswered: gradebookReplies.length > 0,
+      rowsSeen,
+      rowsRead,
+    };
+  }
 
   // The detection arrives as its own message; give it a moment to land.
   await new Promise((resolve) => setTimeout(resolve, 900));
@@ -697,7 +744,12 @@ export async function syncCanvasNow(options = {}) {
     pageKind,
     // True when they were on a page that actually carries scores, so the UI can
     // nudge them to Grades instead of silently finding little.
-    readGrades: pageKind === 'grades' || pageKind === 'grades_all',
+    readGrades: !!readableGradebook,
+    gradebookAnswered: gradebookReplies.length > 0,
+    readableTabs,
+    unreadableTabs,
+    rowsSeen,
+    rowsRead,
     tabsChecked: reached,
     tabsInjected: injected,
     tabsSeen,
@@ -710,6 +762,239 @@ export async function syncCanvasNow(options = {}) {
     detected: afterEntries.map(([, value]) => value),
     grades: Object.values(await getCanvasGrades()),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Automatic, owned-tab gradebook reads                               */
+/* ------------------------------------------------------------------ */
+
+function cleanCourseIds(raw) {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map(String).filter((id) => /^\d{1,32}$/.test(id)))].slice(
+    0,
+    MAX_AUTO_READ_COURSES,
+  );
+}
+
+async function getAutoReadState() {
+  try {
+    const raw = (await chrome.storage.local.get(AUTO_READ_KEY))[AUTO_READ_KEY];
+    if (!raw || typeof raw !== 'object') return { courses: [], lastRead: {}, lastAttemptAt: 0 };
+    const courses = cleanCourseIds(raw.courses);
+    const lastRead = {};
+    if (raw.lastRead && typeof raw.lastRead === 'object' && !Array.isArray(raw.lastRead)) {
+      for (const courseId of courses) {
+        const at = Number(raw.lastRead[courseId]);
+        if (Number.isFinite(at) && at > 0) lastRead[courseId] = at;
+      }
+    }
+    const lastAttemptAt = Number(raw.lastAttemptAt);
+    return {
+      courses,
+      lastRead,
+      lastAttemptAt: Number.isFinite(lastAttemptAt) && lastAttemptAt > 0 ? lastAttemptAt : 0,
+    };
+  } catch {
+    return { courses: [], lastRead: {}, lastAttemptAt: 0 };
+  }
+}
+
+async function setAutoReadState(state) {
+  await chrome.storage.local.set({ [AUTO_READ_KEY]: state });
+}
+
+function gradebookPath(courseId) {
+  return `/courses/${courseId}/grades`;
+}
+
+function isOwnedGradebookUrl(url, domain, path) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && parsed.hostname === domain && parsed.pathname === path;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForTabReady(tabId, timeoutMs = 12_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab?.status === 'complete') return tab;
+    } catch {
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
+}
+
+/**
+ * Ask a Canvas tab to parse, repairing a missing/orphaned content script once.
+ * The trigger is carried into the content message so the automatic gate is
+ * checked again at the trust boundary—not merely before the tab was opened.
+ */
+async function reparseAutomaticTab(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, {
+      type: CANVAS_MSG.REPARSE,
+      trigger: 'automatic',
+    });
+  } catch {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId, allFrames: false },
+        func: () => {
+          window.__lockinCanvasLoaded = false;
+          window.__lockinCanvasActive = false;
+        },
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId, allFrames: false },
+        files: ['canvas/content.js'],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return await chrome.tabs.sendMessage(tabId, {
+        type: CANVAS_MSG.REPARSE,
+        trigger: 'automatic',
+      });
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * Close only a temporary gradebook tab that LockIn itself created.
+ *
+ * The record is persisted because MV3 may kill the worker while the page is
+ * loading. The heartbeat calls this too. A tab the student activated or
+ * navigated away is considered adopted and is deliberately left alone.
+ */
+export async function closeOwnedCanvasReadTab(now = Date.now(), { force = false } = {}) {
+  let record;
+  try {
+    record = (await chrome.storage.local.get(AUTO_READ_TAB_KEY))[AUTO_READ_TAB_KEY];
+  } catch {
+    return { closed: false };
+  }
+  if (!record || typeof record.id !== 'number') return { closed: false };
+  if (!force && now - Number(record.openedAt || 0) < 25_000) {
+    return { closed: false, waiting: true };
+  }
+
+  await chrome.storage.local.remove(AUTO_READ_TAB_KEY);
+  try {
+    const tab = await chrome.tabs.get(record.id);
+    if (tab?.active) return { closed: false, adopted: true };
+    if (!isOwnedGradebookUrl(tab?.url, record.domain, record.path)) {
+      return { closed: false, adopted: true };
+    }
+    await chrome.tabs.remove(record.id);
+    return { closed: true };
+  } catch {
+    return { closed: false };
+  }
+}
+
+let autoReadInFlight = null;
+
+/**
+ * Read one class gradebook without taking over the student's browser.
+ *
+ * The web app supplies the bounded set of classes that still have live work.
+ * The roster is retained as numeric ids only so the fifteen-minute extension
+ * alarm can continue while LockIn is closed. Each tick chooses the least
+ * recently read class; this prevents six classes becoming six simultaneous
+ * tabs. Existing gradebook tabs are reused and never closed.
+ */
+export function autoReadCanvasCourses(rawCourseIds, options = {}) {
+  if (autoReadInFlight) return autoReadInFlight;
+  autoReadInFlight = (async () => {
+    const now = typeof options.now === 'number' ? options.now : Date.now();
+    const config = await getCanvasConfig();
+    if (!config) return { ok: false, reason: 'not-configured' };
+    if (!(await hasCanvasPermission(config.domain))) {
+      return { ok: false, reason: 'no-permission' };
+    }
+
+    const previous = await getAutoReadState();
+    const supplied = cleanCourseIds(rawCourseIds);
+    const courses = Array.isArray(rawCourseIds) ? supplied : previous.courses;
+    const lastRead = Object.fromEntries(
+      Object.entries(previous.lastRead).filter(([courseId]) => courses.includes(courseId)),
+    );
+    const previousAttempt = previous.lastAttemptAt > now ? 0 : previous.lastAttemptAt;
+    await setAutoReadState({ courses, lastRead, lastAttemptAt: previousAttempt });
+    if (courses.length === 0) return { ok: false, reason: 'nothing-needed' };
+    if (now - previousAttempt < AUTO_READ_COOLDOWN_MS) {
+      return { ok: false, reason: 'fresh' };
+    }
+
+    // Record the attempt before the gate/open so the one-minute heartbeat and
+    // the page's own fifteen-minute timer cannot race into several tabs.
+    await setAutoReadState({ courses, lastRead, lastAttemptAt: now });
+
+    const gate = await canvasGate('automatic', now, { config });
+    if (!gate.allowed) return { ok: false, reason: 'gate-refused', verdict: gate.verdict };
+
+    const courseId = [...courses].sort(
+      (a, b) => Number(lastRead[a] || 0) - Number(lastRead[b] || 0) || a.localeCompare(b),
+    )[0];
+    const path = gradebookPath(courseId);
+    const url = `https://${config.domain}${path}`;
+    let tab = null;
+    let opened = false;
+    try {
+      const existing = await chrome.tabs.query({ url: `https://${config.domain}/*` });
+      tab = existing.find(
+        (candidate) => candidate.id !== undefined && isOwnedGradebookUrl(candidate.url, config.domain, path),
+      );
+      if (!tab) {
+        tab = await chrome.tabs.create({ url, active: false });
+        opened = true;
+        await chrome.storage.local.set({
+          [AUTO_READ_TAB_KEY]: {
+            id: tab.id,
+            domain: config.domain,
+            path,
+            openedAt: now,
+          },
+        });
+      }
+    } catch {
+      return { ok: false, reason: 'open-failed', courseId };
+    }
+
+    if (tab?.id === undefined) return { ok: false, reason: 'open-failed', courseId };
+    if (opened && !(await waitForTabReady(tab.id))) {
+      return { ok: false, reason: 'tab-not-ready', courseId, opened: true };
+    }
+
+    const reply = await reparseAutomaticTab(tab.id);
+    // The content script sends the detection separately from its quick reply.
+    if (reply) await new Promise((resolve) => setTimeout(resolve, 900));
+
+    const readGrades = reply?.ok !== false && reply?.pageKind === 'grades';
+    if (readGrades) {
+      lastRead[courseId] = now;
+      await setAutoReadState({ courses, lastRead, lastAttemptAt: now });
+    }
+    const close = opened ? await closeOwnedCanvasReadTab(Date.now(), { force: true }) : null;
+    return {
+      ok: readGrades,
+      reason: readGrades ? undefined : reply ? 'not-gradebook' : 'tab-not-ready',
+      courseId,
+      pageKind: typeof reply?.pageKind === 'string' ? reply.pageKind : undefined,
+      opened,
+      reused: !opened,
+      closed: close?.closed === true,
+    };
+  })().finally(() => {
+    autoReadInFlight = null;
+  });
+  return autoReadInFlight;
 }
 
 /** Opens a Canvas URL, reusing an existing tab for the same page when possible. */
@@ -768,7 +1053,12 @@ export async function handleCanvasContentMessage(message, sender) {
   // 5. and the gate agrees this reading may happen at all. A page the student
   //    merely browsed past is refused unless they asked for that; anything
   //    during configured school hours is refused outright.
-  const trigger = message.trigger === 'passive' ? 'passive' : 'manual';
+  const trigger =
+    message.trigger === 'automatic'
+      ? 'automatic'
+      : message.trigger === 'passive'
+        ? 'passive'
+        : 'manual';
   const gate = await canvasGate(trigger, Date.now(), { config });
   if (!gate.allowed) return { ok: false, reason: gate.verdict };
 
@@ -823,4 +1113,6 @@ export const CANVAS_STORAGE_KEYS = {
   WINDOW_KEY,
   GATE_LOG_KEY,
   LAST_READ_KEY,
+  AUTO_READ_KEY,
+  AUTO_READ_TAB_KEY,
 };

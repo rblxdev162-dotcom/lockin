@@ -56,9 +56,9 @@ export function CanvasCheckSettings() {
       />
 
       <p className="mb-4 text-sm lk-muted">
-        LockIn never opens Canvas by itself and never asks Canvas for anything. It reads the page
-        you already have open, when you press <strong>Check Canvas</strong>. Everything below is
-        about what happens <em>without</em> a press.
+        LockIn never uses a Canvas API or stores your password. A manual check reads pages you
+        already have open. If you authorize scheduled checks below, the Companion may briefly open
+        one needed class Grades page in the background, read it locally, and close only that tab.
       </p>
 
       <div className="space-y-4">
@@ -70,7 +70,8 @@ export function CanvasCheckSettings() {
           />
           <p className="mt-1 text-caption lk-muted">
             Off by default. With it off, your due dates update when you press Check Canvas and at
-            no other time. With it on, LockIn refreshes the calendar feed every 30 minutes —{' '}
+            no other time. With it on, LockIn refreshes every 15 minutes and can read one needed
+            class Grades page in a temporary background tab —{' '}
             <strong>inside the hours below, and never outside them</strong>.
           </p>
         </div>
@@ -82,8 +83,8 @@ export function CanvasCheckSettings() {
             label="Read Canvas pages as I browse them"
           />
           <p className="mt-1 text-caption lk-muted">
-            Off by default. This makes no request either way — it reads a page already on your
-            screen — but with it off, “only when I press the button” is literally true.
+            Off by default. This controls pages you open yourself and makes no request either way.
+            Temporary scheduled reads are controlled by the timer switch above.
           </p>
         </div>
 

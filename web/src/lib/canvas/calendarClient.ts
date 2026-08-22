@@ -40,7 +40,7 @@ const EMPTY_VIEW: CalendarView = {
   addedAt: null,
   lastFetchedAt: null,
   lastError: null,
-  refreshMinutes: 30,
+  refreshMinutes: 15,
   hasCache: false,
   cachedAt: null,
 };
@@ -68,8 +68,10 @@ export function sanitizeCalendarView(raw: unknown): CalendarView {
     lastError: typeof value.lastError === 'string' ? value.lastError.slice(0, 160) : null,
     refreshMinutes:
       typeof value.refreshMinutes === 'number' && Number.isFinite(value.refreshMinutes)
-        ? Math.min(1440, Math.max(15, Math.round(value.refreshMinutes)))
-        : 30,
+        ? [3, 30].includes(value.refreshMinutes)
+          ? 15
+          : Math.min(1440, Math.max(15, Math.round(value.refreshMinutes)))
+        : 15,
     hasCache: value.hasCache === true,
     cachedAt: number(value.cachedAt),
     ok: value.ok === true ? true : value.ok === false ? false : undefined,

@@ -2,6 +2,8 @@
 import type { Assignment, AppState, CanvasDetectedAssignment, Exam } from '../types';
 import { canvasKey } from '../types/canvas';
 import { daysUntil, parseDueDate, todayISO } from './time';
+import { homeworkWindowFrom, isDuringSchoolHours, isHomeworkTime, schoolHoursFrom } from './schoolSchedule';
+import type { HomeworkWindow, SchoolHours } from './schoolSchedule';
 import type { BridgeState } from './protocol';
 
 export function isComplete(a: Assignment): boolean {
@@ -73,14 +75,49 @@ export function currentTaskTitle(state: AppState): string | null {
   return next ? next.title : null;
 }
 
-/** True while blocking should actually be applied right now. */
+/**
+ * The school day LockIn should keep blocking out of, or `null` for "do not
+ * suspend anything" — either because the student turned the pause off, or
+ * because no schedule has been configured to derive it from.
+ */
+export function blockingSchoolHours(state: AppState): SchoolHours | null {
+  if (!state.settings.pauseBlockingDuringSchool) return null;
+  return schoolHoursFrom(state.settings.schoolSchedule, state.settings.canvasCheckWindow);
+}
+
+/**
+ * The homework hours blocking runs inside on its own, or `null` when
+ * automatic blocking is off.
+ */
+export function blockingHomeworkWindow(state: AppState): HomeworkWindow | null {
+  if (!state.settings.autoBlockAfterSchool) return null;
+  return homeworkWindowFrom(state.settings.schoolSchedule, state.settings.canvasCheckWindow);
+}
+
+/**
+ * True while blocking should actually be applied right now.
+ *
+ * **LockIn blocks after school, and only after school.** The school day is
+ * carved out, and homework hours block on their own without a Focus session —
+ * which is the half that matters, because a blocker that waits to be switched
+ * on never reaches the student who needs it most. A deliberately started Focus
+ * session still blocks any time outside school.
+ *
+ * Mirrored in `extension/background/rules.js`, which is what enforces.
+ */
 export function blockingActive(state: AppState, now = Date.now()): boolean {
   const fm = state.focusMode;
-  if (!fm.active) return false;
   if (!state.settings.blockingEnabled) return false;
   if (fm.temporaryUnlockUntil && fm.temporaryUnlockUntil > now) return false;
   if (fm.isTest && fm.testExpiresAt && fm.testExpiresAt <= now) return false;
-  return true;
+  // The 5-minute test from Settings ignores the schedule: it is the only way
+  // to confirm blocking works, and one that silently does nothing at the wrong
+  // hour teaches the opposite of what it is for.
+  if (fm.isTest && fm.active) return true;
+  const dates = state.settings.schoolSchedule.noSchoolDates;
+  if (isDuringSchoolHours(blockingSchoolHours(state), now, dates)) return false;
+  if (fm.active) return true;
+  return isHomeworkTime(blockingHomeworkWindow(state), now, dates);
 }
 
 /**
@@ -112,6 +149,11 @@ export function toBridgeState(state: AppState): BridgeState {
     testExpiresAt: state.focusMode.testExpiresAt,
     appUrl: window.location.origin + '/home',
     canvasDomain: state.canvas?.connection?.domain ?? null,
+    // Sent rather than recomputed extension-side: the schedule lives here, and
+    // the extension has to be able to pause blocking with no LockIn tab open.
+    schoolHours: blockingSchoolHours(state),
+    homeworkWindow: blockingHomeworkWindow(state),
+    noSchoolDates: state.settings.schoolSchedule.noSchoolDates,
   };
 }
 

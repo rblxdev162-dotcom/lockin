@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../store/context';
 import { Card, EmptyState } from '../components/ui/Card';
+import { Badge } from '../components/ui/Badge';
 import { Chip, Select, TextInput } from '../components/ui/Field';
 import { Button } from '../components/ui/Button';
 import { Icon } from '../components/ui/Icon';
@@ -24,8 +25,16 @@ import { CheckCanvasButton } from '../components/features/CheckCanvasButton';
 import { formatScore, hasPublishedTotal } from '../types/grades';
 import { classGradesUrl, classSwitchLabel } from '../lib/classNames';
 import { relativeTime } from '../lib/time';
+import { classStyle } from '../lib/schoolSchedule';
+import { readToolkit } from '../lib/localExperience';
+import { describeStoredCoverage } from '../lib/canvas/readCoverage';
 
 const ALL = 'All';
+type BrowseTabs = 'class' | 'teacher';
+
+function teacherFor(subject: string, contacts: ReturnType<typeof readToolkit>['teacherContacts']): string {
+  return contacts[subject]?.name.trim() || 'Teacher not set';
+}
 
 /**
  * The views a student actually thinks in.
@@ -110,8 +119,16 @@ export function AssignmentsPage() {
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<string>(ALL);
   const [priority, setPriority] = useState<string>(ALL);
+  const [toolkit] = useState(readToolkit);
   const requestedClass = params.get('class')?.trim() || ALL;
+  const requestedTeacher = params.get('teacher')?.trim() || ALL;
   const [subject, setSubject] = useState<string>(requestedClass);
+  const [teacher, setTeacher] = useState<string>(requestedTeacher);
+  const [browseTabs, setBrowseTabs] = useState<BrowseTabs>(() => {
+    if (requestedClass !== ALL) return 'class';
+    if (requestedTeacher !== ALL) return 'teacher';
+    try { return localStorage.getItem('lockin.assignments.tabs') === 'teacher' ? 'teacher' : 'class'; } catch { return 'class'; }
+  });
   /**
    * Which view to land on.
    *
@@ -165,13 +182,14 @@ export function AssignmentsPage() {
       state.assignments.filter((a) => {
         if (platform !== ALL && a.platform !== platform) return false;
         if (priority !== ALL && a.priority !== priority) return false;
-        if (subject !== ALL && (a.subject?.trim() || 'No class') !== subject) return false;
-        if (q && !`${a.title} ${a.subject}`.toLowerCase().includes(q)) return false;
+        if (browseTabs === 'class' && subject !== ALL && (a.subject?.trim() || 'No class') !== subject) return false;
+        if (browseTabs === 'teacher' && teacher !== ALL && teacherFor(a.subject?.trim() || 'No class', toolkit.teacherContacts) !== teacher) return false;
+        if (q && !`${a.title} ${a.subject} ${teacherFor(a.subject, toolkit.teacherContacts)}`.toLowerCase().includes(q)) return false;
         return true;
       }),
       now,
     );
-  }, [state.assignments, query, platform, priority, subject, now]);
+  }, [state.assignments, query, platform, priority, subject, teacher, browseTabs, toolkit.teacherContacts, now]);
 
   /** Counts for the tabs, computed once rather than per tab. */
   const buckets = useMemo(() => {
@@ -183,7 +201,21 @@ export function AssignmentsPage() {
     return out;
   }, [matching, now]);
 
-  const shown = buckets[view];
+  const horizon = params.get('horizon');
+  const shown = useMemo(() => {
+    if (!horizon) return buckets[view];
+    const endToday = new Date(now); endToday.setHours(23, 59, 59, 999);
+    const endSoon = endToday.getTime() + 3 * 86_400_000;
+    const due = (assignment: Assignment) => assignment.dueDate ? Date.parse(`${assignment.dueDate}T${assignment.dueTime || '23:59'}`) : Number.MAX_SAFE_INTEGER;
+    return matching.filter((assignment) => {
+      if (assignment.status === 'Completed') return false;
+      if (horizon === 'parking') return !assignment.dueDate;
+      if (horizon === 'today') return due(assignment) <= endToday.getTime();
+      if (horizon === 'soon') return due(assignment) > endToday.getTime() && due(assignment) <= endSoon;
+      if (horizon === 'later') return due(assignment) > endSoon && due(assignment) < Number.MAX_SAFE_INTEGER;
+      return true;
+    });
+  }, [buckets, view, horizon, matching, now]);
   const filtersOn = platform !== ALL || priority !== ALL || query.trim() !== '';
   const classTabs = useMemo(
     () =>
@@ -194,9 +226,22 @@ export function AssignmentsPage() {
       })),
     [state.assignments, now],
   );
+  const teacherTabs = useMemo(() => {
+    const grouped = new Map<string, { teacher: string; subjects: Set<string>; open: number }>();
+    for (const assignment of state.assignments) {
+      const name = teacherFor(assignment.subject?.trim() || 'No class', toolkit.teacherContacts);
+      const entry = grouped.get(name) ?? { teacher: name, subjects: new Set<string>(), open: 0 };
+      entry.subjects.add(assignment.subject?.trim() || 'No class');
+      if (!isSettled(workStateOf(assignment, now))) entry.open += 1;
+      grouped.set(name, entry);
+    }
+    return [...grouped.values()].sort((a, b) => a.teacher === 'Teacher not set' ? 1 : b.teacher === 'Teacher not set' ? -1 : a.teacher.localeCompare(b.teacher));
+  }, [state.assignments, toolkit.teacherContacts, now]);
 
   const chooseClass = (next: string) => {
+    setBrowseTabs('class');
     setSubject(next);
+    setTeacher(ALL);
     const classAssignments =
       next === ALL
         ? state.assignments
@@ -205,6 +250,30 @@ export function AssignmentsPage() {
     const nextParams = new URLSearchParams(params);
     if (next === ALL) nextParams.delete('class');
     else nextParams.set('class', next);
+    nextParams.delete('teacher');
+    setParams(nextParams, { replace: true });
+    try { localStorage.setItem('lockin.assignments.tabs', 'class'); } catch { /* presentation preference */ }
+  };
+
+  const chooseTeacher = (next: string) => {
+    setBrowseTabs('teacher');
+    setTeacher(next);
+    setSubject(ALL);
+    const teacherAssignments = next === ALL ? state.assignments : state.assignments.filter((assignment) => teacherFor(assignment.subject?.trim() || 'No class', toolkit.teacherContacts) === next);
+    setView(initialView(teacherAssignments, now));
+    const nextParams = new URLSearchParams(params);
+    if (next === ALL) nextParams.delete('teacher'); else nextParams.set('teacher', next);
+    nextParams.delete('class');
+    setParams(nextParams, { replace: true });
+    try { localStorage.setItem('lockin.assignments.tabs', 'teacher'); } catch { /* presentation preference */ }
+  };
+
+  const chooseBrowseTabs = (next: BrowseTabs) => {
+    setBrowseTabs(next);
+    if (next === 'class') setTeacher(ALL); else setSubject(ALL);
+    try { localStorage.setItem('lockin.assignments.tabs', next); } catch { /* presentation preference */ }
+    const nextParams = new URLSearchParams(params);
+    nextParams.delete(next === 'class' ? 'teacher' : 'class');
     setParams(nextParams, { replace: true });
   };
 
@@ -227,6 +296,9 @@ export function AssignmentsPage() {
     return status === 'needs_sync' || a.canvas?.submissionStatus === 'verification_unavailable';
   });
   const checkReport = state.canvas.lastCheckReport;
+  const checkCoverage = checkReport
+    ? describeStoredCoverage(checkReport.coverage, checkReport.rowsRead)
+    : null;
 
   /**
    * A class's current grade, matched by the Canvas course name LockIn stored
@@ -313,7 +385,22 @@ export function AssignmentsPage() {
                   <Icon name="refresh" size={16} />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-body font-extrabold lk-strong">Last Canvas check</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-body font-extrabold lk-strong">Last Canvas check</p>
+                    {checkCoverage && (
+                      <Badge
+                        tone={
+                          checkCoverage.coverage === 'gradebook'
+                            ? 'mint'
+                            : checkCoverage.coverage === 'unreadable'
+                              ? 'flame'
+                              : 'neutral'
+                        }
+                      >
+                        {checkCoverage.label}
+                      </Badge>
+                    )}
+                  </div>
                   <p className="mt-0.5 text-caption lk-muted">
                     {checkReport.message} · {relativeTime(checkReport.checkedAt, new Date(now))}
                     {checkReport.origin === 'automatic' ? ' · after-school refresh' : ''}
@@ -322,6 +409,14 @@ export function AssignmentsPage() {
                     {checkReport.newAssignments} new · {checkReport.updatedAssignments} changed ·{' '}
                     {checkReport.cancelledAssignments} cancelled
                   </p>
+                  {checkCoverage && (
+                    <p className="mt-1 text-caption lk-muted">
+                      {checkCoverage.detail}
+                      {(checkReport.rowsSeen ?? 0) > 0 && (
+                        <> Candidate rows seen: {checkReport.rowsSeen}.</>
+                      )}
+                    </p>
+                  )}
                 </div>
               </div>
             </Card>
@@ -397,37 +492,31 @@ export function AssignmentsPage() {
           })}
         </div>
 
-        {classTabs.length > 0 && (
+        {(classTabs.length > 0 || teacherTabs.length > 0) && (
           <div className="mt-3">
-            <p className="mb-1.5 text-caption font-bold tracking-wide lk-muted uppercase">
-              Switch class
-            </p>
-            <div
-              role="tablist"
-              aria-label="Classes"
-              className="lk-class-switcher flex gap-2 overflow-x-auto pb-1"
-            >
-              <ClassTab
-                label="All classes"
-                count={classTabs.reduce((sum, item) => sum + item.open, 0)}
-                selected={subject === ALL}
-                onClick={() => chooseClass(ALL)}
-              />
-              {classTabs.map((item) => (
-                <ClassTab
-                  key={item.subject}
-                  label={item.label}
-                  fullName={item.subject}
-                  count={item.open}
-                  selected={subject === item.subject}
-                  onClick={() => chooseClass(item.subject)}
-                />
-              ))}
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-caption font-bold tracking-wide lk-muted uppercase">Browse assignments</p>
+              <div className="flex rounded-xl border lk-border lk-sunken p-1" role="tablist" aria-label="Assignment tab type">
+                <button type="button" role="tab" aria-selected={browseTabs === 'class'} onClick={() => chooseBrowseTabs('class')} className={cx('rounded-lg px-3 py-1.5 text-caption font-extrabold transition-all', browseTabs === 'class' ? 'lk-raised lk-strong shadow-sm' : 'lk-muted')}>Classes</button>
+                <button type="button" role="tab" aria-selected={browseTabs === 'teacher'} onClick={() => chooseBrowseTabs('teacher')} className={cx('rounded-lg px-3 py-1.5 text-caption font-extrabold transition-all', browseTabs === 'teacher' ? 'lk-raised lk-strong shadow-sm' : 'lk-muted')}>Teachers</button>
+              </div>
             </div>
+            {browseTabs === 'class' ? (
+              <div role="tablist" aria-label="Classes" className="lk-class-switcher flex gap-2 overflow-x-auto pb-1">
+                <ClassTab label="All classes" count={classTabs.reduce((sum, item) => sum + item.open, 0)} selected={subject === ALL} onClick={() => chooseClass(ALL)} />
+                {classTabs.map((item) => <ClassTab key={item.subject} label={item.label} fullName={item.subject} count={item.open} selected={subject === item.subject} onClick={() => chooseClass(item.subject)} />)}
+              </div>
+            ) : (
+              <div role="tablist" aria-label="Teachers" className="lk-teacher-switcher flex gap-2 overflow-x-auto pb-1">
+                <ClassTab label="All teachers" count={teacherTabs.reduce((sum, item) => sum + item.open, 0)} selected={teacher === ALL} onClick={() => chooseTeacher(ALL)} />
+                {teacherTabs.map((item) => <ClassTab key={item.teacher} label={item.teacher} fullName={`${item.subjects.size} class${item.subjects.size === 1 ? '' : 'es'}`} count={item.open} selected={teacher === item.teacher} onClick={() => chooseTeacher(item.teacher)} />)}
+              </div>
+            )}
+            {browseTabs === 'teacher' && teacherTabs.some((item) => item.teacher === 'Teacher not set') && <p className="mt-1.5 text-caption lk-muted">Teacher names come from each local class dashboard. Unset classes stay together without LockIn guessing.</p>}
           </div>
         )}
 
-        {subject !== ALL && (
+        {browseTabs === 'class' && subject !== ALL && (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border lk-border lk-sunken px-4 py-3">
             <div className="min-w-0">
               <p className="truncate text-body font-bold lk-strong">{subject}</p>
@@ -458,6 +547,13 @@ export function AssignmentsPage() {
               </Button>
               )}
             </div>
+          </div>
+        )}
+
+        {browseTabs === 'teacher' && teacher !== ALL && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border lk-border lk-sunken px-4 py-3">
+            <div className="min-w-0"><p className="truncate text-body font-bold lk-strong">{teacher}</p><p className="text-caption lk-muted">{teacherTabs.find((item) => item.teacher === teacher)?.subjects.size ?? 0} class{(teacherTabs.find((item) => item.teacher === teacher)?.subjects.size ?? 0) === 1 ? '' : 'es'} · {teacherTabs.find((item) => item.teacher === teacher)?.open ?? 0} open assignments</p></div>
+            {teacher !== 'Teacher not set' && (() => { const firstSubject = [...(teacherTabs.find((item) => item.teacher === teacher)?.subjects ?? [])][0]; return firstSubject ? <Button size="sm" variant="ghost" onClick={() => navigate(`/class/${encodeURIComponent(firstSubject)}`)}>Open teacher details</Button> : null; })()}
           </div>
         )}
 
@@ -493,7 +589,7 @@ export function AssignmentsPage() {
             }}
             aria-pressed={layout === 'class'}
           >
-            By class
+            {layout === 'class' ? 'Grouped cards' : 'Flat list'}
           </Chip>
           <Chip
             onClick={() => setShowFilters((open) => !open)}
@@ -557,12 +653,15 @@ export function AssignmentsPage() {
       ) : (
         <section aria-live="polite">
           <SectionHeader
-            title={`${VIEWS.find((v) => v.id === view)?.label} (${shown.length})`}
+            title={`${horizon ? (horizon === 'parking' ? 'Parking lot' : `${horizon.charAt(0).toUpperCase()}${horizon.slice(1)}`) : VIEWS.find((v) => v.id === view)?.label} (${shown.length})`}
             hint={
-              layout === 'class'
-                ? 'Grouped by class, most urgent class first.'
+              horizon
+                ? 'A calm time horizon from Home.'
+                : layout === 'class'
+                ? browseTabs === 'teacher' && teacher !== ALL ? `Filtered to ${teacher}, then grouped by class.` : 'Grouped by class, most urgent class first.'
                 : 'Most urgent first.'
             }
+            action={horizon ? <button type="button" className="text-caption font-extrabold lk-muted hover:underline" onClick={() => { const next = new URLSearchParams(params); next.delete('horizon'); setParams(next, { replace: true }); }}>Show normal views</button> : undefined}
           />
 
           {layout === 'class' ? (
@@ -571,15 +670,15 @@ export function AssignmentsPage() {
               together without producing narrow newspaper columns.
             */
             <div className="lk-stagger space-y-5">
-              {groupByClass(shown, now).map((group) => (
+              {groupByClass(shown, now).map((group) => {
+                const style = classStyle(state.settings.schoolSchedule, group.subject);
+                return (
                 <div
                   key={group.subject}
-                  className="lk-assignment-group min-w-0 rounded-2xl border lk-border p-3 sm:p-4"
+                  className={cx('lk-assignment-group lk-class-pattern min-w-0 rounded-2xl border lk-border p-3 sm:p-4', `lk-class-theme-${style?.color ?? 'brand'}`)}
                 >
                   <div className="mb-3 flex items-baseline justify-between gap-2 px-1">
-                    <h3 className="truncate text-heading font-extrabold lk-strong">
-                      {group.subject}
-                    </h3>
+                    <button type="button" className="flex min-w-0 items-center gap-2 text-left" onClick={() => navigate(`/class/${encodeURIComponent(group.subject)}`)} aria-label={`Open ${group.subject} dashboard`}><span className="lk-class-icon grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[0.62rem] font-black text-white">{style?.icon ?? group.subject.slice(0, 1).toUpperCase()}</span><h3 className="truncate text-heading font-extrabold lk-strong">{group.subject}</h3></button>
                     <span className="shrink-0 text-caption tabular-nums lk-muted">
                       {/* The class's own grade, when one has been read. It
                           belongs here rather than only on /grades: "how am I
@@ -593,7 +692,7 @@ export function AssignmentsPage() {
                     {group.assignments.map((a) => renderCard(a))}
                   </div>
                 </div>
-              ))}
+              );})}
             </div>
           ) : (
             <div className="space-y-2.5">{shown.map((a) => renderCard(a))}</div>
@@ -694,7 +793,7 @@ export function AssignmentsPage() {
           <TextInput value={classNameDraft} onChange={(e) => setClassNameDraft(e.target.value)} autoFocus />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setRenamingClass(null)}>Cancel</Button>
-            <Button type="submit">Save name</Button>
+            <Button type="submit" aria-label="Save class name">Save name</Button>
           </div>
         </form>
       </Modal>

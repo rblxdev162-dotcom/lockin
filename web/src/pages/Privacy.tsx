@@ -100,9 +100,10 @@ export function PrivacyPage() {
         <CardHeader title="Canvas" />
         <p className="text-sm leading-relaxed lk-muted">
           After you grant access to your Canvas site, LockIn reads supported assignment and
-          submission information from Canvas pages you visit yourself. It does not collect your
-          Canvas password, it cannot open Canvas on your behalf, and it only ever sees pages you
-          actually open. LockIn is not affiliated with Canvas or Instructure.
+          submission information from rendered Canvas pages. It does not collect your Canvas
+          password or call Canvas APIs. If you enable scheduled checks, the Companion may open one
+          needed class Grades page in a temporary background tab, parse it locally, and close only
+          that tab. LockIn is not affiliated with Canvas or Instructure.
         </p>
       </Card>
 

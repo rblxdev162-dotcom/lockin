@@ -90,8 +90,8 @@ export function CanvasCallout({ variant = 'banner' }: { variant?: 'banner' | 'em
         </span>
         <p className="text-sm font-bold lk-strong">Pull your work from Canvas</p>
         <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed lk-muted">
-          LockIn can read assignments and submission status from Canvas pages you open. It never
-          needs your Canvas password, and it only ever sees pages you visit yourself.
+          LockIn reads rendered Canvas pages without your password or an API. With scheduled checks
+          enabled, it can briefly read one needed class in a temporary background tab after school.
         </p>
         <Button className="mt-4" icon={<Icon name="canvas" size={16} aria-hidden />} onClick={() => setSetupOpen(true)}>
           Connect Canvas

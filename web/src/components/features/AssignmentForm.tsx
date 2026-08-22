@@ -185,7 +185,7 @@ export function AssignmentForm({
             Cancel
           </Button>
         )}
-        <Button type="submit">{submitLabel}</Button>
+        <Button type="submit" aria-label={submitLabel}>{submitLabel}</Button>
       </div>
     </form>
   );

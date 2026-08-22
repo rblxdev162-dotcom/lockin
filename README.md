@@ -72,6 +72,13 @@ The extension has no build step in development; load the folder as-is.
 To watch it work: add a site under **Blocked websites**, then press **Start
 5-minute blocking test**.
 
+> By default LockIn blocks **after school and only after school**: nothing is
+> blocked between your configured first and last bell, and your blocked sites
+> are blocked from the last bell until midnight with no Focus session running.
+> Both halves are toggles under **Settings → Browser Protection**, which name
+> the exact hours they derived. The 5-minute test above ignores the schedule
+> on purpose, so it works whenever you press it.
+
 > The dev port is fixed at **5173**. The extension's committed configuration
 > names that origin. If something else is holding the port, free it rather than
 > letting Vite pick 5174 — see [Origins](#origins-development-and-production).
@@ -90,11 +97,14 @@ To watch it work: add a site under **Blocked websites**, then press **Start
 | **Chrome extension** | Does the blocking for real, with `declarativeNetRequest`. Survives closing LockIn and restarting Chrome. |
 | **Canvas calendar feed** | Assignments, courses and due dates from Canvas's own calendar feed — by LockIn's local service (no extension needed, keeps running with Chrome closed) or by the Companion. Refreshed on a timer only if you switch that on, and never during your school hours. |
 | **Canvas status and grades** | Graded, submitted, missing, excused, scores, and each class's current grade — read off the Canvas **Grades** page you opened yourself, when you press **Check Canvas**. LockIn makes no request to Canvas: no API call, no token, no polling, no background tab. |
+| **Honest Canvas coverage** | Every check says whether it read a class gradebook, class totals only, dates only, a limited page, or an unrecognised layout. A tab answering is never treated as proof that its rows parsed. |
 | **The check gate** | One rule in front of every Canvas path, in the app, the extension and the local service. Manual-only by default; automatic checks are disabled during your configured school hours; every decision, allowed or refused, is logged. |
 | **What to do next** | One ordering everywhere: missing, then overdue, then dates that need a fresh sync, then today and upcoming — strictly by due time inside each. Priority never beats a deadline. |
 | **By class** | Home summarises each class in one compact card; Assignments has a generated class switcher (including short teacher labels such as Chopra or Emmett) and opens grouped by class. |
 | **Pace** | Ahead / on track / at risk / behind — with reasons, and "not enough data" as a real answer when a sync failed. |
 | **Parent View** | A PIN-gated local dashboard of work, verification and Focus Mode history. |
+| **Transparent accountability** | Student View states exactly what Parent View can and cannot see, with the same weekly headline numbers. |
+| **Weekly review** | A local seven-day recap of completed work, focused minutes, blocked attempts and estimate accuracy, followed by one deterministic adjustment — never a score or comparison. |
 | **Emergency exit** | Always available, no PIN, no progress required. |
 
 ---
@@ -134,7 +144,7 @@ Five rules explain most of the code:
    `assignment.status`. Remaining work is always `estimate − logged`, derived,
    never stored.
 5. **Schema migrations, never wipes.** Bump `SCHEMA_VERSION` in
-   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v9**.
+   `web/src/lib/storage.ts` and add a `MIGRATIONS[n]` step. Currently **v16**.
 6. **Freshness is derived, never stored.** `lib/sources/freshness.ts` takes
    `now` and works out whether a record is live, synced, imported, stale or
    unavailable every time it is asked. Nothing persists that state, so nothing

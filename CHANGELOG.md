@@ -5,6 +5,39 @@ User-visible changes only. Internal architecture and phase history live in
 
 ## 1.5.0
 
+### After school, and only after school
+
+Blocking now follows your school day by itself. Nothing is blocked in class,
+where the sites you need are your teacher's call rather than LockIn's. Then,
+once school is over, your blocked sites stay blocked until midnight — you no
+longer have to remember to start a Focus session first.
+
+Mark a holiday or teacher workday with **Mark today no-school** on Home and
+LockIn treats it as a day off: nothing waits for a bell that isn't ringing.
+
+Both halves are toggles under Settings → Browser Protection, and the 5-minute
+blocking test still works at any hour so you can check it for yourself.
+
+### Canvas checks now say what they actually read
+
+The latest check receipt distinguishes a class gradebook, class totals, dates
+only, a limited Canvas page, and a layout LockIn could not read. A tab replying
+is no longer enough to call the check fresh: current rendered rows must produce
+structured data, and stale cached assignments cannot disguise a parser miss.
+
+### A weekly review for the student
+
+Activity now includes the last seven days of completed work, focus minutes,
+sessions and blocked attempts, plus estimate calibration and one factual next
+adjustment. It is local, deterministic, and deliberately has no productivity
+score or comparison with anyone else.
+
+### Parent View is visible from both sides
+
+Settings now lets the student preview exactly which categories Parent View can
+and cannot show, alongside the same weekly headline numbers. The PIN gate is
+unchanged; the rules are simply no longer hidden from the person they bind.
+
 ### LockIn can finally tell what you've already handed in
 
 Your Canvas connection is a **calendar feed**, and a calendar feed carries a

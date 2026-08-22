@@ -16,6 +16,7 @@ import { CanvasSettings } from '../components/features/CanvasSettings';
 import { CanvasCheckSettings } from '../components/features/CanvasCheckSettings';
 import { CanvasImportModal } from '../components/features/CanvasImportModal';
 import { ParentPinDialog } from '../components/features/ParentPinDialog';
+import { ParentTransparencyPreview } from '../components/features/parent/ParentTransparencyPreview';
 import { toast } from '../components/ui/Toast';
 import { DEFAULT_ALLOWLIST, SUGGESTED_BLOCKLIST, shadowedDomains } from '../lib/domains';
 import { normalizeDomain } from '../lib/domains';
@@ -25,7 +26,19 @@ import { REMINDER_MODES } from '../types';
 import type { ReminderMode } from '../types';
 import { formatClock, formatTime } from '../lib/time';
 import { APP_VERSION } from '../version';
-import { CLASS_COLORS, SCHOOL_DAYS } from '../lib/schoolSchedule';
+import {
+  CLASS_COLORS,
+  SCHOOL_DAYS,
+  describeSchoolHours,
+  isDuringSchoolHours,
+  isHomeworkTime,
+} from '../lib/schoolSchedule';
+import { blockingHomeworkWindow, blockingSchoolHours } from '../lib/selectors';
+
+/** Minutes past midnight back to `HH:MM`, for the copy that names the hour. */
+const minutesToClock = (value: number) =>
+  `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+import { BACKGROUNDS, readExperience, updateExperience, readToolkit, updateToolkit } from '../lib/localExperience';
 
 const MODE_COPY: Record<ReminderMode, string> = {
   Normal: 'Gentle reminders. Nothing is blocked unless you start Focus Mode yourself.',
@@ -49,6 +62,8 @@ export function SettingsPage() {
   const [requestedDomain, setRequestedDomain] = useState<string | null>(null);
   const [addGate, setAddGate] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
+  const [experience, setExperience] = useState(readExperience);
+  const [toolkit, setToolkit] = useState(readToolkit);
 
   useEffect(() => {
     const raw = params.get('allowlist');
@@ -82,6 +97,12 @@ export function SettingsPage() {
   const shadowed = shadowedDomains(s.blockedDomains, s.allowedDomains);
   const fm = state.focusMode;
   const testRunning = fm.active && fm.isTest && fm.testExpiresAt !== null;
+  const schoolHours = blockingSchoolHours(state);
+  const schoolHoursLabel = describeSchoolHours(schoolHours);
+  const schoolPauseActive = isDuringSchoolHours(schoolHours, now, s.schoolSchedule.noSchoolDates);
+  const homeworkWindow = blockingHomeworkWindow(state);
+  const homeworkActive = isHomeworkTime(homeworkWindow, now, s.schoolSchedule.noSchoolDates);
+  const homeworkLabel = homeworkWindow ? formatTime(minutesToClock(homeworkWindow.from)) : null;
   const updateSchedule = (patch: Partial<typeof s.schoolSchedule>) => dispatch({
     type: 'UPDATE_SETTINGS',
     patch: { schoolSchedule: { ...s.schoolSchedule, ...patch, configured: true } },
@@ -147,6 +168,34 @@ export function SettingsPage() {
           <div>
             <p className="mb-1.5 text-sm font-semibold lk-strong">Appearance</p>
             <ThemeToggle />
+            <div className="mt-3 flex flex-wrap gap-2" aria-label="Custom background">
+              {BACKGROUNDS.map((background) => (
+                <Chip
+                  key={background}
+                  active={experience.background === background}
+                  onClick={() => setExperience(updateExperience({ background }))}
+                >
+                  {background}
+                </Chip>
+              ))}
+            </div>
+            <p className="mt-2 text-xs lk-muted">All six backgrounds are local CSS—nothing is downloaded.</p>
+            <div className="mt-3">
+              <Toggle
+                label="Schedule backgrounds"
+                description="Locally move through Aurora, Ocean, Sunset, and Midnight with the time of day. Your manual theme stays saved."
+                checked={toolkit.autoTheme}
+                onChange={(autoTheme) => setToolkit(updateToolkit({ autoTheme }))}
+              />
+            </div>
+            <div className="mt-4 border-t lk-border pt-3">
+              <Toggle
+                label="Focus sounds"
+                description="Short local cues when Focus starts, work finishes, or a timer ends. Off by default."
+                checked={experience.sounds}
+                onChange={(sounds) => setExperience(updateExperience({ sounds }))}
+              />
+            </div>
           </div>
         </div>
       </Card>
@@ -306,6 +355,44 @@ export function SettingsPage() {
             checked={s.blockingEnabled}
             onChange={(v) => dispatch({ type: 'UPDATE_SETTINGS', patch: { blockingEnabled: v } })}
           />
+
+          <Toggle
+            label="Pause blocking during school"
+            description={
+              schoolHoursLabel
+                ? `No site is blocked between ${schoolHoursLabel}. Focus Mode, its timer and reminders still work — they just don't redirect anything.`
+                : 'Add your school hours under School schedule below, and blocking will stay out of them.'
+            }
+            checked={s.pauseBlockingDuringSchool}
+            onChange={(v) =>
+              dispatch({ type: 'UPDATE_SETTINGS', patch: { pauseBlockingDuringSchool: v } })
+            }
+          />
+          <Toggle
+            label="Block automatically after school"
+            description={
+              homeworkLabel
+                ? `Blocked sites stay blocked from ${homeworkLabel} until midnight, with no Focus session needed. Turn off to block only while a Focus session is running.`
+                : 'Add your school hours under School schedule below to set when homework hours begin.'
+            }
+            checked={s.autoBlockAfterSchool}
+            onChange={(v) =>
+              dispatch({ type: 'UPDATE_SETTINGS', patch: { autoBlockAfterSchool: v } })
+            }
+          />
+          {s.autoBlockAfterSchool && homeworkActive && !schoolPauseActive && (
+            <p className="rounded-xl lk-sunken px-3 py-2 text-caption lk-muted">
+              Homework hours are running now — your{' '}
+              {s.blockedDomains.length === 0 ? 'blocklist is empty, so nothing' : `${s.blockedDomains.length} blocked site${s.blockedDomains.length === 1 ? '' : 's'}`}{' '}
+              {s.blockedDomains.length === 0 ? 'is being blocked' : 'are being blocked'}.
+            </p>
+          )}
+          {s.pauseBlockingDuringSchool && schoolPauseActive && (
+            <p className="rounded-xl lk-sunken px-3 py-2 text-caption lk-muted">
+              School is in session right now, so blocking is paused. It resumes on its own
+              afterwards.
+            </p>
+          )}
 
           <div className="flex flex-wrap gap-2 border-t lk-border pt-3">
             {testRunning ? (
@@ -473,6 +560,7 @@ export function SettingsPage() {
           Used for: the Parent Dashboard, overriding Focus Mode, temporary unlocks, and — in Strict
           Mode — protected blocklist and allowlist changes.
         </p>
+        <ParentTransparencyPreview />
       </Card>
 
       {/* ---------------- Data, privacy and help ---------------- */}

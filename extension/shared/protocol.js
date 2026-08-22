@@ -27,6 +27,8 @@ export const MSG = {
   CANVAS_GET_VIEW: 'CANVAS_GET_VIEW',
   /** web → ext: re-read the Canvas page in the active tab now */
   CANVAS_SYNC: 'CANVAS_SYNC',
+  /** web → ext: quietly read one needed class gradebook, inside the auto window */
+  CANVAS_AUTO_READ: 'CANVAS_AUTO_READ',
   /**
    * web → ext: the school-hours check window.
    *
@@ -155,7 +157,56 @@ export function validateBridgeState(value) {
       typeof value.canvasDomain === 'string' && value.canvasDomain.length < 254
         ? value.canvasDomain
         : null,
+    schoolHours: schoolHours(value.schoolHours),
+    homeworkWindow: homeworkWindow(value.homeworkWindow),
+    noSchoolDates: Array.isArray(value.noSchoolDates)
+      ? value.noSchoolDates.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 180)
+      : [],
   };
+}
+
+/**
+ * Homework hours — when blocking runs with no Focus session.
+ *
+ * `null` means no automatic blocking. A malformed school window must not
+ * switch blocking off; a malformed homework window must not switch it on at a
+ * time nobody chose. Both land on the same rule: an unusable window does
+ * nothing.
+ */
+function homeworkWindow(value) {
+  if (!value || typeof value !== 'object') return null;
+  const minute = (v, max) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= max ? v : null);
+  const from = minute(value.from, 1439);
+  const freeDayFrom = minute(value.freeDayFrom, 1439);
+  const until = minute(value.until, 1440);
+  if (from === null || freeDayFrom === null || until === null) return null;
+  if (until <= from || until <= freeDayFrom) return null;
+  const schoolDays = Array.isArray(value.schoolDays)
+    ? [...new Set(value.schoolDays)].filter((d) => typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6)
+    : [];
+  return { schoolDays, from, freeDayFrom, until };
+}
+
+/**
+ * The school day, as minutes past midnight plus the weekdays it applies to.
+ *
+ * Rebuilt field by field like everything else here. An interval is only kept
+ * if it is usable — real minutes, an end after its start, at least one day —
+ * because `null` means "do not suspend blocking", and that is the direction a
+ * malformed value has to fail in. A window arriving as junk must not be able
+ * to switch blocking off for a day, or forever.
+ */
+function schoolHours(value) {
+  if (!value || typeof value !== 'object') return null;
+  const minute = (v) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 1440 ? v : null);
+  const from = minute(value.from);
+  const until = minute(value.until);
+  if (from === null || until === null || until <= from) return null;
+  const days = Array.isArray(value.days)
+    ? [...new Set(value.days)].filter((d) => typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6)
+    : [];
+  if (!days.length) return null;
+  return { days, from, until };
 }
 
 export function emptyBridgeState() {
@@ -174,5 +225,8 @@ export function emptyBridgeState() {
     testExpiresAt: null,
     appUrl: '',
     canvasDomain: null,
+    schoolHours: null,
+    homeworkWindow: null,
+    noSchoolDates: [],
   };
 }

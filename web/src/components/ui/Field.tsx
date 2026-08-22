@@ -53,15 +53,18 @@ export function Chip({
   children,
   onClick,
   className,
+  ariaLabel,
 }: {
   active?: boolean;
   children: ReactNode;
   onClick?: () => void;
   className?: string;
+  ariaLabel?: string;
 }) {
   return (
     <button
       type="button"
+      aria-label={ariaLabel}
       onClick={onClick}
       className={cx(
         'rounded-full border px-3 py-1.5 text-sm font-semibold transition-all active:scale-95',

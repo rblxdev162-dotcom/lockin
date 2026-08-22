@@ -27,12 +27,67 @@ const ext = await import('../canvas/checkWindow.js');
 const service = await import('../../scripts/canvas-feed.mjs');
 const { validateCourseGrade, validateDetectionMessage } = await import('../canvas/messaging.js');
 const grades = await import('../../web/src/types/grades.ts');
+const autoRead = await import('../../web/src/lib/canvas/autoRead.ts');
+const readCoverage = await import('../../web/src/lib/canvas/readCoverage.ts');
 
 const DOMAIN = 'myschool.instructure.com';
 
 /** A weekday and a weekend day, so day-of-week logic is actually exercised. */
 const WEDNESDAY = (h, m = 0) => new Date(2026, 7, 19, h, m).getTime();
 const SATURDAY = (h, m = 0) => new Date(2026, 7, 22, h, m).getTime();
+
+test('a responding but unreadable gradebook is never reported as a fresh read', () => {
+  const assessment = readCoverage.assessCanvasRead({
+    ok: false,
+    reason: 'page-unreadable',
+    pageKind: 'grades',
+    gradebookAnswered: true,
+    readableTabs: 0,
+    rowsSeen: 18,
+    rowsRead: 0,
+  });
+  assert.equal(assessment.coverage, 'unreadable');
+});
+
+test('candidate rows without trustworthy records degrade to unreadable', () => {
+  const assessment = readCoverage.assessCanvasRead({
+    ok: true,
+    pageKind: 'grades',
+    readGrades: true,
+    gradebookAnswered: true,
+    readableTabs: 1,
+    rowsSeen: 12,
+    rowsRead: 0,
+  });
+  assert.equal(assessment.coverage, 'unreadable');
+  assert.match(assessment.detail, /12 candidate rows/);
+});
+
+test('current structured gradebook rows produce gradebook coverage', () => {
+  const assessment = readCoverage.assessCanvasRead({
+    ok: true,
+    pageKind: 'grades',
+    readGrades: true,
+    gradebookAnswered: true,
+    readableTabs: 1,
+    rowsSeen: 14,
+    rowsRead: 13,
+  });
+  assert.equal(assessment.coverage, 'gradebook');
+  assert.match(assessment.detail, /13 assignment rows/);
+});
+
+test('the all-classes grades page is labelled totals only', () => {
+  const assessment = readCoverage.assessCanvasRead({
+    ok: true,
+    pageKind: 'grades_all',
+    readGrades: true,
+    readableTabs: 1,
+    rowsSeen: 10,
+    rowsRead: 10,
+  });
+  assert.equal(assessment.coverage, 'totals_only');
+});
 
 /* ------------------------------------------------------------------ */
 /* 1. The gate                                                         */
@@ -242,6 +297,44 @@ test('a service that was never told the window does not fetch at all', () => {
     service.autoFetchAllowed(WEDNESDAY(17), { checkWindow: undefined }).verdict,
     'unknown_window',
   );
+});
+
+test('automatic page reading keeps unfinished classes and drops completed ones', () => {
+  const now = WEDNESDAY(17);
+  const assignments = [
+    { status: 'Not Started', externalCourseId: '101', canvas: { lastCheckedAt: null } },
+    {
+      status: 'Not Started',
+      externalCourseId: '202',
+      canvas: { lastCheckedAt: new Date(now - 60_000).toISOString() },
+    },
+    { status: 'Completed', externalCourseId: '303', canvas: { lastCheckedAt: null } },
+  ];
+  assert.deepEqual(autoRead.canvasCourseIdsNeedingRead(assignments, [], DOMAIN), ['101', '202']);
+});
+
+test('a new calendar item can identify its class before its first page reading', () => {
+  const items = [
+    {
+      kind: 'assignment',
+      cancelled: false,
+      externalAssignmentId: '5001',
+      url: `https://${DOMAIN}/courses/101/assignments/5001`,
+    },
+  ];
+  assert.deepEqual(autoRead.canvasCourseIdsNeedingRead([], items, DOMAIN), ['101']);
+});
+
+test('a calendar link from another host cannot choose an automatic Canvas page', () => {
+  const items = [
+    {
+      kind: 'assignment',
+      cancelled: false,
+      externalAssignmentId: '5001',
+      url: 'https://evil.example/courses/999/assignments/5001',
+    },
+  ];
+  assert.deepEqual(autoRead.canvasCourseIdsNeedingRead([], items, DOMAIN), []);
 });
 
 /* ------------------------------------------------------------------ */

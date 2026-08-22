@@ -66,12 +66,38 @@ export interface CanvasExtensionView {
     readGrades?: boolean;
     tabsInjected?: number;
     /** Which Canvas tabs the check found, and whether each answered. */
-    tabsSeen?: { path: string; answered: boolean; injected?: boolean; kind?: string; error?: string }[];
+    tabsSeen?: {
+      path: string;
+      answered: boolean;
+      readable?: boolean;
+      injected?: boolean;
+      kind?: string;
+      error?: string;
+    }[];
     tabsChecked?: number;
+    /** Tabs that answered and yielded structured Canvas data. */
+    readableTabs?: number;
+    /** Tabs that answered but whose rendered markup could not be read. */
+    unreadableTabs?: number;
+    /** A gradebook route answered, even if its markup was unreadable. */
+    gradebookAnswered?: boolean;
+    /** Privacy-safe parser coverage counts from the selected gradebook. */
+    rowsSeen?: number;
+    rowsRead?: number;
     found?: number;
     added?: number;
     updated?: number;
     newlySubmitted?: number;
+  };
+  /** Result of one owned-tab automatic class gradebook read. */
+  autoRead?: {
+    ok: boolean;
+    reason?: string;
+    courseId?: string;
+    pageKind?: string;
+    opened?: boolean;
+    reused?: boolean;
+    closed?: boolean;
   };
   disconnect?: { ok: boolean; permissionRemoved: boolean };
   open?: { ok: boolean; reason?: string };
@@ -186,6 +212,7 @@ export function sanitizeView(payload: unknown): CanvasExtensionView | null {
     canvasTabsOpen: Number.isFinite(v.canvasTabsOpen) ? Number(v.canvasTabsOpen) : 0,
     gradesTabOpen: v.gradesTabOpen === true,
     sync: (v.sync as CanvasExtensionView['sync']) ?? undefined,
+    autoRead: (v.autoRead as CanvasExtensionView['autoRead']) ?? undefined,
     disconnect: (v.disconnect as CanvasExtensionView['disconnect']) ?? undefined,
     open: (v.open as CanvasExtensionView['open']) ?? undefined,
     configureOk: v.configureOk === true,
@@ -256,6 +283,14 @@ export class CanvasPageProvider implements CanvasProvider {
    */
   async sync(override = false): Promise<CanvasExtensionView | null> {
     return this.view(MSG.CANVAS_SYNC, { override }, 6000);
+  }
+
+  /**
+   * Lets the companion read one needed class in a temporary background tab.
+   * Numeric course ids are the only page-derived values crossing this request.
+   */
+  async autoRead(courseIds: string[]): Promise<CanvasExtensionView | null> {
+    return this.view(MSG.CANVAS_AUTO_READ, { courseIds }, 18_000);
   }
 
   /** Pushes the check window the gate enforces into the extension. */

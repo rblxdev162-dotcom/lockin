@@ -112,7 +112,7 @@ export function QuickAdd({ onOpenFull, autoFocus }: { onOpenFull?: () => void; a
               setOverrides({});
             }}
           />
-          <Button type="submit" disabled={!ready} icon={<Icon name="plus" size={16} aria-hidden />}>
+          <Button type="submit" aria-label="Add assignment from quick entry" disabled={!ready} icon={<Icon name="plus" size={16} aria-hidden />}>
             Add
           </Button>
         </div>

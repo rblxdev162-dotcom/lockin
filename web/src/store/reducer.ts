@@ -155,6 +155,7 @@ export type Action =
   | { type: 'PLANNER_UNSKIP_ITEM'; sourceType: 'assignment' | 'exam'; sourceId: string; date: string }
   /** Manual reordering of one day. Survives until the plan is rebuilt. */
   | { type: 'PLANNER_SET_ORDER'; date: string; order: string[] }
+  | { type: 'PLANNER_MOVE_ITEM'; itemId: string; fromDate: string; toDate: string }
   | { type: 'PLANNER_SET_LOCK'; date: string; locked: boolean }
   /** Opt in to a learned subject speed factor. */
   | { type: 'PLANNER_ACCEPT_FACTOR'; subject: string }
@@ -1772,6 +1773,43 @@ export function reducer(state: AppState, action: Action): AppState {
         'plan_item_moved',
         'Reordered today’s plan',
         { date: action.date },
+      );
+    }
+
+    /** Dragging a block is an explicit edit to the plan cache. A later rebuild
+     * may revisit it; the work itself and its remaining minutes stay derived. */
+    case 'PLANNER_MOVE_ITEM': {
+      const plan = state.planner.plan;
+      if (!plan || action.fromDate === action.toDate) return state;
+      if (state.planner.lockedDates.includes(action.fromDate) || state.planner.lockedDates.includes(action.toDate)) return state;
+      const from = plan.days.find((day) => day.date === action.fromDate);
+      const to = plan.days.find((day) => day.date === action.toDate);
+      const item = from?.items.find((entry) => entry.id === action.itemId);
+      if (!from || !to || !item) return state;
+      const moved = {
+        ...item,
+        scheduledDate: action.toDate,
+        originalScheduledDate: item.originalScheduledDate ?? action.fromDate,
+        startTime: undefined,
+        endTime: undefined,
+        reason: { ...item.reason, codes: [...new Set([...item.reason.codes, 'manual_order' as const])] },
+      };
+      const days = plan.days.map((day) => {
+        if (day.date === action.fromDate) {
+          const items = day.items.filter((entry) => entry.id !== action.itemId);
+          return { ...day, items, plannedMinutes: items.reduce((sum, entry) => sum + entry.plannedMinutes, 0) };
+        }
+        if (day.date === action.toDate) {
+          const items = [...day.items, moved];
+          return { ...day, items, plannedMinutes: items.reduce((sum, entry) => sum + entry.plannedMinutes, 0) };
+        }
+        return day;
+      });
+      return log(
+        { ...state, planner: { ...state.planner, plan: { ...plan, days } } },
+        'plan_item_moved',
+        `Moved “${item.title}” to ${action.toDate}`,
+        { fromDate: action.fromDate, toDate: action.toDate, plannedMinutes: item.plannedMinutes },
       );
     }
 

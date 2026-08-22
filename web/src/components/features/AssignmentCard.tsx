@@ -6,6 +6,7 @@ import { cx } from '../../lib/cx';
 import { SourceBadge } from '../ui/Status';
 import { WORK_STATE_LABEL, WORK_STATE_TONE, isSettled, workStateOf } from '../../lib/workState';
 import { CanvasStatusBadge } from './CanvasStatusBadge';
+import { AssignmentToolkit } from './AssignmentToolkit';
 
 export function AssignmentCard({
   assignment,
@@ -194,6 +195,8 @@ export function AssignmentCard({
             ))}
           </div>
         )}
+
+        <AssignmentToolkit assignment={assignment} />
       </div>
 
       <div className="flex shrink-0 flex-col items-end gap-1.5">

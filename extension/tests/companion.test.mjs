@@ -336,12 +336,21 @@ test('nothing fires for work long past due', async () => {
 
 const calendar = await import('../background/calendar.js');
 
-test('the feed is checked every 30 minutes by default', async () => {
+test('the feed is checked every 15 minutes by default', async () => {
   const config = await calendar.getCalendarConfig();
-  assert.equal(config.refreshMinutes, 30);
+  assert.equal(config.refreshMinutes, 15);
   // And the view the page sees agrees, so the UI cannot claim a cadence the
   // alarm is not actually running at.
-  assert.equal(calendar.toCalendarView(config).refreshMinutes, 30);
+  assert.equal(calendar.toCalendarView(config).refreshMinutes, 15);
+});
+
+test('the former 3- and 30-minute defaults migrate to the new cadence', async () => {
+  for (const formerDefault of [3, 30]) {
+    store.set('lockin_calendar', { refreshMinutes: formerDefault });
+    const config = await calendar.getCalendarConfig();
+    assert.equal(config.refreshMinutes, 15);
+    assert.equal(calendar.toCalendarView(config).refreshMinutes, 15);
+  }
 });
 
 test('a feed URL is validated before it is ever stored', () => {

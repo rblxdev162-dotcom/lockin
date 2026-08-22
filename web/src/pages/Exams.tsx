@@ -258,14 +258,14 @@ function ExamModal({
           <TextInput
             autoFocus
             value={name}
-            placeholder="Biology Exam"
+            placeholder="Which exam is it?"
             onChange={(e) => setName(e.target.value)}
           />
         </Field>
         <Field label="Subject">
           <TextInput
             value={subject}
-            placeholder="Biology"
+            placeholder="Class name, or your teacher's name"
             onChange={(e) => setSubject(e.target.value)}
           />
         </Field>

@@ -76,7 +76,7 @@ export function AssignmentForm({
         <TextInput
           value={title}
           autoFocus
-          placeholder="Chapter 7 problem set"
+          placeholder="What is the assignment?"
           onChange={(e) => setTitle(e.target.value)}
         />
       </Field>
@@ -85,7 +85,7 @@ export function AssignmentForm({
         <Field label="Subject">
           <TextInput
             value={subject}
-            placeholder="Biology"
+            placeholder="Class name, or your teacher's name"
             onChange={(e) => setSubject(e.target.value)}
           />
         </Field>

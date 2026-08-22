@@ -150,7 +150,7 @@ export function Onboarding() {
                 autoFocus
                 value={name}
                 maxLength={40}
-                placeholder="Alex"
+                placeholder="Your first name"
                 onChange={(e) => setName(e.target.value)}
               />
               <Button className="mt-5" size="lg" block type="submit" disabled={!name.trim()}>
@@ -183,7 +183,7 @@ export function Onboarding() {
                   <div className="flex gap-2">
                     <TextInput
                       value={item.name}
-                      placeholder="Biology or Emmett"
+                      placeholder="Class name, or your teacher's name"
                       aria-label={`Class ${index + 1} name`}
                       onChange={(e) => setClasses((list) => list.map((entry) => entry.id === item.id ? { ...entry, name: e.target.value, icon: e.target.value.trim().slice(0, 1).toUpperCase() || 'C' } : entry))}
                     />

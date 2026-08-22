@@ -201,7 +201,7 @@ function FixedBlockForm({ onAdd }: { onAdd: (block: FixedBlock) => void }) {
       }}
     >
       <Field label="What">
-        <TextInput name="label" placeholder="Soccer" maxLength={60} />
+        <TextInput name="label" placeholder="What is it? Practice, work, dinner…" maxLength={60} />
       </Field>
       <Field label="Day">
         <select name="weekday" className="lk-input" defaultValue="2">

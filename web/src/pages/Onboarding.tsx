@@ -298,7 +298,8 @@ export function Onboarding() {
                   <p className="text-body font-extrabold lk-strong">Connect Canvas</p>
                   <p className="mt-0.5 text-sm lk-muted">
                     Your assignments, due dates, classes and teachers arrive by themselves —
-                    nothing to type. Needs the Chrome companion, which is the next step.
+                    nothing to type. Canvas reading happens inside the Chrome companion, so this
+                    needs the step before this one.
                   </p>
                 </div>
                 {connection?.domain ? (

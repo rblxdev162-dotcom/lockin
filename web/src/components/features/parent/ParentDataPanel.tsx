@@ -15,6 +15,7 @@ import { Icon } from '../../ui/Icon';
 import { ConfirmDialog } from '../../ui/Modal';
 import { toast } from '../../ui/Toast';
 import { useApp } from '../../../store/context';
+import { todayISO } from '../../../lib/time';
 import { buildWeeklyCsv, buildWeeklyExport, selectWeeklySummary } from '../../../lib/parent/selectors';
 
 type Destructive = 'verification' | 'activity' | 'focus' | null;
@@ -35,7 +36,9 @@ export function ParentDataPanel({ state, now }: { state: AppState; now: Date }) 
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const stamp = new Date(now).toISOString().slice(0, 10);
+  // The student's own date, not UTC's: an export made at 6pm in the Americas
+  // was being filed under tomorrow.
+  const stamp = todayISO(new Date(now));
 
   return (
     <div className="space-y-5">

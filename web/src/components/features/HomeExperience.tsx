@@ -11,6 +11,7 @@ import { workStateOf } from '../../lib/workState';
 import { cx } from '../../lib/cx';
 import { importCandidates } from '../../lib/selectors';
 import { readToolkit, updateToolkit } from '../../lib/localExperience';
+import { dayShapeOf, formatClock } from '../../lib/dayShape';
 import { TextInput } from '../ui/Field';
 
 const SECTIONS = ['changes', 'reset', 'confidence'] as const;
@@ -26,18 +27,38 @@ export function SmartDayHeader({ next }: { next?: Assignment }) {
   const schedule = state.settings.schoolSchedule;
   const date = new Date(now);
   const current = date.getHours() * 60 + date.getMinutes();
-  const schoolStart = minutes(schedule.schoolStart);
   const schoolEnd = minutes(schedule.schoolEnd);
-  const noSchool = readToolkit().noSchoolDays.includes(todayISO(date));
+  const noSchoolDates = readToolkit().noSchoolDays;
+  const noSchool = noSchoolDates.includes(todayISO(date));
+  const isSchoolDayToday =
+    !noSchool &&
+    (schedule.schoolDays.length ? schedule.schoolDays : [1, 2, 3, 4, 5]).includes(date.getDay());
   const afterSchool = schedule.configured && !noSchool && current >= schoolEnd;
-  const morning = schedule.configured && !noSchool && current < schoolEnd;
-  const marker = Math.max(2, Math.min(98, ((current - schoolStart) / Math.max(1, 21 * 60 - schoolStart)) * 100));
+  /**
+   * Today as real time blocks. `null` means LockIn genuinely does not know
+   * when school is, and the rail is not drawn at all — an invented school day
+   * is worse than no rail.
+   */
+  const day = dayShapeOf({
+    now: date,
+    schedule,
+    canvasWindow: state.settings.canvasCheckWindow,
+    assignments: state.assignments,
+    availability: state.planner.settings.availability,
+    plannerConfigured: state.planner.settings.configured,
+    noSchoolDates,
+  });
+  /**
+   * The after-school briefing is for after school. It used to fire on any day
+   * once the clock passed the last bell — including Saturdays, where it
+   * announced "After school · ready when you are" to a student who had not
+   * been at school for two days.
+   */
   const [briefing, setBriefing] = useState(() => {
     const key = `lockin.briefing.${todayISO(date)}`;
-    return afterSchool && sessionStorage.getItem(key) !== 'seen';
+    return afterSchool && isSchoolDayToday && sessionStorage.getItem(key) !== 'seen';
   });
   const changes = state.activity.filter((event) => event.type === 'feed_assignment_updated' || event.type === 'feed_assignment_cancelled').slice(0, 2);
-  const todaysClasses = schedule.classes.filter((item) => item.days.includes(date.getDay()));
   const dueToday = state.assignments.filter((assignment) => assignment.status !== 'Completed' && assignment.dueDate === todayISO(date));
   const carryover = state.assignments.filter((assignment) => assignment.status === 'In Progress');
 
@@ -71,16 +92,56 @@ export function SmartDayHeader({ next }: { next?: Assignment }) {
         </div>
       )}
 
-      {schedule.configured && (
-        <Card className="lk-day-rail-card" aria-label="School-day progress">
+      {day && (
+        <Card className="lk-day-rail-card" aria-label="Today">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0"><p className="text-heading font-extrabold lk-strong">{noSchool ? 'No-school day' : morning ? 'Morning mode' : afterSchool ? 'After-school mode' : 'Evening mode'}</p><p className="break-words text-caption lk-muted">{noSchool ? `Normal school prompts are paused · ${dueToday.length} deadline${dueToday.length === 1 ? '' : 's'} still visible` : morning ? `Between-class glance · ${todaysClasses.map((item) => item.name).join(' · ') || 'No classes listed'} · ${dueToday.length} due today` : afterSchool ? `${carryover.length} class task${carryover.length === 1 ? '' : 's'} already started · your next action is ready.` : 'Wrap up and reset for tomorrow.'}</p></div>
-            <span className="rounded-full lk-sunken px-3 py-1 text-caption font-bold lk-muted">Automatic</span>
+            <div className="min-w-0">
+              <p className="text-heading font-extrabold lk-strong">{day.headline}</p>
+              <p className="break-words text-caption lk-muted">{day.detail}</p>
+            </div>
+            {day.kind === 'school' ? (
+              <span className="rounded-full lk-sunken px-3 py-1 text-caption font-bold lk-muted">
+                School ends {formatClock(day.homeworkFrom)}
+              </span>
+            ) : (
+              <span className="rounded-full lk-sunken px-3 py-1 text-caption font-bold lk-muted">
+                {day.kind === 'weekend' ? 'Weekend' : 'No school'}
+              </span>
+            )}
           </div>
-          <div className="relative mt-5">
-            <div className="h-1.5 rounded-full bg-gradient-to-r from-sky-400 via-violet-500 to-mint-500 opacity-70" />
-            <span className="lk-you-are-here absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-brand-500" style={{ left: `${marker}%` }}><span className="sr-only">You are here</span></span>
-            <div className="mt-2 grid grid-cols-4 text-[0.65rem] font-bold lk-muted"><span>School</span><span className="text-center">Break</span><span className="text-center">Homework</span><span className="text-right">Finished</span></div>
+
+          {/*
+            Real blocks with real times, rather than four words that meant the
+            same thing every day. A suggested block is marked in words as well
+            as colour — "Suggested" is written on it — because a coloured bar
+            with no text is not a thing a screen reader can read out.
+          */}
+          <div className="mt-4 flex gap-1.5" role="list" aria-label="Today's blocks">
+            {day.blocks.map((block) => (
+              <div
+                key={`${block.start}-${block.end}`}
+                role="listitem"
+                className={cx(
+                  'min-w-0 flex-1 rounded-xl border px-2.5 py-2 transition-colors',
+                  block.current ? 'border-brand-500 lk-raised shadow-sm' : 'lk-border',
+                  block.kind === 'school' && 'lk-sunken',
+                  block.recommended && !block.current && 'border-brand-500/40',
+                )}
+                style={{ flexGrow: Math.max(1, (block.end - block.start) / 60) }}
+              >
+                <p className="truncate text-[0.7rem] font-extrabold lk-strong">{block.label}</p>
+                <p className="truncate text-[0.65rem] font-bold lk-muted">
+                  {block.kind === 'school'
+                    ? 'In class'
+                    : block.kind === 'break'
+                      ? 'Your break'
+                      : block.recommended
+                        ? 'Suggested'
+                        : 'Free'}
+                  {block.current ? ' · now' : ''}
+                </p>
+              </div>
+            ))}
           </div>
         </Card>
       )}
@@ -145,7 +206,9 @@ function WeeklyStory() {
   const weekOf = todayISO(week);
   const sessions = state.completedSessions.filter((session) => new Date(session.endedAt).getTime() >= week.getTime());
   const minutes = sessions.reduce((sum, session) => sum + session.actualMinutes, 0);
-  const days = new Set(sessions.map((session) => session.endedAt.slice(0,10))).size;
+  // Local dates: a UTC slice counts an evening session as the next day, so a
+  // student in the Americas would see "2 days" for one evening's work.
+  const days = new Set(sessions.map((session) => todayISO(new Date(session.endedAt)))).size;
   const longest = sessions.reduce((best, session) => Math.max(best, session.actualMinutes), 0);
   const last = [...state.completedSessions].sort((a,b) => new Date(b.endedAt).getTime()-new Date(a.endedAt).getTime())[0];
   const quietDays = last ? Math.floor((now-new Date(last.endedAt).getTime())/86_400_000) : 99;

@@ -308,16 +308,34 @@ export function CanvasSetupModal({
             </li>
           </ul>
           {!extensionConnected && (
-            <p className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-xs font-semibold text-amber-700 dark:text-amber-300">
-              The LockIn Chrome extension isn’t connected yet. Install it first — Canvas detection
-              runs inside the extension.
-            </p>
+            /*
+              A warning is not a stop. This used to say the extension was
+              missing and then let the student continue, name their school,
+              press Connect and receive a toast for their trouble — every step
+              of a working flow except the working part. Canvas detection runs
+              inside the Companion; with no Companion answering there is
+              nothing to connect to, so the flow stops here and says what to do.
+            */
+            <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-xs font-semibold text-amber-700 dark:text-amber-300">
+              <p>
+                The LockIn Companion isn’t answering on this page, so there is nothing to connect
+                Canvas to yet. Canvas detection runs inside it.
+              </p>
+              <p className="mt-1.5 font-normal">
+                If you have installed it, check two things: that this page has been reloaded since,
+                and that you installed the copy downloaded from <strong>this</strong> address
+                ({typeof window === 'undefined' ? '' : window.location.host}) — a Companion built
+                for a different address cannot see this one.
+              </p>
+            </div>
           )}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={close}>
               Cancel
             </Button>
-            <Button onClick={() => setStep(1)}>Continue</Button>
+            <Button onClick={() => setStep(1)} disabled={!extensionConnected}>
+              Continue
+            </Button>
           </div>
         </div>
       ) : (

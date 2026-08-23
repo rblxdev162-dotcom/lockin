@@ -201,11 +201,50 @@ export function SettingsPage() {
       </Card>
 
       <Card id="school-schedule">
-        <CardHeader title="School schedule" subtitle="Class days, breaks, and the boundary between school and study time." />
+        <CardHeader title="School schedule" subtitle="School days, breaks, and the boundary between school and study time." />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="School starts"><TextInput type="time" value={s.schoolSchedule.schoolStart} onChange={(e) => updateSchedule({ schoolStart: e.target.value })} /></Field>
           <Field label="School ends"><TextInput type="time" value={s.schoolSchedule.schoolEnd} onChange={(e) => updateSchedule({ schoolEnd: e.target.value })} /></Field>
         </div>
+        {/*
+          One row, not one per class. These days decide when blocking pauses,
+          when Canvas checks are refused, and which days are weekends — so they
+          are asked as the single question they are.
+        */}
+        <div className="mt-4">
+          <p className="text-sm font-bold lk-strong">School days</p>
+          <p className="mt-0.5 text-xs lk-muted">Everything else is treated as a free day.</p>
+          <div className="mt-2 flex flex-wrap gap-1.5" aria-label="School days">
+            {SCHOOL_DAYS.map((day) => (
+              <Chip
+                key={day.id}
+                active={s.schoolSchedule.schoolDays.includes(day.id)}
+                aria-label={day.label}
+                onClick={() => {
+                  const next = s.schoolSchedule.schoolDays.includes(day.id)
+                    ? s.schoolSchedule.schoolDays.filter((value) => value !== day.id)
+                    : [...s.schoolSchedule.schoolDays, day.id].sort();
+                  // Both mirrors move together: the schedule decides when
+                  // blocking pauses, the Canvas window decides when checks are
+                  // refused, and a student who unticks Friday means both.
+                  dispatch({
+                    type: 'UPDATE_SETTINGS',
+                    patch: {
+                      schoolSchedule: { ...s.schoolSchedule, schoolDays: next, configured: true },
+                      canvasCheckWindow: { ...s.canvasCheckWindow, schoolDays: next },
+                    },
+                  });
+                }}
+              >
+                {day.short}
+              </Chip>
+            ))}
+          </div>
+        </div>
+        <p className="mt-4 text-sm font-bold lk-strong">Your classes</p>
+        <p className="-mt-0.5 text-xs lk-muted">
+          These fill themselves in from Canvas. Rename, recolour or remove them here.
+        </p>
         <div className="mt-4 space-y-3">
           {s.schoolSchedule.classes.map((item) => (
             <div key={item.id} className="rounded-2xl lk-sunken p-3">
@@ -215,7 +254,6 @@ export function SettingsPage() {
                 <select className="lk-input w-auto" aria-label={`${item.name} color`} value={item.color} onChange={(e) => updateSchedule({ classes: s.schoolSchedule.classes.map((entry) => entry.id === item.id ? { ...entry, color: e.target.value as (typeof CLASS_COLORS)[number] } : entry) })}>{CLASS_COLORS.map((color) => <option key={color} value={color}>{color}</option>)}</select>
                 <Button size="sm" variant="ghost" onClick={() => updateSchedule({ classes: s.schoolSchedule.classes.filter((entry) => entry.id !== item.id) })}>Remove</Button>
               </div>
-              <div className="mt-2 flex gap-1.5">{SCHOOL_DAYS.map((day) => <Chip key={day.id} active={item.days.includes(day.id)} aria-label={day.label} onClick={() => updateSchedule({ classes: s.schoolSchedule.classes.map((entry) => entry.id === item.id ? { ...entry, days: entry.days.includes(day.id) ? entry.days.filter((value) => value !== day.id) : [...entry.days, day.id].sort() } : entry) })}>{day.short}</Chip>)}</div>
             </div>
           ))}
           <Button size="sm" variant="secondary" onClick={() => updateSchedule({ classes: [...s.schoolSchedule.classes, { id: `class-${Date.now()}`, name: 'New class', days: [1, 2, 3, 4, 5], color: CLASS_COLORS[s.schoolSchedule.classes.length % CLASS_COLORS.length], icon: 'N' }] })}>Add class</Button>

@@ -31,6 +31,15 @@ export interface SchoolSchedule {
   configured: boolean;
   schoolStart: string;
   schoolEnd: string;
+  /**
+   * Days school happens, `Date.getDay()` numbering (schema v17).
+   *
+   * This used to be derived by unioning the meeting days of every class the
+   * student typed in, which made one simple fact ("school is Monday to
+   * Friday") a by-product of a much larger form — and made it wrong the moment
+   * they stopped listing classes. It is one question now, asked once.
+   */
+  schoolDays: number[];
   classes: ScheduledClass[];
   breaks: SchoolBreak[];
   quietMode: boolean;
@@ -50,6 +59,7 @@ export function defaultSchoolSchedule(): SchoolSchedule {
     configured: false,
     schoolStart: '07:30',
     schoolEnd: '15:30',
+    schoolDays: [1, 2, 3, 4, 5],
     classes: [],
     breaks: [],
     quietMode: false,
@@ -101,10 +111,26 @@ export function normalizeSchoolSchedule(value: unknown): SchoolSchedule {
         }];
       }).slice(0, 20)
     : [];
+  /**
+   * Before schema v17 the days lived on each class. A stored schedule from
+   * then still knows its days — they are the union of what its classes met on
+   * — so they are migrated rather than replaced with the Monday–Friday
+   * default, which would quietly give a student with no Friday classes a
+   * school day they do not have.
+   */
+  const storedDays = days(raw.schoolDays);
+  const legacyDays = [...new Set(classes.flatMap((item) => item.days))].sort();
+  const schoolDays = storedDays.length
+    ? storedDays
+    : legacyDays.length
+      ? legacyDays
+      : base.schoolDays;
+
   return {
     configured: raw.configured === true,
     schoolStart: hhmm(raw.schoolStart, base.schoolStart),
     schoolEnd: hhmm(raw.schoolEnd, base.schoolEnd),
+    schoolDays,
     classes,
     breaks,
     quietMode: raw.quietMode === true,
@@ -115,6 +141,55 @@ export function normalizeSchoolSchedule(value: unknown): SchoolSchedule {
           .slice(-180)
       : [],
   };
+}
+
+/**
+ * Adopts the classes Canvas has actually produced work for.
+ *
+ * Onboarding used to ask the student to type every class. It no longer does —
+ * the class list is a thing their school already knows, including the teacher
+ * names Canvas puts in its course titles — so a subject seen on a real Canvas
+ * assignment becomes a class here, which is what gives it a colour, an icon
+ * and a place in the day's tools.
+ *
+ * Only additive: a class the student named or coloured themselves is never
+ * rewritten, and nothing is ever removed, because a quiet week for one class
+ * is not evidence they dropped it.
+ */
+export function withCanvasClasses(
+  schedule: SchoolSchedule,
+  assignments: {
+    subject?: string;
+    externalCourseId?: string;
+    canvas?: { courseName?: string } | undefined;
+  }[],
+): SchoolSchedule {
+  const known = new Set(schedule.classes.map((item) => item.name.trim().toLowerCase()));
+  const additions: ScheduledClass[] = [];
+
+  for (const assignment of assignments) {
+    // Canvas-linked work only. Work the student typed by hand carries whatever
+    // subject the quick-add parser guessed, and a guess is not evidence that a
+    // class exists — it would put a permanent class in Settings for a typo.
+    if (!assignment.canvas && !assignment.externalCourseId) continue;
+    const name = (assignment.subject ?? '').trim().slice(0, 80);
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (known.has(key)) continue;
+    known.add(key);
+    const index = schedule.classes.length + additions.length;
+    if (index >= 30) break;
+    additions.push({
+      id: `class-canvas-${index}`,
+      name,
+      days: [...schedule.schoolDays],
+      color: CLASS_COLORS[index % CLASS_COLORS.length],
+      icon: classSwitchLabel(name).slice(0, 1).toUpperCase() || 'C',
+    });
+  }
+
+  if (additions.length === 0) return schedule;
+  return { ...schedule, classes: [...schedule.classes, ...additions] };
 }
 
 export function classStyle(schedule: SchoolSchedule, subject: string) {
@@ -142,6 +217,16 @@ export interface SchoolHours {
   until: number;
 }
 
+/**
+ * True when the school day is a real interval: it ends after it starts, and
+ * it leaves some of the day on the other side of the last bell.
+ */
+export function scheduleHasCoherentHours(schedule: SchoolSchedule): boolean {
+  const from = minutesOfDay(schedule.schoolStart);
+  const until = minutesOfDay(schedule.schoolEnd);
+  return until > from && until < 24 * 60 && schedule.schoolDays.length > 0;
+}
+
 export function minutesOfDay(hhmmValue: string): number {
   const [hours, minutes] = hhmmValue.split(':').map(Number);
   return (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0);
@@ -166,12 +251,19 @@ export function schoolHoursFrom(
   schedule: SchoolSchedule,
   canvasWindow: { schoolDays: number[]; schoolDayFrom: number; schoolDayStart: number } | null,
 ): SchoolHours | null {
-  if (schedule.configured) {
-    // Class days are the truthful answer to which days school happens. A
-    // schedule with hours but no classes listed still means a normal week.
-    const classDays = [...new Set(schedule.classes.flatMap((item) => item.days))].sort();
+  /**
+   * An incoherent schedule is not used at all.
+   *
+   * A student who types 3:00 PM as the start and 7:00 AM as the end — or
+   * leaves the end at midnight — used to produce hours whose `until` was not
+   * after its `from`. `isDuringSchoolHours` then matched nothing, so school
+   * never appeared to be happening and the school-hours pause silently
+   * stopped protecting them. Falling through to the Canvas window is both
+   * safer and truer: it is the other place they said when school ends.
+   */
+  if (schedule.configured && scheduleHasCoherentHours(schedule)) {
     return {
-      days: classDays.length ? classDays : [1, 2, 3, 4, 5],
+      days: [...schedule.schoolDays],
       from: minutesOfDay(schedule.schoolStart),
       until: minutesOfDay(schedule.schoolEnd),
     };
@@ -255,10 +347,12 @@ export function homeworkWindowFrom(
   canvasWindow: { schoolDays: number[]; schoolDayStart: number; freeDayStart: number } | null,
 ): HomeworkWindow | null {
   const freeDayFrom = canvasWindow ? canvasWindow.freeDayStart : 9 * 60;
-  if (schedule.configured) {
-    const classDays = [...new Set(schedule.classes.flatMap((item) => item.days))].sort();
+  // Same coherence rule as above, and for a sharper reason: an end time of
+  // midnight would otherwise make homework hours begin at 00:00, so automatic
+  // blocking would run all day including through school.
+  if (schedule.configured && scheduleHasCoherentHours(schedule)) {
     return {
-      schoolDays: classDays.length ? classDays : [1, 2, 3, 4, 5],
+      schoolDays: [...schedule.schoolDays],
       from: minutesOfDay(schedule.schoolEnd),
       freeDayFrom,
       until: 24 * 60,

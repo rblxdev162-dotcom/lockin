@@ -25,8 +25,11 @@ import type { WorkloadPreference } from '../types';
 import { BlockingConsent } from '../components/features/BlockingConsent';
 import { QuickAdd } from '../components/features/QuickAdd';
 import { formatDue } from '../lib/time';
-import { CLASS_COLORS, SCHOOL_DAYS } from '../lib/schoolSchedule';
-import type { ScheduledClass, SchoolBreak } from '../lib/schoolSchedule';
+import { SCHOOL_DAYS } from '../lib/schoolSchedule';
+import { EXTENSION_DOWNLOAD_URL, companionInstallGuide } from '../lib/downloads';
+import { useCanvas } from '../hooks/useCanvas';
+import { CanvasSetupModal } from '../components/features/CanvasSettings';
+import type { SchoolBreak } from '../lib/schoolSchedule';
 
 const MODE_COPY: Record<ReminderMode, string> = {
   Normal: 'Gentle reminders. Nothing gets blocked unless you start Focus Mode yourself.',
@@ -38,18 +41,28 @@ const MODE_COPY: Record<ReminderMode, string> = {
 export function Onboarding() {
   useTheme();
   const navigate = useNavigate();
-  const { state, dispatch } = useApp();
+  const { state, dispatch, extension } = useApp();
 
   const [step, setStep] = useState(state.profile ? 1 : 0);
+  const [canvasSetup, setCanvasSetup] = useState(false);
+  const { connection, busy: canvasBusy, connect: connectCanvas } = useCanvas();
+  const extensionConnected = extension.status === 'connected';
+  /**
+   * The steps depend on where this page is served from: a Companion built for
+   * one address cannot see another, so the instructions have to name the one
+   * the student is actually on.
+   */
+  const companionGuide = companionInstallGuide();
+  const companionSteps = companionGuide.steps;
   const [name, setName] = useState(state.profile?.firstName ?? '');
   const [preset, setPreset] = useState<PresetId>('typical');
   const [window_, setWindow] = useState<PresetWindow>(DEFAULT_WINDOW);
   const [schoolStart, setSchoolStart] = useState(state.settings.schoolSchedule.schoolStart);
   const [schoolEnd, setSchoolEnd] = useState(state.settings.schoolSchedule.schoolEnd);
-  const [classes, setClasses] = useState<ScheduledClass[]>(
-    state.settings.schoolSchedule.classes.length > 0
-      ? state.settings.schoolSchedule.classes
-      : [{ id: 'class-1', name: '', days: [1, 2, 3, 4, 5], color: 'brand', icon: 'C' }],
+  const [schoolDays, setSchoolDays] = useState<number[]>(
+    state.settings.schoolSchedule.schoolDays.length
+      ? state.settings.schoolSchedule.schoolDays
+      : [1, 2, 3, 4, 5],
   );
   const [breaks, setBreaks] = useState<SchoolBreak[]>(
     state.settings.schoolSchedule.breaks.length > 0
@@ -66,7 +79,15 @@ export function Onboarding() {
    * used the app once. They live in Settings now. Onboarding asks only what
    * changes what LockIn *does* on day one.
    */
-  const steps = ['Name', 'School schedule', 'Your work', 'Your time', 'How LockIn helps', 'Companion', 'Canvas checks'];
+  /**
+   * The Companion sits third, before anything that needs it.
+   *
+   * It used to be second-to-last, which put "Connect Canvas" on a screen where
+   * connecting could not work: the student typed their school's address, hit
+   * Connect, and got "the LockIn extension is not connected" — a dead end
+   * three steps before the screen that would have told them how to install it.
+   */
+  const steps = ['Name', 'School schedule', 'Companion', 'Your work', 'Your time', 'How LockIn helps', 'Canvas checks'];
   /**
    * Writes the availability a preset implies, and marks the planner as
    * configured so `/planner` opens with a real schedule instead of the
@@ -160,15 +181,22 @@ export function Onboarding() {
           </div>
         )}
 
-        {/* ---------- Step 2: school timetable ---------- */}
+        {/* ---------- Step 2: the school day ----------
+            Phase 36 removed the per-class rows that used to live here. They
+            asked a student to type every class and tick its meeting days, and
+            the answer bought almost nothing: LockIn groups work by the class
+            name Canvas already provides, and the only thing the days were used
+            for was "which days is there school", which is one question, not
+            one per class. Connecting Canvas is the real answer to "what are my
+            classes", and it needs no typing at all. */}
         {step === 1 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
-              What does your school week look like?
+              When is your school day?
             </h1>
             <p className="mt-1.5 text-sm lk-muted">
-              Add your classes, the days they meet, and real breaks. This stays on this device and
-              helps LockIn build a schedule around school instead of through it.
+              This is all LockIn needs to stay out of your way during school and start working
+              with you after it. Your classes come from Canvas — you never type them here.
             </p>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -176,51 +204,66 @@ export function Onboarding() {
               <Field label="School ends"><TextInput type="time" value={schoolEnd} onChange={(e) => setSchoolEnd(e.target.value)} /></Field>
             </div>
 
-            <div className="mt-6 space-y-3">
-              <p className="text-sm font-extrabold lk-strong">Classes and meeting days</p>
-              {classes.map((item, index) => (
-                <div key={item.id} className="rounded-2xl border lk-border p-3.5">
-                  <div className="flex gap-2">
-                    <TextInput
-                      value={item.name}
-                      placeholder="Class name, or your teacher's name"
-                      aria-label={`Class ${index + 1} name`}
-                      onChange={(e) => setClasses((list) => list.map((entry) => entry.id === item.id ? { ...entry, name: e.target.value, icon: e.target.value.trim().slice(0, 1).toUpperCase() || 'C' } : entry))}
-                    />
-                    {classes.length > 1 && <Button size="sm" variant="ghost" onClick={() => setClasses((list) => list.filter((entry) => entry.id !== item.id))}>Remove</Button>}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`${item.name || `Class ${index + 1}`} meeting days`}>
-                    {SCHOOL_DAYS.map((day) => <Chip key={day.id} active={item.days.includes(day.id)} onClick={() => setClasses((list) => list.map((entry) => entry.id === item.id ? { ...entry, days: entry.days.includes(day.id) ? entry.days.filter((value) => value !== day.id) : [...entry.days, day.id].sort() } : entry))} aria-label={day.label}>{day.short}</Chip>)}
-                  </div>
-                </div>
-              ))}
-              <Button variant="secondary" size="sm" icon={<Icon name="plus" size={14} />} onClick={() => setClasses((list) => [...list, { id: `class-${Date.now()}`, name: '', days: [1, 2, 3, 4, 5], color: CLASS_COLORS[list.length % CLASS_COLORS.length], icon: 'C' }])}>Add class</Button>
+            <div className="mt-6">
+              <p className="text-sm font-extrabold lk-strong">Which days do you have school?</p>
+              <p className="mt-0.5 text-xs lk-muted">
+                The days LockIn stays quiet until the last bell. Everything else is a free day.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5" aria-label="School days">
+                {SCHOOL_DAYS.map((day) => (
+                  <Chip
+                    key={day.id}
+                    active={schoolDays.includes(day.id)}
+                    aria-label={day.label}
+                    onClick={() =>
+                      setSchoolDays((list) =>
+                        list.includes(day.id)
+                          ? list.filter((value) => value !== day.id)
+                          : [...list, day.id].sort(),
+                      )
+                    }
+                  >
+                    {day.short}
+                  </Chip>
+                ))}
+              </div>
             </div>
 
             <div className="mt-6 space-y-3">
               <p className="text-sm font-extrabold lk-strong">Breaks</p>
+              <p className="-mt-2 text-xs lk-muted">
+                Time LockIn will not suggest working in — lunch, practice, dinner, the walk home.
+              </p>
               {breaks.map((item, index) => (
                 <div key={item.id} className="grid gap-2 rounded-2xl border lk-border p-3.5 sm:grid-cols-[1fr_8rem_8rem_auto]">
-                  <TextInput value={item.label} aria-label={`Break ${index + 1} name`} onChange={(e) => setBreaks((list) => list.map((entry) => entry.id === item.id ? { ...entry, label: e.target.value } : entry))} />
+                  <TextInput value={item.label} placeholder="What is this break?" aria-label={`Break ${index + 1} name`} onChange={(e) => setBreaks((list) => list.map((entry) => entry.id === item.id ? { ...entry, label: e.target.value } : entry))} />
                   <TextInput type="time" value={item.start} aria-label={`${item.label} starts`} onChange={(e) => setBreaks((list) => list.map((entry) => entry.id === item.id ? { ...entry, start: e.target.value } : entry))} />
                   <TextInput type="time" value={item.end} aria-label={`${item.label} ends`} onChange={(e) => setBreaks((list) => list.map((entry) => entry.id === item.id ? { ...entry, end: e.target.value } : entry))} />
                   <Button size="sm" variant="ghost" onClick={() => setBreaks((list) => list.filter((entry) => entry.id !== item.id))}>Remove</Button>
                 </div>
               ))}
-              <Button variant="secondary" size="sm" icon={<Icon name="plus" size={14} />} onClick={() => setBreaks((list) => [...list, { id: `break-${Date.now()}`, label: 'Break', start: '10:30', end: '10:45', days: [1, 2, 3, 4, 5] }])}>Add break</Button>
+              <Button variant="secondary" size="sm" icon={<Icon name="plus" size={14} />} onClick={() => setBreaks((list) => [...list, { id: `break-${Date.now()}`, label: 'After school', start: '15:30', end: '16:30', days: [1, 2, 3, 4, 5] }])}>Add break</Button>
             </div>
 
             <div className="mt-7 flex gap-2">
               <Button variant="secondary" onClick={back}>Back</Button>
-              <Button block onClick={() => {
-                const cleanClasses = classes.filter((item) => item.name.trim()).map((item) => ({ ...item, name: item.name.trim() }));
-                const cleanBreaks = breaks.filter((item) => item.label.trim() && item.start < item.end).map((item) => ({ ...item, label: item.label.trim() }));
-                const meetingDays = [...new Set(cleanClasses.flatMap((item) => item.days))].sort();
+              <Button block disabled={schoolDays.length === 0} onClick={() => {
+                const cleanBreaks = breaks.filter((item) => item.label.trim() && item.start < item.end).map((item) => ({ ...item, label: item.label.trim(), days: schoolDays }));
                 dispatch({ type: 'UPDATE_SETTINGS', patch: {
-                  schoolSchedule: { configured: true, schoolStart, schoolEnd, classes: cleanClasses, breaks: cleanBreaks, quietMode: false, noSchoolDates: state.settings.schoolSchedule.noSchoolDates },
+                  schoolSchedule: {
+                    ...state.settings.schoolSchedule,
+                    configured: true,
+                    schoolStart,
+                    schoolEnd,
+                    // Classes are Canvas's answer, not a form's. Anything the
+                    // student defined before is kept rather than wiped.
+                    classes: state.settings.schoolSchedule.classes,
+                    breaks: cleanBreaks,
+                    schoolDays,
+                  },
                   canvasCheckWindow: {
                     ...state.settings.canvasCheckWindow,
-                    schoolDays: meetingDays.length > 0 ? meetingDays : [1, 2, 3, 4, 5],
+                    schoolDays,
                     schoolDayFrom: Number(schoolStart.slice(0, 2)) * 60 + Number(schoolStart.slice(3)),
                     schoolDayStart: Number(schoolEnd.slice(0, 2)) * 60 + Number(schoolEnd.slice(3)),
                   },
@@ -231,8 +274,8 @@ export function Onboarding() {
           </div>
         )}
 
-        {/* ---------- Step 3: work ---------- */}
-        {step === 2 && (
+        {/* ---------- Step 4: work ---------- */}
+        {step === 3 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
               What do you need to finish?
@@ -242,9 +285,65 @@ export function Onboarding() {
               work whenever.
             </p>
 
-            <div className="lk-card mt-5 p-5">
-              <QuickAdd autoFocus />
+            {/*
+              Canvas belongs on this step, not three screens later.
+              "What do you need to finish?" has exactly two honest answers —
+              type it, or let your school's Canvas fill it in — and only one of
+              them was on the screen. Connecting also answers "what are my
+              classes", which is why the class form above it could go.
+            */}
+            <div className="lk-card mt-5 border-brand-500/40 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-body font-extrabold lk-strong">Connect Canvas</p>
+                  <p className="mt-0.5 text-sm lk-muted">
+                    Your assignments, due dates, classes and teachers arrive by themselves —
+                    nothing to type. Needs the Chrome companion, which is the next step.
+                  </p>
+                </div>
+                {connection?.domain ? (
+                  <span className="rounded-full bg-mint-400/20 px-3 py-1 text-caption font-bold text-mint-600 dark:text-mint-400">
+                    Connected
+                  </span>
+                ) : extensionConnected ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => setCanvasSetup(true)}
+                    disabled={canvasBusy === 'connect'}
+                  >
+                    {canvasBusy === 'connect' ? 'Opening…' : 'Connect'}
+                  </Button>
+                ) : (
+                  /*
+                    Canvas detection lives inside the Companion, so without it
+                    connecting cannot work. Offering the button anyway let a
+                    student type their school's address and hit a toast; this
+                    sends them to the step that fixes it instead.
+                  */
+                  <Button variant="secondary" onClick={() => setStep(2)}>
+                    Add the companion first
+                  </Button>
+                )}
+              </div>
             </div>
+
+            <p className="mt-4 text-caption font-bold tracking-wide lk-muted uppercase">
+              Or type it yourself
+            </p>
+            <div className="lk-card mt-2 p-5">
+              <QuickAdd autoFocus={false} />
+            </div>
+
+            <CanvasSetupModal
+              open={canvasSetup}
+              onClose={() => setCanvasSetup(false)}
+              connecting={canvasBusy === 'connect'}
+              extensionConnected={extensionConnected}
+              onConnect={async (domain) => {
+                const ok = await connectCanvas(domain);
+                if (ok) setCanvasSetup(false);
+              }}
+            />
 
             {state.assignments.length > 0 && (
               <div className="mt-4 space-y-2">
@@ -282,8 +381,8 @@ export function Onboarding() {
           </div>
         )}
 
-        {/* ---------- Step 3: when you can study ---------- */}
-        {step === 3 && (
+        {/* ---------- Step 5: when you can study ---------- */}
+        {step === 4 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
               When can you usually study?
@@ -340,8 +439,8 @@ export function Onboarding() {
           </div>
         )}
 
-        {/* ---------- Step 4: how LockIn helps ---------- */}
-        {step === 4 && (
+        {/* ---------- Step 6: how LockIn helps ---------- */}
+        {step === 5 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
               How should LockIn help?
@@ -435,51 +534,64 @@ export function Onboarding() {
         )}
 
         {/* ---------- Step 5: the Companion ----------
-            Phase 16. This is the one thing about LockIn a student cannot work
-            out by using it: the difference between the website on its own and
-            the website with its browser half. Canvas setup is still absent on
-            purpose — Phase 10's finding was that setup should be triggered by
-            behaviour, not by a step counter — but the *existence* of the
-            Companion has to be said once, because reminders and blocking both
-            depend on it and neither failure is visible until it matters. */}
-        {step === 5 && (
+            Phase 16 said the Companion exists. Phase 36 says how to get it:
+            the step named the thing a student cannot work out by using LockIn
+            and then left them with no way to act on it, which is the same
+            failure as not mentioning it. Chrome will not install this from a
+            web page — an unlisted extension is a download, an unzip and a
+            developer-mode load — so the steps are written out, numbered, in
+            the order Chrome asks for them. */}
+        {step === 2 && (
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight lk-strong">
-              One last thing
+              Add the Chrome companion
             </h1>
             <p className="mt-1.5 text-sm lk-muted">
-              LockIn works as a website. It works better with its Chrome
-              companion — and it will tell you honestly which one you have.
+              LockIn works as a website. Blocking, reminders while this tab is closed, and
+              automatic Canvas reading all need its browser half. Four steps, about a minute.
             </p>
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border lk-border p-4">
-                <p className="text-caption font-bold tracking-wide lk-muted uppercase">
-                  Basic LockIn
+            {extensionConnected ? (
+              <div className="mt-6 rounded-2xl border border-mint-500/50 bg-mint-400/10 p-5">
+                <p className="text-body font-extrabold text-mint-600 dark:text-mint-400">
+                  The Companion is already connected.
                 </p>
-                <ul className="mt-2 space-y-1.5 text-sm lk-strong">
-                  <li>Plan and track your work</li>
-                  <li>Focus timer and Focus Guard</li>
-                  <li>Reminders while this tab is open</li>
-                </ul>
-              </div>
-              <div className="rounded-2xl border border-brand-500/50 lk-raised p-4">
-                <p className="text-caption font-bold tracking-wide uppercase text-brand-600 dark:text-brand-300">
-                  With the Companion
+                <p className="mt-1 text-sm lk-muted">
+                  Nothing to install — LockIn can see it answering right now.
                 </p>
-                <ul className="mt-2 space-y-1.5 text-sm lk-strong">
-                  <li>Distracting sites actually blocked</li>
-                  <li>Reminders when LockIn is closed</li>
-                  <li>Canvas calendar imported automatically</li>
-                </ul>
               </div>
-            </div>
+            ) : (
+              <ol className="mt-6 space-y-3">
+                {companionSteps.map((item, index) => (
+                  <li key={item.title} className="flex gap-3 rounded-2xl border lk-border p-4">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-500 text-sm font-extrabold text-white">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-body font-bold lk-strong">
+                        {index === 0 && companionGuide.download ? (
+                          <a
+                            className="text-brand-600 underline underline-offset-2 dark:text-brand-300"
+                            href={EXTENSION_DOWNLOAD_URL}
+                          >
+                            {item.title}
+                          </a>
+                        ) : (
+                          item.title
+                        )}
+                      </p>
+                      <p className="mt-0.5 text-sm leading-relaxed lk-muted">{item.body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
 
             <p className="mt-5 rounded-2xl border border-dashed lk-border p-3.5 text-xs leading-relaxed lk-muted">
-              You can add it later from Integrations, and nothing here breaks
-              without it. Whenever Focus Mode is running and the Companion is
-              not answering, LockIn says so across every screen rather than
-              letting you believe sites are blocked.
+              You can skip this and add it later from Integrations. Nothing breaks without it —
+              but websites are not really blocked without it, and whenever Focus Mode is running
+              and the Companion is not answering, LockIn says so on every screen rather than
+              letting you believe you are protected.
             </p>
 
             <div className="mt-7 flex gap-2">
@@ -487,7 +599,7 @@ export function Onboarding() {
                 Back
               </Button>
               <Button block size="lg" onClick={next}>
-                Continue
+                {extensionConnected ? 'Continue' : 'Skip for now'}
               </Button>
             </div>
           </div>

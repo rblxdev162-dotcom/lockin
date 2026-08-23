@@ -22,6 +22,7 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { toast } from '../ui/Toast';
+import { EXTENSION_DOWNLOAD_URL, companionInstallGuide } from '../../lib/downloads';
 import { COMPATIBILITY_MESSAGE, PROTOCOL_VERSION } from '../../lib/protocol';
 import { prettyDomain } from '../../lib/domains';
 
@@ -30,6 +31,7 @@ export function BrowserProtectionSetup({ compact }: { compact?: boolean }) {
   const [testing, setTesting] = useState(false);
 
   const connected = extension.status === 'connected';
+  const guide = companionInstallGuide();
   const checking = extension.status === 'checking';
   const blocked = state.settings.blockedDomains;
   const canBlock = connected && state.settings.blockingEnabled && blocked.length > 0;
@@ -41,7 +43,7 @@ export function BrowserProtectionSetup({ compact }: { compact?: boolean }) {
     toast(
       ok
         ? 'Extension responded — blocking is wired up.'
-        : 'No response. Is the extension loaded, and has this tab been reloaded since?',
+        : `No response on ${guide.host}. Check it is installed and enabled, that this tab has been reloaded since, and that the copy you installed was built for this address.`,
       ok ? 'success' : 'error',
     );
   };
@@ -120,27 +122,42 @@ export function BrowserProtectionSetup({ compact }: { compact?: boolean }) {
         </p>
       )}
 
-      {/* ---- install instructions ---- */}
+      {/* ---- install instructions ----
+           Origin-aware. A Companion is built for one web address and is
+           invisible on every other, so instructions that always named the
+           repo folder were wrong for anyone using the published site — and
+           produced exactly the failure they were meant to prevent. */}
       {!connected && !checking && (
-        <ol className="list-decimal space-y-1.5 rounded-2xl border lk-border p-4 pl-8 text-sm lk-muted">
-          <li>
-            Open <code className="rounded bg-black/10 px-1 dark:bg-white/10">chrome://extensions</code>{' '}
-            (Chrome won’t let a page open this for you — paste it into the address bar).
-          </li>
-          <li>
-            Turn on <strong className="lk-strong">Developer mode</strong>, top right.
-          </li>
-          <li>
-            Click <strong className="lk-strong">Load unpacked</strong> and choose the{' '}
-            <code className="rounded bg-black/10 px-1 dark:bg-white/10">lockin/extension</code>{' '}
-            folder — the one with{' '}
-            <code className="rounded bg-black/10 px-1 dark:bg-white/10">manifest.json</code>{' '}
-            directly inside it. Picking the outer{' '}
-            <code className="rounded bg-black/10 px-1 dark:bg-white/10">lockin</code> folder gives
-            “Manifest file is missing or unreadable”.
-          </li>
-          <li>Come back here, reload this tab, and press Test connection.</li>
-        </ol>
+        <div className="rounded-2xl border lk-border p-4 text-sm lk-muted">
+          <ol className="list-decimal space-y-1.5 pl-4">
+            {guide.steps.map((item, index) => (
+              <li key={item.title}>
+                <strong className="lk-strong">
+                  {index === 0 && guide.download ? (
+                    <a
+                      className="text-brand-600 underline underline-offset-2 dark:text-brand-300"
+                      href={EXTENSION_DOWNLOAD_URL}
+                    >
+                      {item.title}
+                    </a>
+                  ) : (
+                    item.title
+                  )}
+                </strong>
+                {' — '}
+                {item.body}
+              </li>
+            ))}
+          </ol>
+          {extension.everConnected && (
+            <p className="mt-3 rounded-xl lk-sunken p-3 text-xs">
+              LockIn has talked to a Companion on this device before. If it is still installed,
+              the likely reason it cannot be seen here is that this page is{' '}
+              <strong className="lk-strong">{guide.host}</strong> and the installed copy was built
+              for a different address.
+            </p>
+          )}
+        </div>
       )}
 
       {/* ---- 4 + 5: can it block, and what ---- */}

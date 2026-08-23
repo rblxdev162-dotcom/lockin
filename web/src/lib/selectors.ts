@@ -111,8 +111,19 @@ export function blockingHomeworkWindow(state: AppState): HomeworkWindow | null {
  */
 export function autoBlockEarnedUntil(state: AppState, now = Date.now()): number | null {
   const today = todayISO(new Date(now));
+  /**
+   * Both dates are local dates.
+   *
+   * `endedAt` is a UTC ISO timestamp, so slicing its first ten characters gave
+   * the UTC date — which is tomorrow's date for anyone west of Greenwich after
+   * their afternoon. The effect was that finishing your work stopped unlocking
+   * anything from about 5pm local time onwards, every single evening, which is
+   * precisely the stretch this feature exists for. (East of Greenwich the same
+   * mistake bites just after local midnight.)
+   */
   const earned = state.focusRuns.some(
-    (run) => run.outcome === 'completed' && run.endedAt && run.endedAt.slice(0, 10) === today,
+    (run) =>
+      run.outcome === 'completed' && run.endedAt && todayISO(new Date(run.endedAt)) === today,
   );
   if (!earned) return null;
   const end = new Date(now);

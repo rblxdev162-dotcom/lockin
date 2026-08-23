@@ -5,6 +5,57 @@ User-visible changes only. Internal architecture and phase history live in
 
 ## 1.5.0
 
+### Finishing your work unlocks again — including in the evening
+
+Finishing everything was supposed to stand blocking down for the rest of the
+day. It did, until about 5pm — after that, an internal date check silently
+disagreed with your clock and blocking stayed on until midnight. So the one
+promise the block page makes was broken during exactly the hours you were
+reading it. Fixed, and pinned with tests that run against your real timezone.
+
+### Installing the companion actually works now
+
+The companion is built for one web address, and a copy built for a different
+one is invisible — which is why installing it could look like it had failed.
+Nothing said that, so the site kept insisting the extension was missing and
+telling you to reload the page.
+
+Now the install steps match wherever you are: on the published site, step one
+is a download built for that site; running LockIn locally, it points at your
+own extension folder. When something is not answering, LockIn names the address
+it is not answering on instead of just telling you to reload.
+
+Connecting Canvas no longer walks you into a dead end either. It used to let
+you type your school's address and press Connect with no companion installed,
+then fail. It now stops earlier and sends you to the step that fixes it.
+
+### Setup stopped asking for things Canvas already knows
+
+You no longer type your classes and tick which days each one meets. LockIn asks
+one question — which days you have school — and your classes arrive from Canvas
+with your teachers' names on them.
+
+Connecting Canvas is now offered on the same screen where you add work, because
+"what do you need to finish?" has two answers and only one of them was on the
+screen.
+
+### The Chrome companion step tells you how to install it
+
+It used to say the companion exists and stop there. Now it is four numbered
+steps with the download link, and if you already have it installed the page
+just says so.
+
+### Your day, in actual times — and weekends that know they are weekends
+
+The strip at the top of Home used to read School · Break · Homework · Finished
+every single day, Saturdays included, with no times on it.
+
+Now it shows your real day in blocks — *3:30pm – 6:30pm*, *6:30pm – 9:30pm* —
+marks the one you are in, and suggests where tonight's work fits, sized by how
+close it actually is and skipping any break you listed. Nothing due? It says
+**Chill weekend** and leaves you alone. Marked a holiday? It says day off. If
+you told the planner you study on Saturdays, it respects that instead.
+
 ### Homework you hand in on paper stops being called missing
 
 If an assignment is handed to your teacher in class, there is nothing to submit

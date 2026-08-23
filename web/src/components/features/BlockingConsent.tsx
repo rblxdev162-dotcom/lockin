@@ -24,6 +24,7 @@ import { useApp } from '../../store/context';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { toast } from '../ui/Toast';
+import { EXTENSION_DOWNLOAD_URL, companionInstallGuide } from '../../lib/downloads';
 
 export function BlockingConsent({
   onDecided,
@@ -34,6 +35,7 @@ export function BlockingConsent({
   compact?: boolean;
 }) {
   const { state, dispatch, extension } = useApp();
+  const guide = companionInstallGuide();
   const [showing, setShowing] = useState<'ask' | 'how'>(
     extension.status === 'connected' ? 'how' : 'ask',
   );
@@ -126,23 +128,33 @@ export function BlockingConsent({
       <p className="mt-1 text-sm lk-muted">
         Chrome won’t let a page install this for you, so these four steps are yours.
       </p>
+      {/*
+        Origin-aware, because a Companion is built for one web address and is
+        invisible on every other. These steps used to name the repo folder
+        unconditionally, which is the right answer on the local service and the
+        wrong one everywhere else — and the wrong one failed in the most
+        confusing way available: the extension installed fine and the site went
+        on insisting it was not there.
+      */}
       <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm lk-muted">
-        <li>
-          Open a new tab and go to{' '}
-          <code className="rounded bg-black/10 px-1 dark:bg-white/10">chrome://extensions</code>
-        </li>
-        <li>
-          Turn on <strong className="lk-strong">Developer mode</strong> (top right)
-        </li>
-        <li>
-          Click <strong className="lk-strong">Load unpacked</strong> and choose the{' '}
-          <code className="rounded bg-black/10 px-1 dark:bg-white/10">lockin/extension</code>{' '}
-          folder — the one that has{' '}
-          <code className="rounded bg-black/10 px-1 dark:bg-white/10">manifest.json</code> directly
-          inside it, <strong className="lk-strong">not</strong> the outer{' '}
-          <code className="rounded bg-black/10 px-1 dark:bg-white/10">lockin</code> folder
-        </li>
-        <li>Come back here and reload this tab</li>
+        {guide.steps.map((item, index) => (
+          <li key={item.title}>
+            <strong className="lk-strong">
+              {index === 0 && guide.download ? (
+                <a
+                  className="text-brand-600 underline underline-offset-2 dark:text-brand-300"
+                  href={EXTENSION_DOWNLOAD_URL}
+                >
+                  {item.title}
+                </a>
+              ) : (
+                item.title
+              )}
+            </strong>
+            {' — '}
+            {item.body}
+          </li>
+        ))}
       </ol>
 
       <div className="mt-5 flex flex-wrap gap-2">
@@ -151,7 +163,9 @@ export function BlockingConsent({
           onClick={async () => {
             const ok = await extension.test();
             toast(
-              ok ? 'Connected — blocking is ready.' : 'Not responding yet. Reload this tab and try again.',
+              ok
+                ? 'Connected — blocking is ready.'
+                : `Still no answer on ${guide.host}. Reload this tab after installing — and check the copy you installed was built for this address.`,
               ok ? 'success' : 'error',
             );
           }}

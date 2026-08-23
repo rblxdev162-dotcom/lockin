@@ -52,6 +52,8 @@ Tagline: *Finish what matters before distractions take over.*
 | 33 | **Finishing unlocks, and the parent suite runs again** — the promise on the block page made true, and the Phase 17 import that killed `test:parent-e2e` removed | **Done** |
 | 34 | **Reading what was turned in** — automatic checks read each class's Assignments page beside its gradebook, and pill-free row wording is understood | **Done** |
 | 35 | **Paper homework, and the grade that arrives later** — Canvas' submission type is read, so on-paper work stops being called missing, and a later grade confirms what the student already said | **Done** |
+| 36 | **A day that makes sense** — the class form removed in favour of Canvas, Canvas offered where work is added, real install steps for the Companion, and a Home rail in real clock time that knows what a weekend is | **Done** |
+| 37 | **The Companion you can actually install** — origin-aware install steps, a published production build, no more dead-end Canvas connect, and schedules that refuse to be nonsense | **Done** |
 | 16 | **Product phase** — provenance model, Pace Engine, Canvas Calendar Feed, Edgenuity report/email import, Companion activity awareness, School Companion + context bridge, and the design/nav/dashboard rebuild | **Done** |
 | 8 | **Release readiness** — environment-configurable origins, extension packaging, protocol versioning, privacy page, data export, storage recovery, retention caps, accessibility audit, security review, release + a11y + performance suites | **Done** |
 
@@ -415,6 +417,154 @@ Since Phase 18 there is a third, and it is a safety rule:
 `web/src/lib/canvas/checkWindow.ts` ↔ `extension/canvas/checkWindow.js` ↔
 `autoFetchAllowed()` in `scripts/canvas-feed.mjs`. All three are run over the
 same matrix by `npm run test:canvas-grades`.
+
+---
+
+## Phase 37 — The Companion you can actually install (done)
+
+Reported as "I made a new account and connecting wasn't working, and it kept
+telling me to reload the site." Every word of that turned out to be a symptom
+of one design flaw with several faces.
+
+**The root cause.** The extension is built for exactly one web origin: its
+content script is injected only there and the bridge refuses everything else.
+That is deliberate. What was missing is that *nothing said so*. A Companion
+loaded from the repo's `extension/` folder is built for `http://localhost:5173`
+and is completely invisible on the published site — so the site reports it as
+not installed, Canvas connect fails, and every troubleshooting hint says to
+reload the page, which changes nothing. Nothing was broken except the
+instructions.
+
+**Fixes, in the order they bite:**
+
+1. `web/src/lib/downloads.ts` — `companionInstallGuide(host)` derives the
+   install steps from the origin the page is actually served from. On the local
+   service it points at the repo folder and names the address it is built for;
+   on a published site the first step is a download *from that site*, and says
+   plainly that a copy built for another address cannot see this one. Used by
+   onboarding, Settings → Browser Protection, and the blocking-consent panel,
+   all three of which previously hard-coded the repo folder.
+2. **A production build is published.** `LOCKIN_ENV=production npm run
+   package:extension` then `npm run deploy:site` puts `lockin-extension.zip`
+   beside the site, built for the site's own origin. The deploy refuses to run
+   without it.
+3. **The Canvas dead end is closed.** `CanvasSetupModal` used to warn that the
+   extension was missing and then let the student continue, name their school,
+   press Connect and receive a toast — every step of a working flow except the
+   working part. Continue is now disabled without a Companion, and the warning
+   explains the one-origin rule. In onboarding the Connect button becomes "Add
+   the companion first" and jumps to that step.
+4. **Onboarding is reordered.** The Companion is step 3, before the work step
+   that offers Canvas. Connecting was previously offered three steps before the
+   screen explaining how to make connecting possible.
+5. **Failure messages name the address.** "The LockIn extension is not
+   connected" became "The LockIn Companion is not answering on
+   *&lt;host&gt;* — install it, or check the copy you installed was built for
+   this address." Same for the two test-connection buttons.
+
+**The bug that was hiding behind a "flaky" test.** `test:parent-e2e` failed one
+check — *"and youtube.com unblocks"* — and had passed the same afternoon, which
+looks exactly like flake. It was not. `autoBlockEarnedUntil()` compared
+`run.endedAt.slice(0, 10)` — the **UTC** date of a UTC timestamp — against the
+student's **local** date. West of Greenwich those disagree from mid-afternoon
+onwards, so from about 5pm local until midnight, finishing your work stopped
+standing blocking down: the Phase 33 promise was false for precisely the hours
+it exists for, every single day. (East of Greenwich the same mistake bites just
+after local midnight.) Both sides are local dates now, with four regression
+tests in `test:time` that fail on the old line and pass on the new one.
+
+The same bug class was swept: the weekly-story day count called one evening
+session two days, and the parent export was filed under tomorrow's date. The
+one remaining UTC slice is a calendar recurrence identity, where UTC is right.
+
+**And four bugs found by fuzzing the schedule, none of them reported:**
+
+- **School ending at midnight** made `minutesOfDay('00:00')` zero, so homework
+  hours began at 00:00 and automatic blocking would have run all day, through
+  school. `scheduleHasCoherentHours()` now gates both windows, falling back to
+  the Canvas window.
+- **An end time before the start time** produced school hours that matched no
+  moment, so "school is happening" was never true and the school-hours pause
+  silently stopped protecting anyone who typed their times in the wrong order.
+  Same gate fixes it.
+- **A break that swallowed the evening** left a one-minute homework block,
+  suggested, for two hours of work. Blocks below fifteen minutes (the planner's
+  own `minChunkMinutes`) are folded into the previous block or marked free.
+- **Overlapping breaks** fragmented the rail into slivers. Blocks now tile the
+  day exactly: contiguous, ordered, none empty or backwards.
+
+`withCanvasClasses` was also tightened to adopt only Canvas-linked work — a
+quick-add parser guess is not evidence that a class exists. `SCHEMA_VERSION` is
+17: the migration derives `schoolDays` from a returning student's existing
+class days, so someone with no Friday classes keeps their free Friday instead
+of being handed a default week.
+
+**Known and pre-existing, not from this phase:** `test:planner-e2e` fails at
+"Start today's plan" when run on a weekend — it seeds a plan-less state and
+expects a today plan, and today's availability on a Saturday afternoon has
+little left. Verified identical on the pre-change tree. The app itself is fine:
+pressing "Build my plan" on a Saturday produces a plan with a Start button.
+`test:perf` can fail its quadratic-growth assertion when the machine is loaded;
+it passed three consecutive runs afterwards.
+
+---
+
+## Phase 36 — A day that makes sense (done)
+
+Four things the app was asking for, or telling, that did not survive being
+looked at.
+
+**The class form is gone.** Onboarding asked the student to type every class
+and tick the days each one met. The days were unioned into "which days is there
+school" — one fact, asked once per class — and the names duplicated something
+their school already knows. `schoolDays` is now a field on `SchoolSchedule`
+(schema v17), asked as a single row of chips in onboarding and in Settings, and
+migrated from the old per-class days on load so a student with no Friday
+classes keeps their free Friday. Class names come from Canvas:
+`withCanvasClasses()` adopts a subject the moment real Canvas work carries it,
+additively, never rewriting a class the student renamed or recoloured.
+
+**Canvas is offered where work is added.** "What do you need to finish?" had
+exactly two honest answers and showed one of them. The step now leads with
+Connect Canvas — reusing `CanvasSetupModal`, not a second copy of it — and
+keeps Quick Add underneath as "or type it yourself".
+
+**The Companion step says how.** It named the one thing a student cannot work
+out by using LockIn and then gave them no way to act on it. Four numbered
+steps, and a real download: `scripts/deploy-site.mjs` publishes the packaged
+zip beside the site as `/lockin-extension.zip`, so the download is always the
+same build as the app offering it. The step detects an already-connected
+Companion and says so instead of explaining an install nobody needs.
+
+**The Home rail tells the time.** It used to draw four fixed words —
+School · Break · Homework · Finished — with a dot sliding across them, and it
+drew them on Saturdays too. `web/src/lib/dayShape.ts` replaces it:
+
+- **Day kinds.** `school`, `weekend`, `day_off`. A Saturday is a weekend; a
+  weekday the student marked no-school is a day off; a day their `schoolDays`
+  excludes is a free day even if it is a Tuesday.
+- **Real blocks.** Three-hour spans in clock time from the last bell to
+  midnight (`3:30pm – 6:30pm`), with the student's own breaks carved out as
+  their own blocks and never suggested.
+- **Suggestions sized by what is close.** Overdue and due-today work at full
+  weight, tomorrow at half, capped at four hours, minus what is already logged.
+  The minutes are laid into the earliest free blocks, so two hours of work
+  suggests one block rather than the whole evening.
+- **"Chill weekend" is reachable**, which is the point. It needs
+  `plannerConfigured` to be true before "you set this as a study day" can be
+  claimed — the shipped availability default marks every day available, and
+  without that flag no weekend would ever be chill.
+- **It returns `null`** when neither the schedule nor the Canvas window knows
+  when school is. No rail beats an invented one.
+
+The after-school briefing overlay was gated on the clock alone, so it greeted
+Saturday afternoons with "After school · ready when you are". It now requires a
+school day.
+
+Verified with `npm test` (21 suites, including the new `test:dayshape` — 23
+checks), the browser suites, a production build, and by walking the real
+onboarding in a browser and reading the rendered rail on a Saturday and on a
+seeded Monday evening.
 
 ---
 

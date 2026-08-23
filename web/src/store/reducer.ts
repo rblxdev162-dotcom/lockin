@@ -32,6 +32,7 @@ import { defaultState } from '../lib/storage';
 import { isVerifiedComplete, mergeStatus } from '../lib/canvas/verification';
 import { assignmentCanvasKey, findByExternalId } from '../lib/canvas/matching';
 import { isHandInWork } from '../lib/workState';
+import { withCanvasClasses } from '../lib/schoolSchedule';
 import { createAssignmentFromCanvas, createAssignmentFromFeed } from './factories';
 import { MAX_ACTIVITY, MAX_COMPLETED_SESSIONS, trimActivity } from '../lib/retention';
 import { AWAY_GRACE_MS } from '../lib/focusGuard';
@@ -1304,6 +1305,12 @@ export function reducer(state: AppState, action: Action): AppState {
       let next: AppState = {
         ...state,
         assignments,
+        // Classes are Canvas' answer now that onboarding no longer asks for
+        // them: a course LockIn has seen work from is a class the student has.
+        settings: {
+          ...state.settings,
+          schoolSchedule: withCanvasClasses(state.settings.schoolSchedule, assignments),
+        },
         canvas: {
           ...state.canvas,
           connection: { ...connection, lastSeenAt: seenAt },

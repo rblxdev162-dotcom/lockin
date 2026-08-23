@@ -57,6 +57,24 @@ try {
   cpSync(join(work, 'index.html'), join(work, '404.html'));
 
   const version = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
+
+  /**
+   * The Companion ships beside the site that offers it.
+   *
+   * Onboarding links to `/lockin-extension.zip`, so the download and the web
+   * app are always the same build: a student cannot install last month's
+   * extension against this month's app. A missing zip is a hard stop rather
+   * than a quietly broken link — run `npm run package:extension` first.
+   */
+  const zip = join(ROOT, `dist/lockin-extension-v${version}.zip`);
+  if (!existsSync(zip)) {
+    console.error(
+      `Missing ${zip}.\nRun: LOCKIN_ENV=production npm run package:extension`,
+    );
+    process.exit(1);
+  }
+  cpSync(zip, join(work, 'lockin-extension.zip'));
+
   git(['add', '-A'], work);
   const status = git(['status', '--porcelain'], work);
   if (!status) {

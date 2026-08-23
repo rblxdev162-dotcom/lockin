@@ -31,7 +31,9 @@ const { defaultState, load, save } = await import('../../web/src/lib/storage.ts'
 const { reducer } = await import('../../web/src/store/reducer.ts');
 const { createAssignment, createExam } = await import('../../web/src/store/factories.ts');
 const { buildPlan } = await import('../../web/src/lib/planner/index.ts');
-const { dueSoon, overdue, dueTimestamp } = await import('../../web/src/lib/selectors.ts');
+const { dueSoon, overdue, dueTimestamp, autoBlockEarnedUntil, blockingActive } = await import(
+  '../../web/src/lib/selectors.ts'
+);
 
 /* ------------------------------------------------------------------ */
 /* Parsing and arithmetic                                              */
@@ -359,5 +361,65 @@ test('a temporary unlock still expires when the clock jumps forward', () => {
     state.focusMode.temporaryUnlockUntil === null ||
       state.focusMode.temporaryUnlockUntil <= new Date(2030, 0, 1).getTime(),
     'an unlock must not outlive a forward jump — blocking has to come back',
+  );
+});
+
+
+/* ------------------------------------------------------------------ */
+/* Finishing unlocks — in the student's own timezone                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `endedAt` is a UTC ISO string. Comparing its first ten characters to the
+ * local date was correct only while the two agreed — that is, until about 5pm
+ * in the Americas, every single day. From then until midnight, which is
+ * exactly when homework happens, finishing your work stopped unlocking
+ * anything and the block page's promise was quietly false.
+ */
+function stateWithRun(endedAt) {
+  const base = defaultState();
+  return {
+    ...base,
+    settings: { ...base.settings, blockingEnabled: true, blockedDomains: ['youtube.com'] },
+    focusRuns: [
+      { id: 'run_1', startedAt: endedAt, endedAt, outcome: 'completed', requiredCount: 1, completedCount: 1 },
+    ],
+  };
+}
+
+test('a run finished this evening counts as today, whatever UTC calls it', () => {
+  // 6:30pm local. In the Americas that is already tomorrow in UTC.
+  const now = new Date();
+  now.setHours(18, 30, 0, 0);
+  const endedAt = new Date(now.getTime() - 5 * 60_000).toISOString();
+  const earned = autoBlockEarnedUntil(stateWithRun(endedAt), now.getTime());
+  assert.notEqual(earned, null, 'finishing at 6:30pm must unlock the rest of the evening');
+  assert.ok(earned > now.getTime());
+});
+
+test('and it unlocks until local midnight, not UTC midnight', () => {
+  const now = new Date();
+  now.setHours(18, 30, 0, 0);
+  const earned = autoBlockEarnedUntil(stateWithRun(now.toISOString()), now.getTime());
+  const midnight = new Date(now);
+  midnight.setHours(24, 0, 0, 0);
+  assert.equal(earned, midnight.getTime());
+});
+
+test('a run finished yesterday evening does not unlock today', () => {
+  const now = new Date();
+  now.setHours(18, 30, 0, 0);
+  const yesterday = new Date(now.getTime() - 24 * 3600_000);
+  assert.equal(autoBlockEarnedUntil(stateWithRun(yesterday.toISOString()), now.getTime()), null);
+});
+
+test('an evening finish actually stands automatic blocking down', () => {
+  const now = new Date();
+  now.setHours(18, 30, 0, 0);
+  const state = stateWithRun(now.toISOString());
+  assert.equal(
+    blockingActive(state, now.getTime()),
+    false,
+    'the block page promises this, so it has to be true at 6:30pm too',
   );
 });

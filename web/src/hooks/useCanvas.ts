@@ -25,7 +25,17 @@ export function useCanvas() {
       try {
         const view = await canvasProvider.requestPermission(domain);
         if (!view) {
-          toast('The LockIn extension is not connected. Install it first.', 'error');
+          /*
+            The Companion is the only thing that can talk to Canvas, and it
+            only answers on the one web address it was built for. Saying just
+            "install it first" sent students who *had* installed it looking for
+            a problem in Chrome instead of in which copy they installed.
+          */
+          const host = typeof window === 'undefined' ? 'this site' : window.location.host;
+          toast(
+            `The LockIn Companion is not answering on ${host}. Install it — or, if it is already installed, check that the copy was built for this address.`,
+            'error',
+          );
           return false;
         }
         // Record the intent now; the granted flag is corrected when the

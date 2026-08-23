@@ -77,7 +77,7 @@ import {
  */
 export const STORAGE_KEY = 'lockin.state.v1';
 export const CORRUPT_KEY = 'lockin.state.corrupt';
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 export function defaultSettings(): Settings {
   return {
@@ -404,6 +404,41 @@ const MIGRATIONS: Record<number, Migration> = {
         ...settings,
         autoBlockAfterSchool: true,
         schoolSchedule: { ...schedule, noSchoolDates: [] },
+      },
+    };
+  },
+
+  /**
+   * 16 -> 17 (Phase 36): school days become one fact instead of a per-class
+   * one.
+   *
+   * Onboarding used to ask which days each class met and union the answers.
+   * The union is what everything actually consumed, so it is stored directly
+   * now — and it is computed here from the classes a returning student already
+   * has, so someone with no Friday classes keeps their free Friday rather than
+   * being handed a default Monday–Friday week.
+   */
+  16: (s) => {
+    const settings = (s.settings ?? {}) as Record<string, unknown>;
+    const schedule = (settings.schoolSchedule ?? {}) as Record<string, unknown>;
+    const classes = Array.isArray(schedule.classes) ? schedule.classes : [];
+    const fromClasses = [
+      ...new Set(
+        classes.flatMap((entry) => {
+          const days = (entry as Record<string, unknown>)?.days;
+          return Array.isArray(days) ? days.map(Number).filter((day) => day >= 1 && day <= 5) : [];
+        }),
+      ),
+    ].sort();
+    return {
+      ...s,
+      schemaVersion: 17,
+      settings: {
+        ...settings,
+        schoolSchedule: {
+          ...schedule,
+          schoolDays: fromClasses.length > 0 ? fromClasses : [1, 2, 3, 4, 5],
+        },
       },
     };
   },
